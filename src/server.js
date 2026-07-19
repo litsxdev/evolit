@@ -1,32 +1,95 @@
 import http from "node:http";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { createRouteResolver } from "./render.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
+import { compileModuleGraph } from "./compiler.js";
 import {
   BUILD_DIRECTORY,
   INTERNAL_DIRECTORY,
   MANIFEST_FILENAME,
 } from "./constants.js";
+import {
+  createAssetResolver,
+  createFrameworkImportMap,
+  getClientOutputRoot,
+} from "./client-assets.js";
 import { pathExists, readJson } from "./fs-utils.js";
+import { createRequire } from "node:module";
+
+const requireFromHere = createRequire(import.meta.url);
+const JAVASCRIPT_CONTENT_TYPE = "text/javascript; charset=utf-8";
 
 function getPort(explicitPort) {
   const port = explicitPort ?? process.env.PORT ?? "3000";
   return Number.parseInt(String(port), 10);
 }
 
+function getClientAssetFilePath(projectRoot, mode, pathname) {
+  const clientRoot = getClientOutputRoot(projectRoot, mode);
+  const relativePath = pathname.slice("/_nextsx/client/".length);
+  return path.join(clientRoot, relativePath);
+}
+
+async function sendFileResponse(res, filePath, contentType = JAVASCRIPT_CONTENT_TYPE) {
+  const body = await fs.readFile(filePath);
+  res.writeHead(200, { "content-type": contentType });
+  res.end(body);
+}
+
 async function createServer(projectRoot, mode, explicitPort) {
   const resolveRequest = await createRouteResolver(projectRoot, mode);
-  const ssrAdapter = createSsrAdapter();
+  const assetResolver = createAssetResolver(projectRoot);
+  const frameworkImportMap = await createFrameworkImportMap();
+  const importMapMarkup = `<script type="importmap">${JSON.stringify(frameworkImportMap)}</script>`;
+  const ssrAdapter = createSsrAdapter({
+    assetResolver,
+    head: importMapMarkup,
+  });
   const port = getPort(explicitPort);
 
   const server = http.createServer(async (req, res) => {
     try {
+      const pathname = new URL(req.url ?? "/", `http://localhost:${port}`).pathname;
+
+      if (pathname.startsWith("/_nextsx/client/")) {
+        const assetPath = getClientAssetFilePath(projectRoot, mode, pathname);
+        await sendFileResponse(res, assetPath);
+        return;
+      }
+
+      if (pathname.startsWith("/_nextsx/pkg/")) {
+        const specifier = decodeURIComponent(pathname.slice("/_nextsx/pkg/".length));
+        const packageFile = requireFromHere.resolve(specifier);
+        await sendFileResponse(res, packageFile);
+        return;
+      }
+
       const origin = `http://${req.headers.host ?? `localhost:${port}`}`;
       const request = new Request(new URL(req.url ?? "/", origin), {
         method: req.method,
         headers: req.headers,
       });
       const routeResult = await resolveRequest(request);
+
+      if (routeResult.type === "route") {
+        await compileModuleGraph(routeResult.route.page, {
+          projectRoot,
+          mode,
+          sourceMaps: mode === "development",
+          target: "client",
+        });
+
+        for (const layoutPath of routeResult.route.layouts) {
+          await compileModuleGraph(layoutPath, {
+            projectRoot,
+            mode,
+            sourceMaps: mode === "development",
+            target: "client",
+          });
+        }
+      }
+
       const response = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
 
       res.writeHead(response.status, response.headers);

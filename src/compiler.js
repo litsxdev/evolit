@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { transformLitsx } from "@litsx/compiler";
 import {
   BUILD_DIRECTORY,
+  CLIENT_DIRECTORY,
   DEV_DIRECTORY,
   INTERNAL_DIRECTORY,
   MODULE_EXTENSIONS,
@@ -48,11 +49,15 @@ async function resolveImportPath(importerPath, specifier) {
 }
 
 function getOutputRoot(projectRoot, mode) {
+  return getTypedOutputRoot(projectRoot, mode, "server");
+}
+
+function getTypedOutputRoot(projectRoot, mode, target = "server") {
   return path.join(
     projectRoot,
     INTERNAL_DIRECTORY,
     mode === "development" ? DEV_DIRECTORY : BUILD_DIRECTORY,
-    SERVER_DIRECTORY,
+    target === "client" ? CLIENT_DIRECTORY : SERVER_DIRECTORY,
   );
 }
 
@@ -115,9 +120,11 @@ export async function compileModuleGraph(entryPath, options = {}) {
     projectRoot,
     mode = "development",
     sourceMaps = mode === "development",
+    ssr = false,
+    target = "server",
   } = options;
 
-  const outputRoot = getOutputRoot(projectRoot, mode);
+  const outputRoot = getTypedOutputRoot(projectRoot, mode, target);
   const visited = new Map();
 
   async function compileModule(sourcePath) {
@@ -133,6 +140,7 @@ export async function compileModuleGraph(entryPath, options = {}) {
     const transformed = await transformLitsx(source, {
       filename: sourcePath,
       sourceMaps,
+      ssr,
     });
     const rewrittenCode = await rewriteRelativeSpecifiers({
       projectRoot,

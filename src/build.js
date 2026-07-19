@@ -20,6 +20,15 @@ export async function buildProject(projectRoot) {
       projectRoot,
       mode: "production",
       sourceMaps: false,
+      ssr: true,
+      target: "server",
+    });
+
+    await compileModuleGraph(route.page, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: false,
+      target: "client",
     });
 
     for (const layoutPath of route.layouts) {
@@ -27,6 +36,15 @@ export async function buildProject(projectRoot) {
         projectRoot,
         mode: "production",
         sourceMaps: false,
+        ssr: true,
+        target: "server",
+      });
+
+      await compileModuleGraph(layoutPath, {
+        projectRoot,
+        mode: "production",
+        sourceMaps: false,
+        target: "client",
       });
     }
   }

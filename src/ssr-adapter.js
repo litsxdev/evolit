@@ -1,4 +1,7 @@
 import { renderDocument } from "@litsx/ssr";
+import {
+  createHydrationBootstrap,
+} from "./client-assets.js";
 
 function escapeHtmlAttribute(value) {
   return String(value)
@@ -91,13 +94,35 @@ export function createSsrAdapter(options = {}) {
       }
 
       const documentOptions = resolveDocumentMetadata(routeResult.metadata, options);
+      const bootstrap = options.bootstrap ?? false;
       const result = await renderDocument(routeResult.tree, {
         ...documentOptions,
         assetResolver: options.assetResolver,
-        bootstrap: options.bootstrap,
+        bootstrap,
         clientEntry: options.clientEntry,
         template: options.template,
       });
+
+      const rootModuleUrls = Object.fromEntries(
+        (result.hydrationData?.roots ?? [])
+          .filter((root) => typeof root?.moduleId === "string" && typeof root?.tagName === "string")
+          .map((root) => [root.moduleId, options.assetResolver?.(root.moduleId) ?? null])
+          .filter((entry) => typeof entry[1] === "string" && entry[1].length > 0),
+      );
+
+      if (Object.keys(rootModuleUrls).length > 0 && !options.bootstrap && !options.clientEntry) {
+        const bootstrapContent = createHydrationBootstrap({ rootModuleUrls });
+        const documentWithBootstrap = result.document.replace(
+          "</body>",
+          `<script type="module">\n${bootstrapContent}\n</script>\n</body>`,
+        );
+
+        return {
+          status: routeResult.status ?? 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+          body: documentWithBootstrap,
+        };
+      }
 
       return {
         status: routeResult.status ?? 200,

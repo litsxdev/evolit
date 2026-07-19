@@ -3,6 +3,7 @@ export const INTERNAL_DIRECTORY = ".nextsx";
 export const BUILD_DIRECTORY = "build";
 export const DEV_DIRECTORY = "dev";
 export const SERVER_DIRECTORY = "server";
+export const CLIENT_DIRECTORY = "client";
 export const MANIFEST_FILENAME = "manifest.json";
 
 export const MODULE_EXTENSIONS = [

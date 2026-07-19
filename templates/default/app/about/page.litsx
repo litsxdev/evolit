@@ -3,7 +3,7 @@ export const metadata = {
   description: "What nextsx is trying to become",
 };
 
-export default function AboutPage() {
+export default async function AboutPage() {
   return (
     <section style={{ maxWidth: "720px", display: "grid", gap: "20px" }}>
       <h1 style={{ margin: "0", fontSize: "clamp(2.5rem, 6vw, 4rem)" }}>About nextsx</h1>

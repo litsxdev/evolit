@@ -1,6 +1,6 @@
 import FeatureCard from "./components/feature-card.litsx";
 
-export default function HomePage() {
+export default async function HomePage() {
   return (
     <section>
       <div style={{ display: "grid", gap: "20px", marginBottom: "40px" }}>

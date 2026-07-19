@@ -3,7 +3,7 @@ export const metadata = {
   description: "A Next.js-style runtime for LitSX",
 };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
   return (
     <main
       style={{

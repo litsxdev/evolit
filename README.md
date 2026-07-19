@@ -19,7 +19,7 @@ It focuses on the core contract that matters first:
 
 - route modules live in `app/**/page.*`
 - layout modules live in `app/**/layout.*`
-- page and layout modules export a default function
+- page and layout modules export a default async function
 - pages receive `{ params, searchParams, request }`
 - layouts receive `{ children, params, searchParams, request }`
 - SSR document rendering is delegated to `@litsx/ssr`
