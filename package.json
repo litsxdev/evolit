@@ -1,0 +1,40 @@
+{
+  "name": "nextsx",
+  "version": "0.1.0",
+  "description": "A Next.js-style application framework for LitSX",
+  "type": "module",
+  "bin": "./src/cli.js",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "dev": "node ./src/cli.js dev",
+    "build": "node ./src/cli.js build",
+    "start": "node ./src/cli.js start",
+    "typecheck": "litsx-tsc -p jsconfig.json --noEmit"
+  },
+  "keywords": [
+    "nextsx",
+    "litsx",
+    "lit",
+    "ssr",
+    "routing"
+  ],
+  "author": "LitSX Team",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.19.5"
+  },
+  "dependencies": {
+    "@litsx/compiler": "canary-feat-ssr",
+    "@litsx/core": "canary-feat-ssr",
+    "@litsx/ssr": "canary-feat-ssr",
+    "@litsx/typescript": "^0.9.0",
+    "lit": "^3.3.3"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.0",
+    "vite": "^8.1.5"
+  }
+}

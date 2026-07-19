@@ -1,0 +1,18 @@
+export default function FeatureCard({ title, body }) {
+  return (
+    <article
+      style={{
+        padding: "24px",
+        borderRadius: "18px",
+        background: "rgba(255, 255, 255, 0.06)",
+        border: "1px solid rgba(255, 255, 255, 0.08)",
+        backdropFilter: "blur(12px)",
+      }}
+    >
+      <h2 style={{ margin: "0 0 12px", fontSize: "1.25rem" }}>{title}</h2>
+      <p style={{ margin: "0", lineHeight: "1.7", color: "rgba(248, 247, 241, 0.78)" }}>
+        {body}
+      </p>
+    </article>
+  );
+}

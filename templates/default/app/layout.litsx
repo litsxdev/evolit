@@ -1,0 +1,37 @@
+export const metadata = {
+  title: "nextsx",
+  description: "A Next.js-style runtime for LitSX",
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "48px 24px",
+        color: "#f8f7f1",
+        background:
+          "radial-gradient(circle at top, rgba(239, 148, 89, 0.22), transparent 34%), linear-gradient(180deg, #10161f 0%, #182332 100%)",
+        fontFamily: "Iowan Old Style, Palatino Linotype, Book Antiqua, Georgia, serif",
+      }}
+    >
+      <div style={{ maxWidth: "960px", margin: "0 auto" }}>
+        <header style={{ marginBottom: "40px" }}>
+          <div
+            style={{
+              display: "inline-block",
+              padding: "8px 12px",
+              border: "1px solid rgba(248, 247, 241, 0.18)",
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              fontSize: "12px",
+            }}
+          >
+            nextsx
+          </div>
+        </header>
+        {children}
+      </div>
+    </main>
+  );
+}

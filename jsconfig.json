@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": true,
+    "checkJs": false,
+    "strict": false,
+    "jsx": "preserve",
+    "jsxImportSource": "@litsx/core",
+    "allowArbitraryExtensions": true,
+    "plugins": [
+      {
+        "name": "@litsx/typescript"
+      }
+    ]
+  },
+  "include": [
+    "src/**/*",
+    "templates/**/*"
+  ]
+}
