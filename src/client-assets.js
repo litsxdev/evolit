@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import {
   BUILD_DIRECTORY,
@@ -122,46 +123,61 @@ export function createAssetResolver(projectRoot) {
 }
 
 export function createHydrationBootstrap({ rootModuleUrls = {} } = {}) {
-  return `
-import { hydratePage, readHydrationData } from "@litsx/ssr/hydration";
+  return "";
+}
 
-const rootModuleUrls = ${JSON.stringify(rootModuleUrls, null, 2)};
+function buildHydrationEntrySource(entries) {
+  const imports = entries.map(
+    ({ moduleUrl }, index) => `import Component${index} from ${JSON.stringify(moduleUrl)};`,
+  );
+  const registrations = entries.map(
+    ({ tagName }, index) => `
+if (!customElements.get(${JSON.stringify(tagName)})) {
+  customElements.define(${JSON.stringify(tagName)}, Component${index});
+}
+`.trim(),
+  );
 
-await hydratePage({
-  register: async () => {
-    const hydration = readHydrationData(document);
-    const roots = Array.isArray(hydration?.roots) ? hydration.roots : [];
-    const seen = new Set();
+  return `${imports.join("\n")}
 
-    for (const root of roots) {
-      if (!root || typeof root !== "object") {
-        continue;
-      }
+${registrations.join("\n\n")}
+`;
+}
 
-      const tagName = typeof root.tagName === "string" ? root.tagName : null;
-      const moduleId = typeof root.moduleId === "string" ? root.moduleId : null;
-      if (!tagName || !moduleId) {
-        continue;
-      }
+export async function ensureHydrationClientEntry({
+  projectRoot,
+  mode,
+  hydrationData,
+  assetResolver,
+}) {
+  const rootEntries = [...new Map(
+    (hydrationData?.roots ?? [])
+      .filter((root) => typeof root?.moduleId === "string" && typeof root?.tagName === "string")
+      .map((root) => {
+        const moduleUrl = assetResolver?.(root.moduleId) ?? null;
+        return [`${root.tagName}::${moduleUrl}`, {
+          tagName: root.tagName,
+          moduleUrl,
+        }];
+      })
+      .filter(([, entry]) => typeof entry.moduleUrl === "string" && entry.moduleUrl.length > 0),
+  ).values()];
 
-      const moduleUrl = rootModuleUrls[moduleId];
-      if (!moduleUrl || seen.has(tagName) || customElements.get(tagName)) {
-        continue;
-      }
+  if (rootEntries.length === 0) {
+    return null;
+  }
 
-      const moduleRecord = await import(moduleUrl);
-      const ctor = moduleRecord?.default;
-      if (typeof ctor !== "function") {
-        continue;
-      }
+  const hash = crypto
+    .createHash("sha1")
+    .update(JSON.stringify(rootEntries))
+    .digest("hex")
+    .slice(0, 12);
+  const clientRoot = getClientOutputRoot(projectRoot, mode);
+  const relativePath = path.join("__nextsx", "hydration", `${hash}.mjs`);
+  const absolutePath = path.join(clientRoot, relativePath);
 
-      if (!customElements.get(tagName)) {
-        customElements.define(tagName, ctor);
-      }
+  await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+  await fs.writeFile(absolutePath, buildHydrationEntrySource(rootEntries), "utf8");
 
-      seen.add(tagName);
-    }
-  },
-});
-`.trim();
+  return `/_nextsx/client/${relativePath.split(path.sep).join("/")}`;
 }

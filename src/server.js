@@ -11,6 +11,7 @@ import {
 } from "./constants.js";
 import {
   createAssetResolver,
+  ensureHydrationClientEntry,
   createFrameworkImportMap,
   getClientOutputRoot,
 } from "./client-assets.js";
@@ -45,6 +46,14 @@ async function createServer(projectRoot, mode, explicitPort) {
   const ssrAdapter = createSsrAdapter({
     assetResolver,
     head: importMapMarkup,
+    resolveClientEntry({ result }) {
+      return ensureHydrationClientEntry({
+        projectRoot,
+        mode,
+        hydrationData: result.hydrationData,
+        assetResolver,
+      });
+    },
   });
   const port = getPort(explicitPort);
 

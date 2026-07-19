@@ -1,7 +1,4 @@
-import { renderDocument } from "@litsx/ssr";
-import {
-  createHydrationBootstrap,
-} from "./client-assets.js";
+import { renderBootstrap, renderDocument } from "@litsx/ssr";
 
 function escapeHtmlAttribute(value) {
   return String(value)
@@ -103,18 +100,18 @@ export function createSsrAdapter(options = {}) {
         template: options.template,
       });
 
-      const rootModuleUrls = Object.fromEntries(
-        (result.hydrationData?.roots ?? [])
-          .filter((root) => typeof root?.moduleId === "string" && typeof root?.tagName === "string")
-          .map((root) => [root.moduleId, options.assetResolver?.(root.moduleId) ?? null])
-          .filter((entry) => typeof entry[1] === "string" && entry[1].length > 0),
-      );
+      const generatedClientEntry =
+        typeof options.resolveClientEntry === "function"
+          ? await options.resolveClientEntry({ routeResult, result })
+          : null;
 
-      if (Object.keys(rootModuleUrls).length > 0 && !options.bootstrap && !options.clientEntry) {
-        const bootstrapContent = createHydrationBootstrap({ rootModuleUrls });
+      if (generatedClientEntry && !options.bootstrap && !options.clientEntry) {
+        const bootstrapMarkup = renderBootstrap({
+          clientEntry: generatedClientEntry,
+        });
         const documentWithBootstrap = result.document.replace(
           "</body>",
-          `<script type="module">\n${bootstrapContent}\n</script>\n</body>`,
+          `${bootstrapMarkup}\n</body>`,
         );
 
         return {
