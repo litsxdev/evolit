@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createHydrationBootstrap,
+  getAssetByClientModule,
+  getAssetByPublicUrl,
+  getAssetsByKind,
   getClientAssetUrl,
+  normalizeClientAssetManifest,
 } from "../src/client-assets.js";
 
 test("createHydrationBootstrap returns an empty string when no hydratable roots exist", () => {
@@ -71,4 +75,36 @@ test("createHydrationBootstrap ignores unresolved module ids", () => {
   });
 
   assert.equal(bootstrap, "");
+});
+
+test("client asset manifest helpers normalize and query structured asset entries", () => {
+  const manifest = normalizeClientAssetManifest({
+    assets: [
+      {
+        clientModule: "app/page.mjs",
+        kind: "entry",
+        publicUrl: "/_nextsx/static/app/page.hash.mjs",
+      },
+      {
+        clientModule: "app/components/card-accent.css",
+        kind: "style",
+        publicUrl: "/_nextsx/static/app/components/card-accent.hash.css",
+      },
+    ],
+  });
+
+  assert.equal(manifest.version, 1);
+  assert.equal(manifest.publicPathPrefix, "/_nextsx/static/");
+  assert.equal(
+    getAssetByClientModule(manifest, "app/page.mjs")?.publicUrl,
+    "/_nextsx/static/app/page.hash.mjs",
+  );
+  assert.equal(
+    getAssetByPublicUrl(manifest, "/_nextsx/static/app/components/card-accent.hash.css")?.clientModule,
+    "app/components/card-accent.css",
+  );
+  assert.deepEqual(
+    getAssetsByKind(manifest, "style").map((asset) => asset.clientModule),
+    ["app/components/card-accent.css"],
+  );
 });

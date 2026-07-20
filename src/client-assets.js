@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import {
   BUILD_DIRECTORY,
   CLIENT_DIRECTORY,
+  CLIENT_ASSET_MANIFEST_VERSION,
   DEV_DIRECTORY,
   INTERNAL_DIRECTORY,
   STATIC_DIRECTORY,
@@ -128,7 +129,7 @@ export function getStaticOutputRoot(projectRoot) {
 }
 
 export function createAssetResolver(projectRoot, options = {}) {
-  const assetManifest = options.assetManifest ?? null;
+  const assetManifest = normalizeClientAssetManifest(options.assetManifest);
 
   return function assetResolver(moduleId) {
     if (!path.isAbsolute(moduleId)) {
@@ -140,7 +141,10 @@ export function createAssetResolver(projectRoot, options = {}) {
     }
 
     if (assetManifest) {
-      return assetManifest.byClientModule?.[toClientModuleRelativePath(projectRoot, moduleId)] ?? null;
+      return getAssetByClientModule(
+        assetManifest,
+        toClientModuleRelativePath(projectRoot, moduleId),
+      )?.publicUrl ?? null;
     }
 
     return getClientAssetUrl(projectRoot, moduleId);
@@ -394,6 +398,8 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
     .sort();
 
   const manifest = {
+    version: CLIENT_ASSET_MANIFEST_VERSION,
+    publicPathPrefix: "/_nextsx/static/",
     byClientModule,
     byPublicPath,
     entries,
@@ -407,12 +413,13 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
 }
 
 export function collectTransitiveAssetPreloads(publicUrls, assetManifest) {
-  if (!assetManifest || !Array.isArray(assetManifest.assets)) {
+  const normalizedManifest = normalizeClientAssetManifest(assetManifest);
+  if (!normalizedManifest) {
     return [];
   }
 
   const byPublicUrl = new Map(
-    assetManifest.assets
+    normalizedManifest.assets
       .filter((asset) => typeof asset?.publicUrl === "string")
       .map((asset) => [asset.publicUrl, asset]),
   );
@@ -442,12 +449,13 @@ export function collectTransitiveAssetPreloads(publicUrls, assetManifest) {
 }
 
 export function collectTransitiveStyleUrls(publicUrls, assetManifest) {
-  if (!assetManifest || !Array.isArray(assetManifest.assets)) {
+  const normalizedManifest = normalizeClientAssetManifest(assetManifest);
+  if (!normalizedManifest) {
     return [];
   }
 
   const byPublicUrl = new Map(
-    assetManifest.assets
+    normalizedManifest.assets
       .filter((asset) => typeof asset?.publicUrl === "string")
       .map((asset) => [asset.publicUrl, asset]),
   );
@@ -543,4 +551,48 @@ export async function collectDevStyleUrls(projectRoot, publicUrls, mode = "devel
   }
 
   return [...collectedStyleUrls].sort();
+}
+
+export function normalizeClientAssetManifest(manifest) {
+  if (!manifest || typeof manifest !== "object" || !Array.isArray(manifest.assets)) {
+    return null;
+  }
+
+  return {
+    version: manifest.version ?? CLIENT_ASSET_MANIFEST_VERSION,
+    publicPathPrefix: manifest.publicPathPrefix ?? "/_nextsx/static/",
+    byClientModule: manifest.byClientModule ?? {},
+    byPublicPath: manifest.byPublicPath ?? {},
+    entries: Array.isArray(manifest.entries) ? manifest.entries : [],
+    chunks: Array.isArray(manifest.chunks) ? manifest.chunks : [],
+    styles: Array.isArray(manifest.styles) ? manifest.styles : [],
+    assets: manifest.assets,
+  };
+}
+
+export function getAssetByClientModule(manifest, clientModule) {
+  const normalizedManifest = normalizeClientAssetManifest(manifest);
+  if (!normalizedManifest || typeof clientModule !== "string") {
+    return null;
+  }
+
+  return normalizedManifest.assets.find((asset) => asset.clientModule === clientModule) ?? null;
+}
+
+export function getAssetByPublicUrl(manifest, publicUrl) {
+  const normalizedManifest = normalizeClientAssetManifest(manifest);
+  if (!normalizedManifest || typeof publicUrl !== "string") {
+    return null;
+  }
+
+  return normalizedManifest.assets.find((asset) => asset.publicUrl === publicUrl) ?? null;
+}
+
+export function getAssetsByKind(manifest, kind) {
+  const normalizedManifest = normalizeClientAssetManifest(manifest);
+  if (!normalizedManifest || typeof kind !== "string") {
+    return [];
+  }
+
+  return normalizedManifest.assets.filter((asset) => asset.kind === kind);
 }

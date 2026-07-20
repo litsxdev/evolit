@@ -159,6 +159,8 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.equal(homePageAsset.kind, "entry");
   assert.equal(cardAccentStyleAsset.kind, "style");
   assert.equal(cardAccentStyleAsset.type, "style");
+  assert.equal(buildManifest.clientAssets.version, 1);
+  assert.equal(buildManifest.clientAssets.publicPathPrefix, "/_nextsx/static/");
   assert.equal(typeof homePageAsset.hash, "string");
   assert.equal(homePageAsset.hash.length, 8);
   assert.equal(typeof homePageAsset.size, "number");

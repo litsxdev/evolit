@@ -16,7 +16,9 @@ import {
   collectTransitiveStyleUrls,
   createHydrationBootstrap,
   createFrameworkImportMap,
+  getAssetByPublicUrl,
   getClientOutputRoot,
+  normalizeClientAssetManifest,
 } from "./client-assets.js";
 import { pathExists, readJson } from "./fs-utils.js";
 import { createRequire } from "node:module";
@@ -49,9 +51,10 @@ async function sendFileResponse(res, filePath, contentType = getContentType(file
 }
 
 async function createServer(projectRoot, mode, explicitPort, options = {}) {
+  const assetManifest = normalizeClientAssetManifest(options.assetManifest);
   const resolveRequest = await createRouteResolver(projectRoot, mode);
   const assetResolver = createAssetResolver(projectRoot, {
-    assetManifest: options.assetManifest,
+    assetManifest,
   });
   const frameworkImportMap = await createFrameworkImportMap();
   const importMapMarkup = `<script type="importmap">${JSON.stringify(frameworkImportMap)}</script>`;
@@ -60,11 +63,11 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     head: importMapMarkup,
     async resolveAdditionalHead({ result }) {
       const clientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
-      const urls = options.assetManifest
-        ? collectTransitiveAssetPreloads(clientImports, options.assetManifest)
+      const urls = assetManifest
+        ? collectTransitiveAssetPreloads(clientImports, assetManifest)
         : [];
-      const styleUrls = options.assetManifest
-        ? collectTransitiveStyleUrls(clientImports, options.assetManifest)
+      const styleUrls = assetManifest
+        ? collectTransitiveStyleUrls(clientImports, assetManifest)
         : await collectDevStyleUrls(projectRoot, clientImports, mode);
       if (urls.length === 0 && styleUrls.length === 0) {
         return "";
@@ -95,7 +98,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       }
 
       if (pathname.startsWith("/_nextsx/static/")) {
-        const assetPath = options.assetManifest?.byPublicPath?.[pathname] ?? null;
+        const assetPath = getAssetByPublicUrl(assetManifest, pathname)?.outputPath ?? null;
         if (!assetPath) {
           res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
           res.end("Asset not found.");
