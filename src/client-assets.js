@@ -269,6 +269,7 @@ export async function emitHashedClientAssets(projectRoot) {
 
   const byClientModule = {};
   const byPublicPath = {};
+  const assets = [];
 
   for (const entry of assetEntries) {
     const rewrittenSource = rewriteRelativeClientImports(
@@ -282,14 +283,22 @@ export async function emitHashedClientAssets(projectRoot) {
     await fs.writeFile(outputPath, rewrittenSource, "utf8");
 
     const publicUrl = `/_nextsx/static/${hashedRelativePath.split(path.sep).join("/")}`;
+    const hash = path.basename(hashedRelativePath).match(/\.([a-f0-9]{8})\.mjs$/)?.[1] ?? null;
 
     byClientModule[entry.relativePath.split(path.sep).join("/")] = publicUrl;
     byPublicPath[publicUrl] = outputPath;
+    assets.push({
+      clientModule: entry.relativePath.split(path.sep).join("/"),
+      publicUrl,
+      outputPath,
+      hash,
+    });
   }
 
   const manifest = {
     byClientModule,
     byPublicPath,
+    assets: assets.sort((left, right) => left.clientModule.localeCompare(right.clientModule)),
   };
 
   await writeJson(path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY, "client-assets.json"), manifest);

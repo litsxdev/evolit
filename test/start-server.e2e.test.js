@@ -14,6 +14,7 @@ const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 let fixtureRoot;
 let server;
 let baseUrl;
+let buildManifest;
 
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
@@ -49,6 +50,12 @@ before(async () => {
     "dir",
   );
   await buildProject(fixtureRoot);
+  buildManifest = JSON.parse(
+    await fs.readFile(
+      path.join(fixtureRoot, ".nextsx", "build", "manifest.json"),
+      "utf8",
+    ),
+  );
 
   const port = await getAvailablePort();
   server = await createStartServer(fixtureRoot, { port });
@@ -72,10 +79,17 @@ after(async () => {
 test("start server emits hashed public asset URLs for hydration bootstrap", async () => {
   const response = await fetch(`${baseUrl}/`);
   const html = await response.text();
+  const featureCardAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/feature-card.mjs",
+  );
 
   assert.equal(response.status, 200);
+  assert.ok(featureCardAsset);
   assert.match(html, /registerHydrationModules/);
-  assert.match(html, /\/_nextsx\/static\/app\/components\/feature-card\.[a-f0-9]{8}\.mjs/);
+  assert.match(
+    html,
+    new RegExp(featureCardAsset.publicUrl.replaceAll(".", "\\.")),
+  );
   assert.doesNotMatch(html, /\/_nextsx\/client\/app\/components\/feature-card\.mjs/);
 });
 
@@ -91,4 +105,34 @@ test("start server serves hashed client asset files", async () => {
 
   assert.equal(assetResponse.status, 200);
   assert.match(source, /litsx\.hydratableTag/);
+});
+
+test("start server emits hashed modulepreload links that match the asset manifest", async () => {
+  const response = await fetch(`${baseUrl}/`);
+  const html = await response.text();
+  const featureCardAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/feature-card.mjs",
+  );
+
+  assert.ok(featureCardAsset);
+  assert.match(
+    html,
+    new RegExp(
+      `<link rel="modulepreload" href="${featureCardAsset.publicUrl.replaceAll(".", "\\.")}">`,
+    ),
+  );
+  assert.match(
+    html,
+    new RegExp(featureCardAsset.hash),
+  );
+});
+
+test("start server omits hashed hydration preload output for non-hydrated routes", async () => {
+  const response = await fetch(`${baseUrl}/about`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.doesNotMatch(html, /rel="modulepreload"/);
+  assert.doesNotMatch(html, /registerHydrationModules/);
+  assert.doesNotMatch(html, /__LITSX_HYDRATION__/);
 });
