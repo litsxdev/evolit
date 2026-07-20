@@ -79,6 +79,7 @@ test("createHydrationBootstrap ignores unresolved module ids", () => {
 
 test("client asset manifest helpers normalize and query structured asset entries", () => {
   const manifest = normalizeClientAssetManifest({
+    resources: ["app/components/card-accent.svg"],
     assets: [
       {
         clientModule: "app/page.mjs",
@@ -95,6 +96,7 @@ test("client asset manifest helpers normalize and query structured asset entries
 
   assert.equal(manifest.version, 1);
   assert.equal(manifest.publicPathPrefix, "/_nextsx/static/");
+  assert.deepEqual(manifest.resources, ["app/components/card-accent.svg"]);
   assert.equal(
     getAssetByClientModule(manifest, "app/page.mjs")?.publicUrl,
     "/_nextsx/static/app/page.hash.mjs",

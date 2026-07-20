@@ -16,6 +16,7 @@ let server;
 let baseUrl;
 let buildManifest;
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
+const cardBadgeSpecialPngFile = "card badge@2x.png";
 
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
@@ -65,17 +66,23 @@ before(async () => {
     Buffer.from(cardBadgePngBase64, "base64"),
   );
   await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", cardBadgeSpecialPngFile),
+    Buffer.from(cardBadgePngBase64, "base64"),
+  );
+  await fs.writeFile(
     path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
     [
       'import "./card-accent.css";',
       'import accentIcon from "./card-accent.svg";',
       'import badgeIcon from "./card-badge.png";',
+      `import badgePoster from "./${cardBadgeSpecialPngFile}";`,
       "",
       "export default function CardAccent() {",
       "  return (",
       '    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>',
       '      <img src={accentIcon} alt="" style={{ display: "inline-block", width: "10px", height: "10px" }} />',
       '      <img src={badgeIcon} alt="" style={{ display: "inline-block", width: "6px", height: "6px" }} />',
+      '      <img src={badgePoster} alt="" style={{ display: "inline-block", width: "6px", height: "6px" }} />',
       "    </span>",
       "  );",
       "}",
@@ -92,6 +99,7 @@ before(async () => {
       "  height: 10px;",
       "  border-radius: 999px;",
       "  background: #ef9459;",
+      `  background-image: url("./${cardBadgeSpecialPngFile}");`,
       "}",
       "",
     ].join("\n"),
@@ -177,6 +185,9 @@ test("build manifest classifies entry and chunk client assets with structured me
   const cardBadgePngAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-badge.png",
   );
+  const cardBadgeSpecialPngAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === `app/components/${cardBadgeSpecialPngFile}`,
+  );
 
   assert.ok(featureCardAsset);
   assert.ok(cardAccentAsset);
@@ -184,6 +195,7 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.ok(cardAccentStyleAsset);
   assert.ok(cardAccentSvgAsset);
   assert.ok(cardBadgePngAsset);
+  assert.ok(cardBadgeSpecialPngAsset);
   assert.equal(featureCardAsset.kind, "chunk");
   assert.equal(cardAccentAsset.kind, "chunk");
   assert.equal(homePageAsset.kind, "entry");
@@ -193,6 +205,8 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.equal(cardAccentSvgAsset.type, "asset");
   assert.equal(cardBadgePngAsset.kind, "asset");
   assert.equal(cardBadgePngAsset.type, "asset");
+  assert.equal(cardBadgeSpecialPngAsset.kind, "asset");
+  assert.equal(cardBadgeSpecialPngAsset.type, "asset");
   assert.equal(buildManifest.clientAssets.version, 1);
   assert.equal(buildManifest.clientAssets.publicPathPrefix, "/_nextsx/static/");
   assert.equal(typeof homePageAsset.hash, "string");
@@ -204,6 +218,7 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.equal(buildManifest.clientAssets.styles.includes("app/components/card-accent.css"), true);
   assert.equal(buildManifest.clientAssets.resources.includes("app/components/card-accent.svg"), true);
   assert.equal(buildManifest.clientAssets.resources.includes("app/components/card-badge.png"), true);
+  assert.equal(buildManifest.clientAssets.resources.includes(`app/components/${cardBadgeSpecialPngFile}`), true);
 });
 
 test("start server serves hashed client asset files", async () => {
@@ -252,6 +267,21 @@ test("start server serves hashed static png assets", async () => {
   assert.equal(pngBase64, cardBadgePngBase64);
 });
 
+test("start server serves hashed static png assets with special characters in the file name", async () => {
+  const pngAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === `app/components/${cardBadgeSpecialPngFile}`,
+  );
+
+  assert.ok(pngAsset);
+
+  const response = await fetch(`${baseUrl}${pngAsset.publicUrl}`);
+  const pngBase64 = Buffer.from(await response.arrayBuffer()).toString("base64");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.equal(pngBase64, cardBadgePngBase64);
+});
+
 test("start server emits hashed modulepreload links that match the asset manifest", async () => {
   const response = await fetch(`${baseUrl}/`);
   const html = await response.text();
@@ -270,12 +300,16 @@ test("start server emits hashed modulepreload links that match the asset manifes
   const cardBadgePngAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-badge.png",
   );
+  const cardBadgeSpecialPngAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === `app/components/${cardBadgeSpecialPngFile}`,
+  );
 
   assert.ok(featureCardAsset);
   assert.ok(cardAccentAsset);
   assert.ok(cardAccentStyleAsset);
   assert.ok(cardAccentSvgAsset);
   assert.ok(cardBadgePngAsset);
+  assert.ok(cardBadgeSpecialPngAsset);
   assert.match(
     html,
     new RegExp(
@@ -299,13 +333,23 @@ test("start server emits hashed modulepreload links that match the asset manifes
   assert.deepEqual(cardAccentAsset.styleImports, ["app/components/card-accent.css"]);
   assert.deepEqual(cardAccentAsset.styleUrls, [cardAccentStyleAsset.publicUrl]);
   assert.deepEqual(cardAccentAsset.assetImports, [
+    `app/components/${cardBadgeSpecialPngFile}`,
     "app/components/card-accent.svg",
     "app/components/card-badge.png",
   ]);
   assert.deepEqual(cardAccentAsset.assetUrls, [
+    cardBadgeSpecialPngAsset.publicUrl,
     cardAccentSvgAsset.publicUrl,
     cardBadgePngAsset.publicUrl,
   ]);
+  const cssResponse = await fetch(`${baseUrl}${cardAccentStyleAsset.publicUrl}`);
+  const css = await cssResponse.text();
+  assert.equal(cssResponse.status, 200);
+  assert.match(
+    css,
+    new RegExp(path.basename(decodeURIComponent(cardBadgeSpecialPngAsset.publicUrl)).replaceAll(".", "\\.")),
+  );
+  assert.doesNotMatch(css, /card badge@2x\.png/);
 });
 
 test("start server omits hashed hydration preload output for non-hydrated routes", async () => {

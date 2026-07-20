@@ -109,7 +109,7 @@ export function getClientAssetUrl(projectRoot, sourcePath) {
     ? `${relativePath.slice(0, -extension.length)}.mjs`
     : `${relativePath}.mjs`;
 
-  return `/_nextsx/client/${compiledPath.split(path.sep).join("/")}`;
+  return `/_nextsx/client/${encodePathForUrl(compiledPath)}`;
 }
 
 function toClientModuleRelativePath(projectRoot, sourcePath) {
@@ -230,19 +230,78 @@ function getAssetType(relativePath) {
 }
 
 function replaceStaticAssetPlaceholders(source, publicPathByRelativePath) {
-  return source.replaceAll(/__NEXTSX_ASSET_URL__:([A-Za-z0-9._/-]+)/g, (match, relativeAssetPath) => {
+  return source.replaceAll(/__NEXTSX_ASSET_URL__:([^"]+)/g, (match, encodedRelativeAssetPath) => {
+    const relativeAssetPath = encodedRelativeAssetPath
+      .replaceAll("\\\\", "\\")
+      .replaceAll('\\"', '"');
     const rewrittenTarget = publicPathByRelativePath.get(relativeAssetPath);
     if (!rewrittenTarget) {
       return match;
     }
 
-    return `/_nextsx/static/${rewrittenTarget.split(path.sep).join("/")}`;
+    return toStaticPublicUrl(rewrittenTarget);
   });
+}
+
+function rewriteRelativeCssAssetUrls(source, fileRelativePath, publicPathByRelativePath) {
+  return source.replaceAll(
+    /url\(\s*(['"]?)([^"'()]+)\1\s*\)/g,
+    (match, quote = "", rawSpecifier) => {
+      const specifier = String(rawSpecifier).trim();
+      if (
+        specifier.length === 0 ||
+        specifier.startsWith("/") ||
+        specifier.startsWith("data:") ||
+        specifier.startsWith("http:") ||
+        specifier.startsWith("https:")
+      ) {
+        return match;
+      }
+
+      const [assetPath, hashFragment] = specifier.split("#", 2);
+      const [cleanAssetPath, searchFragment] = assetPath.split("?", 2);
+      const resolvedRelativePath = path.normalize(
+        path.join(path.dirname(fileRelativePath), cleanAssetPath),
+      );
+      const rewrittenTarget = publicPathByRelativePath.get(resolvedRelativePath);
+      if (!rewrittenTarget) {
+        return match;
+      }
+
+      let rewrittenSpecifier = normalizeRelativeImportPath(
+        path.relative(
+          path.dirname(publicPathByRelativePath.get(fileRelativePath)),
+          rewrittenTarget,
+        ),
+      );
+      if (typeof searchFragment === "string") {
+        rewrittenSpecifier += `?${searchFragment}`;
+      }
+      if (typeof hashFragment === "string") {
+        rewrittenSpecifier += `#${hashFragment}`;
+      }
+
+      return `url(${quote}${rewrittenSpecifier}${quote})`;
+    },
+  );
 }
 
 function normalizeRelativeImportPath(value) {
   const normalized = value.split(path.sep).join("/");
   return normalized.startsWith(".") ? normalized : `./${normalized}`;
+}
+
+function encodePathForUrl(value) {
+  return value
+    .split(path.sep)
+    .join("/")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function toStaticPublicUrl(relativePath) {
+  return `/_nextsx/static/${encodePathForUrl(relativePath)}`;
 }
 
 function collectRelativeClientImportPaths(source, fileRelativePath, publicPathByRelativePath) {
@@ -354,6 +413,12 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
         ),
         publicPathByRelativePath,
       )
+      : entry.type === "style"
+        ? rewriteRelativeCssAssetUrls(
+          entry.buffer.toString("utf8"),
+          entry.relativePath,
+          publicPathByRelativePath,
+        )
       : entry.source;
     const hashedRelativePath = publicPathByRelativePath.get(entry.relativePath);
     const outputPath = path.join(staticRoot, hashedRelativePath);
@@ -374,7 +439,7 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
         if (typeof value !== "string") {
           return null;
         }
-        return `/_nextsx/static/${value.split(path.sep).join("/")}`;
+        return toStaticPublicUrl(value);
       })
       .filter((value) => typeof value === "string");
     let styleImports = [];
@@ -393,29 +458,29 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
       styleUrls = styleImports
         .map((importedStyle) => publicPathByRelativePath.get(importedStyle))
         .filter((value) => typeof value === "string")
-        .map((value) => `/_nextsx/static/${value.split(path.sep).join("/")}`);
+        .map((value) => toStaticPublicUrl(value));
       assetUrls = assetImports
         .map((importedAsset) => publicPathByRelativePath.get(importedAsset))
         .filter((value) => typeof value === "string")
-        .map((value) => `/_nextsx/static/${value.split(path.sep).join("/")}`);
+        .map((value) => toStaticPublicUrl(value));
     }
     await ensureDirectory(path.dirname(outputPath));
     await fs.writeFile(
       outputPath,
-      entry.type === "script" ? rewrittenSource : entry.buffer,
-      entry.type === "script" ? "utf8" : undefined,
+      entry.type === "asset" ? entry.buffer : rewrittenSource,
+      entry.type === "asset" ? undefined : "utf8",
     );
 
-    const publicUrl = `/_nextsx/static/${hashedRelativePath.split(path.sep).join("/")}`;
+    const publicUrl = toStaticPublicUrl(hashedRelativePath);
     const hash = path.basename(hashedRelativePath).match(/\.([a-f0-9]{8})\.[^.]+$/)?.[1] ?? null;
     const kind = entry.type === "style"
       ? "style"
       : entry.type === "asset"
         ? "asset"
         : entryClientModules.has(clientModule) ? "entry" : "chunk";
-    const size = entry.type === "script"
-      ? Buffer.byteLength(rewrittenSource, "utf8")
-      : entry.buffer.byteLength;
+    const size = entry.type === "asset"
+      ? entry.buffer.byteLength
+      : Buffer.byteLength(rewrittenSource, "utf8");
 
     byClientModule[clientModule] = publicUrl;
     byPublicPath[publicUrl] = outputPath;
@@ -488,6 +553,11 @@ export async function rewriteServerAssetPlaceholders(projectRoot, assetManifest)
 
     const source = await fs.readFile(filePath, "utf8");
     const rewritten = source.replaceAll(/__NEXTSX_ASSET_URL__:([A-Za-z0-9._/-]+)/g, (match, relativeAssetPath) => {
+      return assetUrlByClientModule.get(relativeAssetPath) ?? match;
+    }).replaceAll(/__NEXTSX_ASSET_URL__:([^"]+)/g, (match, encodedRelativeAssetPath) => {
+      const relativeAssetPath = encodedRelativeAssetPath
+        .replaceAll("\\\\", "\\")
+        .replaceAll('\\"', '"');
       return assetUrlByClientModule.get(relativeAssetPath) ?? match;
     });
 
@@ -651,6 +721,7 @@ export function normalizeClientAssetManifest(manifest) {
     entries: Array.isArray(manifest.entries) ? manifest.entries : [],
     chunks: Array.isArray(manifest.chunks) ? manifest.chunks : [],
     styles: Array.isArray(manifest.styles) ? manifest.styles : [],
+    resources: Array.isArray(manifest.resources) ? manifest.resources : [],
     assets: manifest.assets,
   };
 }

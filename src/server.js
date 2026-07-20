@@ -54,7 +54,7 @@ function getPort(explicitPort) {
 
 function getClientAssetFilePath(projectRoot, mode, pathname) {
   const clientRoot = getClientOutputRoot(projectRoot, mode);
-  const relativePath = pathname.slice("/_nextsx/client/".length);
+  const relativePath = decodeURIComponent(pathname.slice("/_nextsx/client/".length));
   return path.join(clientRoot, relativePath);
 }
 
@@ -112,7 +112,11 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       }
 
       if (pathname.startsWith("/_nextsx/static/")) {
-        const assetPath = getAssetByPublicUrl(assetManifest, pathname)?.outputPath ?? null;
+        const decodedPathname = decodeURIComponent(pathname);
+        const assetPath = getAssetByPublicUrl(assetManifest, decodedPathname)
+          ?.outputPath
+          ?? getAssetByPublicUrl(assetManifest, pathname)?.outputPath
+          ?? null;
         if (!assetPath) {
           res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
           res.end("Asset not found.");

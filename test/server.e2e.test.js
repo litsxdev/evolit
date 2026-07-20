@@ -14,6 +14,7 @@ let fixtureRoot;
 let server;
 let baseUrl;
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
+const cardBadgeSpecialPngFile = "card badge@2x.png";
 
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
@@ -64,17 +65,23 @@ before(async () => {
     Buffer.from(cardBadgePngBase64, "base64"),
   );
   await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", cardBadgeSpecialPngFile),
+    Buffer.from(cardBadgePngBase64, "base64"),
+  );
+  await fs.writeFile(
     path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
     [
       'import "./card-accent.css";',
       'import accentIcon from "./card-accent.svg";',
       'import badgeIcon from "./card-badge.png";',
+      `import badgePoster from "./${cardBadgeSpecialPngFile}";`,
       "",
       "export default function CardAccent() {",
       "  return (",
       '    <span className="card-accent-wrap">',
       '      <img src={accentIcon} className="card-accent" alt="" />',
       '      <img src={badgeIcon} className="card-badge" alt="" />',
+      '      <img src={badgePoster} className="card-badge-poster" alt="" />',
       "    </span>",
       "  );",
       "}",
@@ -93,6 +100,12 @@ before(async () => {
       "}",
       "",
       ".card-badge {",
+      "  width: 6px;",
+      "  height: 6px;",
+      `  background-image: url("./${cardBadgeSpecialPngFile}");`,
+      "}",
+      "",
+      ".card-badge-poster {",
       "  width: 6px;",
       "  height: 6px;",
       "}",
@@ -175,6 +188,17 @@ test("dev server serves imported static svg assets", async () => {
 
 test("dev server serves imported static png assets", async () => {
   const response = await fetch(`${baseUrl}/_nextsx/client/app/components/card-badge.png`);
+  const pngBase64 = Buffer.from(await response.arrayBuffer()).toString("base64");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.equal(pngBase64, cardBadgePngBase64);
+});
+
+test("dev server serves imported static png assets with special characters in the file name", async () => {
+  const response = await fetch(
+    `${baseUrl}/_nextsx/client/app/components/${encodeURIComponent(cardBadgeSpecialPngFile)}`,
+  );
   const pngBase64 = Buffer.from(await response.arrayBuffer()).toString("base64");
 
   assert.equal(response.status, 200);
