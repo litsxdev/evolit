@@ -104,6 +104,13 @@ export function createSsrAdapter(options = {}) {
         !options.bootstrap && !options.clientEntry && typeof options.resolveBootstrap === "function"
           ? await options.resolveBootstrap({ routeResult, result })
           : "";
+      const additionalHead =
+        typeof options.resolveAdditionalHead === "function"
+          ? await options.resolveAdditionalHead({ routeResult, result })
+          : "";
+      const documentWithAdditionalHead = additionalHead
+        ? result.document.replace("</head>", `${additionalHead}\n</head>`)
+        : result.document;
 
       if (generatedBootstrap) {
         const bootstrapMarkup = renderBootstrap({
@@ -111,7 +118,7 @@ export function createSsrAdapter(options = {}) {
             content: generatedBootstrap,
           },
         });
-        const documentWithBootstrap = result.document.replace(
+        const documentWithBootstrap = documentWithAdditionalHead.replace(
           "</body>",
           `${bootstrapMarkup}\n</body>`,
         );
@@ -126,7 +133,7 @@ export function createSsrAdapter(options = {}) {
       return {
         status: routeResult.status ?? 200,
         headers: { "content-type": "text/html; charset=utf-8" },
-        body: result.document,
+        body: documentWithAdditionalHead,
       };
     },
   };

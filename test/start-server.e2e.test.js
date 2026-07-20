@@ -49,6 +49,33 @@ before(async () => {
     path.join(fixtureRoot, "node_modules"),
     "dir",
   );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
+    [
+      "export default function CardAccent() {",
+      '  return <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "999px", background: "#ef9459" }} />;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
+  const featureCardSource = await fs.readFile(featureCardPath, "utf8");
+  await fs.writeFile(
+    featureCardPath,
+    [
+      'import CardAccent from "./card-accent.litsx";',
+      "",
+      featureCardSource.replace(
+        '      <h2 style={{ margin: "0 0 12px", fontSize: "1.25rem" }}>{title}</h2>',
+        [
+          "      <CardAccent />",
+          '      <h2 style={{ margin: "0 0 12px", fontSize: "1.25rem" }}>{title}</h2>',
+        ].join("\n"),
+      ),
+    ].join("\n"),
+    "utf8",
+  );
   await buildProject(fixtureRoot);
   buildManifest = JSON.parse(
     await fs.readFile(
@@ -105,6 +132,7 @@ test("start server serves hashed client asset files", async () => {
 
   assert.equal(assetResponse.status, 200);
   assert.match(source, /litsx\.hydratableTag/);
+  assert.match(source, /card-accent\.[a-f0-9]{8}\.mjs/);
 });
 
 test("start server emits hashed modulepreload links that match the asset manifest", async () => {
@@ -113,8 +141,12 @@ test("start server emits hashed modulepreload links that match the asset manifes
   const featureCardAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/feature-card.mjs",
   );
+  const cardAccentAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-accent.mjs",
+  );
 
   assert.ok(featureCardAsset);
+  assert.ok(cardAccentAsset);
   assert.match(
     html,
     new RegExp(
@@ -123,8 +155,12 @@ test("start server emits hashed modulepreload links that match the asset manifes
   );
   assert.match(
     html,
-    new RegExp(featureCardAsset.hash),
+    new RegExp(
+      `<link rel="modulepreload" href="${cardAccentAsset.publicUrl.replaceAll(".", "\\.")}">`,
+    ),
   );
+  assert.deepEqual(featureCardAsset.imports, ["app/components/card-accent.mjs"]);
+  assert.deepEqual(featureCardAsset.importUrls, [cardAccentAsset.publicUrl]);
 });
 
 test("start server omits hashed hydration preload output for non-hydrated routes", async () => {

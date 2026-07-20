@@ -208,6 +208,31 @@ function normalizeRelativeImportPath(value) {
   return normalized.startsWith(".") ? normalized : `./${normalized}`;
 }
 
+function collectRelativeClientImportPaths(source, fileRelativePath, publicPathByRelativePath) {
+  const imports = [];
+
+  for (const match of source.matchAll(BARE_SPECIFIER_PATTERN)) {
+    const specifier = match[1] ?? match[2] ?? null;
+    if (
+      !specifier ||
+      (!specifier.startsWith("./") && !specifier.startsWith("../"))
+    ) {
+      continue;
+    }
+
+    const resolvedRelativePath = path.normalize(
+      path.join(path.dirname(fileRelativePath), specifier),
+    );
+    if (!publicPathByRelativePath.has(resolvedRelativePath)) {
+      continue;
+    }
+
+    imports.push(resolvedRelativePath.split(path.sep).join("/"));
+  }
+
+  return [...new Set(imports)].sort();
+}
+
 function rewriteRelativeClientImports(source, fileRelativePath, publicPathByRelativePath) {
   let rewrittenCode = "";
   let previousIndex = 0;
@@ -279,19 +304,39 @@ export async function emitHashedClientAssets(projectRoot) {
     );
     const hashedRelativePath = publicPathByRelativePath.get(entry.relativePath);
     const outputPath = path.join(staticRoot, hashedRelativePath);
+    const clientModule = entry.relativePath.split(path.sep).join("/");
+    const importedClientModules = collectRelativeClientImportPaths(
+      entry.source,
+      entry.relativePath,
+      publicPathByRelativePath,
+    );
+    const importedPublicUrls = importedClientModules
+      .map((importedModule) => byClientModule[importedModule] ?? publicPathByRelativePath.get(importedModule))
+      .map((value) => {
+        if (typeof value === "string" && value.startsWith("/_nextsx/")) {
+          return value;
+        }
+        if (typeof value !== "string") {
+          return null;
+        }
+        return `/_nextsx/static/${value.split(path.sep).join("/")}`;
+      })
+      .filter((value) => typeof value === "string");
     await ensureDirectory(path.dirname(outputPath));
     await fs.writeFile(outputPath, rewrittenSource, "utf8");
 
     const publicUrl = `/_nextsx/static/${hashedRelativePath.split(path.sep).join("/")}`;
     const hash = path.basename(hashedRelativePath).match(/\.([a-f0-9]{8})\.mjs$/)?.[1] ?? null;
 
-    byClientModule[entry.relativePath.split(path.sep).join("/")] = publicUrl;
+    byClientModule[clientModule] = publicUrl;
     byPublicPath[publicUrl] = outputPath;
     assets.push({
-      clientModule: entry.relativePath.split(path.sep).join("/"),
+      clientModule,
       publicUrl,
       outputPath,
       hash,
+      imports: importedClientModules,
+      importUrls: importedPublicUrls,
     });
   }
 
@@ -303,4 +348,39 @@ export async function emitHashedClientAssets(projectRoot) {
 
   await writeJson(path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY, "client-assets.json"), manifest);
   return manifest;
+}
+
+export function collectTransitiveAssetPreloads(publicUrls, assetManifest) {
+  if (!assetManifest || !Array.isArray(assetManifest.assets)) {
+    return [];
+  }
+
+  const byPublicUrl = new Map(
+    assetManifest.assets
+      .filter((asset) => typeof asset?.publicUrl === "string")
+      .map((asset) => [asset.publicUrl, asset]),
+  );
+  const visited = new Set(publicUrls);
+  const queue = [...publicUrls];
+  const discovered = [];
+
+  while (queue.length > 0) {
+    const currentUrl = queue.shift();
+    const asset = byPublicUrl.get(currentUrl);
+    if (!asset || !Array.isArray(asset.importUrls)) {
+      continue;
+    }
+
+    for (const importedUrl of asset.importUrls) {
+      if (typeof importedUrl !== "string" || visited.has(importedUrl)) {
+        continue;
+      }
+
+      visited.add(importedUrl);
+      discovered.push(importedUrl);
+      queue.push(importedUrl);
+    }
+  }
+
+  return discovered;
 }

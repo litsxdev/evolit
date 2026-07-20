@@ -11,6 +11,7 @@ import {
 } from "./constants.js";
 import {
   createAssetResolver,
+  collectTransitiveAssetPreloads,
   createHydrationBootstrap,
   createFrameworkImportMap,
   getClientOutputRoot,
@@ -48,6 +49,23 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
   const ssrAdapter = createSsrAdapter({
     assetResolver,
     head: importMapMarkup,
+    resolveAdditionalHead({ result }) {
+      if (!options.assetManifest) {
+        return "";
+      }
+
+      const urls = collectTransitiveAssetPreloads(
+        Array.isArray(result.clientImports) ? result.clientImports : [],
+        options.assetManifest,
+      );
+      if (urls.length === 0) {
+        return "";
+      }
+
+      return urls
+        .map((href) => `<link rel="modulepreload" href="${href}">`)
+        .join("\n");
+    },
     resolveBootstrap({ result }) {
       return createHydrationBootstrap({
         hydrationData: result.hydrationData,
