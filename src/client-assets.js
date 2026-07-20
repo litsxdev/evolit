@@ -480,3 +480,67 @@ export function collectTransitiveStyleUrls(publicUrls, assetManifest) {
 
   return [...styles].sort();
 }
+
+function getClientRelativePathFromPublicUrl(publicUrl) {
+  if (typeof publicUrl !== "string" || !publicUrl.startsWith("/_nextsx/client/")) {
+    return null;
+  }
+
+  return publicUrl.slice("/_nextsx/client/".length);
+}
+
+function resolveRelativeClientImportPath(fromRelativePath, specifier) {
+  return path.normalize(
+    path.join(path.dirname(fromRelativePath), specifier),
+  ).split(path.sep).join("/");
+}
+
+export async function collectDevStyleUrls(projectRoot, publicUrls, mode = "development") {
+  const clientRoot = getClientOutputRoot(projectRoot, mode);
+  const visitedModules = new Set();
+  const pendingModules = publicUrls
+    .map((publicUrl) => getClientRelativePathFromPublicUrl(publicUrl))
+    .filter((relativePath) => typeof relativePath === "string");
+  const collectedStyleUrls = new Set();
+
+  while (pendingModules.length > 0) {
+    const currentModule = pendingModules.shift();
+    if (!currentModule || visitedModules.has(currentModule)) {
+      continue;
+    }
+
+    visitedModules.add(currentModule);
+
+    const modulePath = path.join(clientRoot, currentModule);
+    let source = "";
+    try {
+      source = await fs.readFile(modulePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    try {
+      const metadata = JSON.parse(await fs.readFile(`${modulePath}.meta.json`, "utf8"));
+      for (const styleImport of Array.isArray(metadata?.styleImports) ? metadata.styleImports : []) {
+        collectedStyleUrls.add(`/_nextsx/client/${styleImport}`);
+      }
+    } catch {
+      // Ignore missing metadata; not every module imports styles.
+    }
+
+    for (const match of source.matchAll(BARE_SPECIFIER_PATTERN)) {
+      const specifier = match[1] ?? match[2] ?? null;
+      if (
+        !specifier ||
+        (!specifier.startsWith("./") && !specifier.startsWith("../")) ||
+        !specifier.endsWith(".mjs")
+      ) {
+        continue;
+      }
+
+      pendingModules.push(resolveRelativeClientImportPath(currentModule, specifier));
+    }
+  }
+
+  return [...collectedStyleUrls].sort();
+}

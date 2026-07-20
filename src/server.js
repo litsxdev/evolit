@@ -11,6 +11,7 @@ import {
 } from "./constants.js";
 import {
   createAssetResolver,
+  collectDevStyleUrls,
   collectTransitiveAssetPreloads,
   collectTransitiveStyleUrls,
   createHydrationBootstrap,
@@ -21,7 +22,14 @@ import { pathExists, readJson } from "./fs-utils.js";
 import { createRequire } from "node:module";
 
 const requireFromHere = createRequire(import.meta.url);
-const JAVASCRIPT_CONTENT_TYPE = "text/javascript; charset=utf-8";
+
+function getContentType(filePath) {
+  if (filePath.endsWith(".css")) {
+    return "text/css; charset=utf-8";
+  }
+
+  return "text/javascript; charset=utf-8";
+}
 
 function getPort(explicitPort) {
   const port = explicitPort ?? process.env.PORT ?? "3000";
@@ -34,7 +42,7 @@ function getClientAssetFilePath(projectRoot, mode, pathname) {
   return path.join(clientRoot, relativePath);
 }
 
-async function sendFileResponse(res, filePath, contentType = JAVASCRIPT_CONTENT_TYPE) {
+async function sendFileResponse(res, filePath, contentType = getContentType(filePath)) {
   const body = await fs.readFile(filePath);
   res.writeHead(200, { "content-type": contentType });
   res.end(body);
@@ -50,19 +58,14 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
   const ssrAdapter = createSsrAdapter({
     assetResolver,
     head: importMapMarkup,
-    resolveAdditionalHead({ result }) {
-      if (!options.assetManifest) {
-        return "";
-      }
-
-      const urls = collectTransitiveAssetPreloads(
-        Array.isArray(result.clientImports) ? result.clientImports : [],
-        options.assetManifest,
-      );
-      const styleUrls = collectTransitiveStyleUrls(
-        Array.isArray(result.clientImports) ? result.clientImports : [],
-        options.assetManifest,
-      );
+    async resolveAdditionalHead({ result }) {
+      const clientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
+      const urls = options.assetManifest
+        ? collectTransitiveAssetPreloads(clientImports, options.assetManifest)
+        : [];
+      const styleUrls = options.assetManifest
+        ? collectTransitiveStyleUrls(clientImports, options.assetManifest)
+        : await collectDevStyleUrls(projectRoot, clientImports, mode);
       if (urls.length === 0 && styleUrls.length === 0) {
         return "";
       }

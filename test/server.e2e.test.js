@@ -48,6 +48,49 @@ before(async () => {
     path.join(fixtureRoot, "node_modules"),
     "dir",
   );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
+    [
+      'import "./card-accent.css";',
+      "",
+      "export default function CardAccent() {",
+      '  return <span className="card-accent" />;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", "card-accent.css"),
+    [
+      ".card-accent {",
+      "  display: inline-block;",
+      "  width: 10px;",
+      "  height: 10px;",
+      "  border-radius: 999px;",
+      "  background: #ef9459;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
+  const featureCardSource = await fs.readFile(featureCardPath, "utf8");
+  await fs.writeFile(
+    featureCardPath,
+    [
+      'import CardAccent from "./card-accent.litsx";',
+      "",
+      featureCardSource.replace(
+        '      <h2 style={{ margin: "0 0 12px", fontSize: "1.25rem" }}>{title}</h2>',
+        [
+          "      <CardAccent />",
+          '      <h2 style={{ margin: "0 0 12px", fontSize: "1.25rem" }}>{title}</h2>',
+        ].join("\n"),
+      ),
+    ].join("\n"),
+    "utf8",
+  );
 
   const port = await getAvailablePort();
   server = await createDevServer(fixtureRoot, { port });
@@ -77,10 +120,21 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   assert.match(html, /registerHydrationModules/);
   assert.match(html, /await hydratePage\(\)/);
   assert.match(html, /\/_nextsx\/client\/app\/components\/feature-card\.mjs/);
+  assert.match(html, /<link rel="stylesheet" href="\/_nextsx\/client\/app\/components\/card-accent\.css">/);
   assert.match(html, /id="__LITSX_HYDRATION__"/);
   assert.match(html, /data-litsx-root="litsx-root-0"/);
   assert.doesNotMatch(html, /__nextsx\/hydration/);
   assert.doesNotMatch(html, /customElements\.define/);
+});
+
+test("dev server serves imported client css assets", async () => {
+  const response = await fetch(`${baseUrl}/_nextsx/client/app/components/card-accent.css`);
+  const css = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/css; charset=utf-8");
+  assert.match(css, /\.card-accent/);
+  assert.match(css, /background: #ef9459/);
 });
 
 test("non-hydrated route omits the generated hydration bootstrap", async () => {
@@ -90,6 +144,7 @@ test("non-hydrated route omits the generated hydration bootstrap", async () => {
   assert.equal(response.status, 200);
   assert.match(html, /<title>About \| nextsx<\/title>/);
   assert.match(html, /<script type="importmap">/);
+  assert.doesNotMatch(html, /rel="stylesheet"/);
   assert.doesNotMatch(html, /registerHydrationModules/);
   assert.doesNotMatch(html, /await hydratePage\(\)/);
   assert.doesNotMatch(html, /id="__LITSX_HYDRATION__"/);
