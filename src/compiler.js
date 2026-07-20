@@ -9,6 +9,7 @@ import {
   INTERNAL_DIRECTORY,
   MODULE_EXTENSIONS,
   SERVER_DIRECTORY,
+  STATIC_ASSET_EXTENSIONS,
 } from "./constants.js";
 import { ensureDirectory } from "./fs-utils.js";
 
@@ -23,12 +24,16 @@ function shouldCompileModule(filePath) {
   return MODULE_EXTENSIONS.some((extension) => filePath.endsWith(extension));
 }
 
+function isStaticAssetPath(filePath) {
+  return STATIC_ASSET_EXTENSIONS.some((extension) => filePath.endsWith(extension));
+}
+
 async function resolveImportPath(importerPath, specifier) {
   const basePath = path.resolve(path.dirname(importerPath), specifier);
   const candidates = [basePath];
 
   if (!path.extname(basePath)) {
-    for (const extension of MODULE_EXTENSIONS) {
+    for (const extension of [...MODULE_EXTENSIONS, ...STATIC_ASSET_EXTENSIONS]) {
       candidates.push(`${basePath}${extension}`);
       candidates.push(path.join(basePath, `index${extension}`));
     }
@@ -80,6 +85,8 @@ async function rewriteRelativeSpecifiers({
   sourcePath,
   code,
   compileModule,
+  moduleMetadata,
+  target,
 }) {
   let rewrittenCode = "";
   let previousIndex = 0;
@@ -91,12 +98,38 @@ async function rewriteRelativeSpecifiers({
     }
 
     const resolvedImportPath = await resolveImportPath(sourcePath, specifier);
-    if (!resolvedImportPath || !shouldCompileModule(resolvedImportPath)) {
+    if (!resolvedImportPath) {
       continue;
     }
 
-    const compiledImportPath = await compileModule(resolvedImportPath);
     const importerOutputPath = toOutputPath(projectRoot, outputRoot, sourcePath);
+    let compiledImportPath = null;
+
+    if (shouldCompileModule(resolvedImportPath)) {
+      compiledImportPath = await compileModule(resolvedImportPath);
+    } else if (isStaticAssetPath(resolvedImportPath)) {
+      const relativeAssetPath = path.relative(projectRoot, resolvedImportPath);
+      const assetOutputPath = path.join(outputRoot, relativeAssetPath);
+      const stubOutputPath = `${assetOutputPath}.mjs`;
+
+      await ensureDirectory(path.dirname(stubOutputPath));
+      await fs.writeFile(stubOutputPath, "export default {};\n", "utf8");
+
+      if (target === "client") {
+        await ensureDirectory(path.dirname(assetOutputPath));
+        await fs.copyFile(resolvedImportPath, assetOutputPath);
+        const sourceMetadata = moduleMetadata.get(sourcePath) ?? {
+          styleImports: new Set(),
+        };
+        sourceMetadata.styleImports.add(relativeAssetPath.split(path.sep).join("/"));
+        moduleMetadata.set(sourcePath, sourceMetadata);
+      }
+
+      compiledImportPath = stubOutputPath;
+    } else {
+      continue;
+    }
+
     const replacementPath = path.relative(
       path.dirname(importerOutputPath),
       compiledImportPath,
@@ -126,6 +159,7 @@ export async function compileModuleGraph(entryPath, options = {}) {
 
   const outputRoot = getTypedOutputRoot(projectRoot, mode, target);
   const visited = new Map();
+  const moduleMetadata = new Map();
 
   async function compileModule(sourcePath) {
     if (visited.has(sourcePath)) {
@@ -148,9 +182,23 @@ export async function compileModuleGraph(entryPath, options = {}) {
       sourcePath,
       code: transformed.code,
       compileModule,
+      moduleMetadata,
+      target,
     });
 
     await fs.writeFile(outputPath, rewrittenCode, "utf8");
+    if (target === "client") {
+      const metadata = moduleMetadata.get(sourcePath);
+      if (metadata) {
+        await fs.writeFile(
+          `${outputPath}.meta.json`,
+          `${JSON.stringify({
+            styleImports: [...metadata.styleImports].sort(),
+          }, null, 2)}\n`,
+          "utf8",
+        );
+      }
+    }
     if (transformed.map && sourceMaps) {
       await fs.writeFile(`${outputPath}.map`, JSON.stringify(transformed.map), "utf8");
     }

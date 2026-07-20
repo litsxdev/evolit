@@ -16,3 +16,7 @@ export const MODULE_EXTENSIONS = [
   ".js",
   ".mjs",
 ];
+
+export const STATIC_ASSET_EXTENSIONS = [
+  ".css",
+];

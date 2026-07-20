@@ -12,6 +12,7 @@ import {
 import {
   createAssetResolver,
   collectTransitiveAssetPreloads,
+  collectTransitiveStyleUrls,
   createHydrationBootstrap,
   createFrameworkImportMap,
   getClientOutputRoot,
@@ -58,13 +59,18 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         Array.isArray(result.clientImports) ? result.clientImports : [],
         options.assetManifest,
       );
-      if (urls.length === 0) {
+      const styleUrls = collectTransitiveStyleUrls(
+        Array.isArray(result.clientImports) ? result.clientImports : [],
+        options.assetManifest,
+      );
+      if (urls.length === 0 && styleUrls.length === 0) {
         return "";
       }
 
-      return urls
-        .map((href) => `<link rel="modulepreload" href="${href}">`)
-        .join("\n");
+      return [
+        ...urls.map((href) => `<link rel="modulepreload" href="${href}">`),
+        ...styleUrls.map((href) => `<link rel="stylesheet" href="${href}">`),
+      ].join("\n");
     },
     resolveBootstrap({ result }) {
       return createHydrationBootstrap({

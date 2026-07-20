@@ -52,8 +52,24 @@ before(async () => {
   await fs.writeFile(
     path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
     [
+      'import "./card-accent.css";',
+      "",
       "export default function CardAccent() {",
       '  return <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "999px", background: "#ef9459" }} />;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", "card-accent.css"),
+    [
+      ".card-accent {",
+      "  display: inline-block;",
+      "  width: 10px;",
+      "  height: 10px;",
+      "  border-radius: 999px;",
+      "  background: #ef9459;",
       "}",
       "",
     ].join("\n"),
@@ -130,19 +146,26 @@ test("build manifest classifies entry and chunk client assets with structured me
   const homePageAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/page.mjs",
   );
+  const cardAccentStyleAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-accent.css",
+  );
 
   assert.ok(featureCardAsset);
   assert.ok(cardAccentAsset);
   assert.ok(homePageAsset);
+  assert.ok(cardAccentStyleAsset);
   assert.equal(featureCardAsset.kind, "chunk");
   assert.equal(cardAccentAsset.kind, "chunk");
   assert.equal(homePageAsset.kind, "entry");
+  assert.equal(cardAccentStyleAsset.kind, "style");
+  assert.equal(cardAccentStyleAsset.type, "style");
   assert.equal(typeof homePageAsset.hash, "string");
   assert.equal(homePageAsset.hash.length, 8);
   assert.equal(typeof homePageAsset.size, "number");
   assert.equal(homePageAsset.size > 0, true);
   assert.equal(buildManifest.clientAssets.entries.includes("app/page.mjs"), true);
   assert.equal(buildManifest.clientAssets.chunks.includes("app/components/feature-card.mjs"), true);
+  assert.equal(buildManifest.clientAssets.styles.includes("app/components/card-accent.css"), true);
 });
 
 test("start server serves hashed client asset files", async () => {
@@ -169,9 +192,13 @@ test("start server emits hashed modulepreload links that match the asset manifes
   const cardAccentAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-accent.mjs",
   );
+  const cardAccentStyleAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-accent.css",
+  );
 
   assert.ok(featureCardAsset);
   assert.ok(cardAccentAsset);
+  assert.ok(cardAccentStyleAsset);
   assert.match(
     html,
     new RegExp(
@@ -184,8 +211,16 @@ test("start server emits hashed modulepreload links that match the asset manifes
       `<link rel="modulepreload" href="${cardAccentAsset.publicUrl.replaceAll(".", "\\.")}">`,
     ),
   );
+  assert.match(
+    html,
+    new RegExp(
+      `<link rel="stylesheet" href="${cardAccentStyleAsset.publicUrl.replaceAll(".", "\\.")}">`,
+    ),
+  );
   assert.deepEqual(featureCardAsset.imports, ["app/components/card-accent.mjs"]);
   assert.deepEqual(featureCardAsset.importUrls, [cardAccentAsset.publicUrl]);
+  assert.deepEqual(cardAccentAsset.styleImports, ["app/components/card-accent.css"]);
+  assert.deepEqual(cardAccentAsset.styleUrls, [cardAccentStyleAsset.publicUrl]);
 });
 
 test("start server omits hashed hydration preload output for non-hydrated routes", async () => {
@@ -194,6 +229,7 @@ test("start server omits hashed hydration preload output for non-hydrated routes
 
   assert.equal(response.status, 200);
   assert.doesNotMatch(html, /rel="modulepreload"/);
+  assert.doesNotMatch(html, /rel="stylesheet"/);
   assert.doesNotMatch(html, /registerHydrationModules/);
   assert.doesNotMatch(html, /__LITSX_HYDRATION__/);
 });

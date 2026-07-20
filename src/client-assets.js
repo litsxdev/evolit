@@ -203,6 +203,10 @@ function createHashedModulePath(relativePath, hash) {
   );
 }
 
+function getAssetType(relativePath) {
+  return relativePath.endsWith(".css") ? "style" : "script";
+}
+
 function normalizeRelativeImportPath(value) {
   const normalized = value.split(path.sep).join("/");
   return normalized.startsWith(".") ? normalized : `./${normalized}`;
@@ -278,9 +282,17 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
   const publicPathByRelativePath = new Map();
 
   for (const filePath of files) {
+    if (filePath.endsWith(".meta.json") || filePath.endsWith(".map")) {
+      continue;
+    }
     const relativePath = path.relative(clientRoot, filePath);
     const source = await fs.readFile(filePath, "utf8");
-    assetEntries.push({ filePath, relativePath, source });
+    assetEntries.push({
+      filePath,
+      relativePath,
+      source,
+      type: getAssetType(relativePath),
+    });
   }
 
   for (const entry of assetEntries) {
@@ -298,19 +310,23 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
   const assets = [];
 
   for (const entry of assetEntries) {
-    const rewrittenSource = rewriteRelativeClientImports(
-      entry.source,
-      entry.relativePath,
-      publicPathByRelativePath,
-    );
+    const rewrittenSource = entry.type === "script"
+      ? rewriteRelativeClientImports(
+        entry.source,
+        entry.relativePath,
+        publicPathByRelativePath,
+      )
+      : entry.source;
     const hashedRelativePath = publicPathByRelativePath.get(entry.relativePath);
     const outputPath = path.join(staticRoot, hashedRelativePath);
     const clientModule = entry.relativePath.split(path.sep).join("/");
-    const importedClientModules = collectRelativeClientImportPaths(
-      entry.source,
-      entry.relativePath,
-      publicPathByRelativePath,
-    );
+    const importedClientModules = entry.type === "script"
+      ? collectRelativeClientImportPaths(
+        entry.source,
+        entry.relativePath,
+        publicPathByRelativePath,
+      )
+      : [];
     const importedPublicUrls = importedClientModules
       .map((importedModule) => byClientModule[importedModule] ?? publicPathByRelativePath.get(importedModule))
       .map((value) => {
@@ -323,18 +339,35 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
         return `/_nextsx/static/${value.split(path.sep).join("/")}`;
       })
       .filter((value) => typeof value === "string");
+    let styleImports = [];
+    let styleUrls = [];
+    if (entry.type === "script") {
+      try {
+        const metadata = JSON.parse(await fs.readFile(`${entry.filePath}.meta.json`, "utf8"));
+        styleImports = Array.isArray(metadata?.styleImports) ? metadata.styleImports : [];
+      } catch {
+        styleImports = [];
+      }
+      styleUrls = styleImports
+        .map((importedStyle) => publicPathByRelativePath.get(importedStyle))
+        .filter((value) => typeof value === "string")
+        .map((value) => `/_nextsx/static/${value.split(path.sep).join("/")}`);
+    }
     await ensureDirectory(path.dirname(outputPath));
     await fs.writeFile(outputPath, rewrittenSource, "utf8");
 
     const publicUrl = `/_nextsx/static/${hashedRelativePath.split(path.sep).join("/")}`;
-    const hash = path.basename(hashedRelativePath).match(/\.([a-f0-9]{8})\.mjs$/)?.[1] ?? null;
-    const kind = entryClientModules.has(clientModule) ? "entry" : "chunk";
+    const hash = path.basename(hashedRelativePath).match(/\.([a-f0-9]{8})\.[^.]+$/)?.[1] ?? null;
+    const kind = entry.type === "style"
+      ? "style"
+      : entryClientModules.has(clientModule) ? "entry" : "chunk";
     const size = Buffer.byteLength(rewrittenSource, "utf8");
 
     byClientModule[clientModule] = publicUrl;
     byPublicPath[publicUrl] = outputPath;
     assets.push({
       clientModule,
+      type: entry.type,
       kind,
       publicUrl,
       outputPath,
@@ -342,6 +375,8 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
       size,
       imports: importedClientModules,
       importUrls: importedPublicUrls,
+      styleImports,
+      styleUrls,
     });
   }
 
@@ -353,12 +388,17 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
     .filter((asset) => asset.kind === "chunk")
     .map((asset) => asset.clientModule)
     .sort();
+  const styles = assets
+    .filter((asset) => asset.type === "style")
+    .map((asset) => asset.clientModule)
+    .sort();
 
   const manifest = {
     byClientModule,
     byPublicPath,
     entries,
     chunks,
+    styles,
     assets: assets.sort((left, right) => left.clientModule.localeCompare(right.clientModule)),
   };
 
@@ -399,4 +439,44 @@ export function collectTransitiveAssetPreloads(publicUrls, assetManifest) {
   }
 
   return discovered;
+}
+
+export function collectTransitiveStyleUrls(publicUrls, assetManifest) {
+  if (!assetManifest || !Array.isArray(assetManifest.assets)) {
+    return [];
+  }
+
+  const byPublicUrl = new Map(
+    assetManifest.assets
+      .filter((asset) => typeof asset?.publicUrl === "string")
+      .map((asset) => [asset.publicUrl, asset]),
+  );
+  const visitedAssets = new Set(publicUrls);
+  const queue = [...publicUrls];
+  const styles = new Set();
+
+  while (queue.length > 0) {
+    const currentUrl = queue.shift();
+    const asset = byPublicUrl.get(currentUrl);
+    if (!asset) {
+      continue;
+    }
+
+    for (const styleUrl of Array.isArray(asset.styleUrls) ? asset.styleUrls : []) {
+      if (typeof styleUrl === "string") {
+        styles.add(styleUrl);
+      }
+    }
+
+    for (const importedUrl of Array.isArray(asset.importUrls) ? asset.importUrls : []) {
+      if (typeof importedUrl !== "string" || visitedAssets.has(importedUrl)) {
+        continue;
+      }
+
+      visitedAssets.add(importedUrl);
+      queue.push(importedUrl);
+    }
+  }
+
+  return [...styles].sort();
 }
