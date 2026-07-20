@@ -269,10 +269,11 @@ function rewriteRelativeClientImports(source, fileRelativePath, publicPathByRela
   return rewrittenCode;
 }
 
-export async function emitHashedClientAssets(projectRoot) {
+export async function emitHashedClientAssets(projectRoot, options = {}) {
   const clientRoot = getClientOutputRoot(projectRoot, "production");
   const staticRoot = getStaticOutputRoot(projectRoot);
   const files = await walkFiles(clientRoot);
+  const entryClientModules = new Set(options.entryClientModules ?? []);
   const assetEntries = [];
   const publicPathByRelativePath = new Map();
 
@@ -327,22 +328,37 @@ export async function emitHashedClientAssets(projectRoot) {
 
     const publicUrl = `/_nextsx/static/${hashedRelativePath.split(path.sep).join("/")}`;
     const hash = path.basename(hashedRelativePath).match(/\.([a-f0-9]{8})\.mjs$/)?.[1] ?? null;
+    const kind = entryClientModules.has(clientModule) ? "entry" : "chunk";
+    const size = Buffer.byteLength(rewrittenSource, "utf8");
 
     byClientModule[clientModule] = publicUrl;
     byPublicPath[publicUrl] = outputPath;
     assets.push({
       clientModule,
+      kind,
       publicUrl,
       outputPath,
       hash,
+      size,
       imports: importedClientModules,
       importUrls: importedPublicUrls,
     });
   }
 
+  const entries = assets
+    .filter((asset) => asset.kind === "entry")
+    .map((asset) => asset.clientModule)
+    .sort();
+  const chunks = assets
+    .filter((asset) => asset.kind === "chunk")
+    .map((asset) => asset.clientModule)
+    .sort();
+
   const manifest = {
     byClientModule,
     byPublicPath,
+    entries,
+    chunks,
     assets: assets.sort((left, right) => left.clientModule.localeCompare(right.clientModule)),
   };
 

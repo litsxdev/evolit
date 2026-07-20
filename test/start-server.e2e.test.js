@@ -120,6 +120,31 @@ test("start server emits hashed public asset URLs for hydration bootstrap", asyn
   assert.doesNotMatch(html, /\/_nextsx\/client\/app\/components\/feature-card\.mjs/);
 });
 
+test("build manifest classifies entry and chunk client assets with structured metadata", () => {
+  const featureCardAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/feature-card.mjs",
+  );
+  const cardAccentAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-accent.mjs",
+  );
+  const homePageAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/page.mjs",
+  );
+
+  assert.ok(featureCardAsset);
+  assert.ok(cardAccentAsset);
+  assert.ok(homePageAsset);
+  assert.equal(featureCardAsset.kind, "chunk");
+  assert.equal(cardAccentAsset.kind, "chunk");
+  assert.equal(homePageAsset.kind, "entry");
+  assert.equal(typeof homePageAsset.hash, "string");
+  assert.equal(homePageAsset.hash.length, 8);
+  assert.equal(typeof homePageAsset.size, "number");
+  assert.equal(homePageAsset.size > 0, true);
+  assert.equal(buildManifest.clientAssets.entries.includes("app/page.mjs"), true);
+  assert.equal(buildManifest.clientAssets.chunks.includes("app/components/feature-card.mjs"), true);
+});
+
 test("start server serves hashed client asset files", async () => {
   const pageResponse = await fetch(`${baseUrl}/`);
   const html = await pageResponse.text();

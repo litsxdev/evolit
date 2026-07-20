@@ -13,6 +13,7 @@ import { ensureDirectory, writeJson } from "./fs-utils.js";
 export async function buildProject(projectRoot) {
   const routes = await discoverAppRoutes(projectRoot);
   const buildRoot = path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY);
+  const entryClientModules = new Set();
 
   await ensureDirectory(buildRoot);
 
@@ -25,12 +26,15 @@ export async function buildProject(projectRoot) {
       target: "server",
     });
 
-    await compileModuleGraph(route.page, {
+    const pageClientBuild = await compileModuleGraph(route.page, {
       projectRoot,
       mode: "production",
       sourceMaps: false,
       target: "client",
     });
+    entryClientModules.add(
+      path.relative(pageClientBuild.outputRoot, pageClientBuild.entrypoint).split(path.sep).join("/"),
+    );
 
     for (const layoutPath of route.layouts) {
       await compileModuleGraph(layoutPath, {
@@ -41,16 +45,21 @@ export async function buildProject(projectRoot) {
         target: "server",
       });
 
-      await compileModuleGraph(layoutPath, {
+      const layoutClientBuild = await compileModuleGraph(layoutPath, {
         projectRoot,
         mode: "production",
         sourceMaps: false,
         target: "client",
       });
+      entryClientModules.add(
+        path.relative(layoutClientBuild.outputRoot, layoutClientBuild.entrypoint).split(path.sep).join("/"),
+      );
     }
   }
 
-  const clientAssets = await emitHashedClientAssets(projectRoot);
+  const clientAssets = await emitHashedClientAssets(projectRoot, {
+    entryClientModules,
+  });
 
   const manifestPath = path.join(buildRoot, MANIFEST_FILENAME);
   await writeJson(manifestPath, {
