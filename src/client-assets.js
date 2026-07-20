@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
@@ -6,7 +7,9 @@ import {
   CLIENT_DIRECTORY,
   DEV_DIRECTORY,
   INTERNAL_DIRECTORY,
+  STATIC_DIRECTORY,
 } from "./constants.js";
+import { ensureDirectory, walkFiles, writeJson } from "./fs-utils.js";
 
 const BARE_SPECIFIER_PATTERN =
   /\b(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
@@ -107,7 +110,26 @@ export function getClientAssetUrl(projectRoot, sourcePath) {
   return `/_nextsx/client/${compiledPath.split(path.sep).join("/")}`;
 }
 
-export function createAssetResolver(projectRoot) {
+function toClientModuleRelativePath(projectRoot, sourcePath) {
+  const relativePath = path.relative(projectRoot, sourcePath);
+  const extension = path.extname(relativePath);
+  return extension
+    ? `${relativePath.slice(0, -extension.length)}.mjs`
+    : `${relativePath}.mjs`;
+}
+
+export function getStaticOutputRoot(projectRoot) {
+  return path.join(
+    projectRoot,
+    INTERNAL_DIRECTORY,
+    BUILD_DIRECTORY,
+    STATIC_DIRECTORY,
+  );
+}
+
+export function createAssetResolver(projectRoot, options = {}) {
+  const assetManifest = options.assetManifest ?? null;
+
   return function assetResolver(moduleId) {
     if (!path.isAbsolute(moduleId)) {
       return null;
@@ -115,6 +137,10 @@ export function createAssetResolver(projectRoot) {
 
     if (!moduleId.startsWith(projectRoot)) {
       return null;
+    }
+
+    if (assetManifest) {
+      return assetManifest.byClientModule?.[toClientModuleRelativePath(projectRoot, moduleId)] ?? null;
     }
 
     return getClientAssetUrl(projectRoot, moduleId);
@@ -163,4 +189,109 @@ await hydratePage();
 `;
 
   return escapeInlineScriptText(source);
+}
+
+function createHashedModulePath(relativePath, hash) {
+  const extension = path.extname(relativePath);
+  if (!extension) {
+    return `${relativePath}.${hash}`;
+  }
+
+  return path.join(
+    path.dirname(relativePath),
+    `${path.basename(relativePath, extension)}.${hash}${extension}`,
+  );
+}
+
+function normalizeRelativeImportPath(value) {
+  const normalized = value.split(path.sep).join("/");
+  return normalized.startsWith(".") ? normalized : `./${normalized}`;
+}
+
+function rewriteRelativeClientImports(source, fileRelativePath, publicPathByRelativePath) {
+  let rewrittenCode = "";
+  let previousIndex = 0;
+
+  for (const match of source.matchAll(BARE_SPECIFIER_PATTERN)) {
+    const specifier = match[1] ?? match[2] ?? null;
+    if (
+      !specifier ||
+      (!specifier.startsWith("./") && !specifier.startsWith("../"))
+    ) {
+      continue;
+    }
+
+    const resolvedRelativePath = path.normalize(
+      path.join(path.dirname(fileRelativePath), specifier),
+    );
+    const rewrittenTarget = publicPathByRelativePath.get(resolvedRelativePath);
+    if (!rewrittenTarget) {
+      continue;
+    }
+
+    const replacementPath = path.relative(
+      path.dirname(publicPathByRelativePath.get(fileRelativePath)),
+      rewrittenTarget,
+    );
+    const quotedSpecifierIndex = match.index + match[0].indexOf(specifier);
+
+    rewrittenCode += source.slice(previousIndex, quotedSpecifierIndex);
+    rewrittenCode += normalizeRelativeImportPath(replacementPath);
+    previousIndex = quotedSpecifierIndex + specifier.length;
+  }
+
+  rewrittenCode += source.slice(previousIndex);
+  return rewrittenCode;
+}
+
+export async function emitHashedClientAssets(projectRoot) {
+  const clientRoot = getClientOutputRoot(projectRoot, "production");
+  const staticRoot = getStaticOutputRoot(projectRoot);
+  const files = await walkFiles(clientRoot);
+  const assetEntries = [];
+  const publicPathByRelativePath = new Map();
+
+  for (const filePath of files) {
+    const relativePath = path.relative(clientRoot, filePath);
+    const source = await fs.readFile(filePath, "utf8");
+    assetEntries.push({ filePath, relativePath, source });
+  }
+
+  for (const entry of assetEntries) {
+    const hash = crypto
+      .createHash("sha1")
+      .update(entry.source)
+      .digest("hex")
+      .slice(0, 8);
+    const hashedRelativePath = createHashedModulePath(entry.relativePath, hash);
+    publicPathByRelativePath.set(entry.relativePath, hashedRelativePath);
+  }
+
+  const byClientModule = {};
+  const byPublicPath = {};
+
+  for (const entry of assetEntries) {
+    const rewrittenSource = rewriteRelativeClientImports(
+      entry.source,
+      entry.relativePath,
+      publicPathByRelativePath,
+    );
+    const hashedRelativePath = publicPathByRelativePath.get(entry.relativePath);
+    const outputPath = path.join(staticRoot, hashedRelativePath);
+    await ensureDirectory(path.dirname(outputPath));
+    await fs.writeFile(outputPath, rewrittenSource, "utf8");
+
+    const publicUrl = `/_nextsx/static/${hashedRelativePath.split(path.sep).join("/")}`;
+
+    byClientModule[entry.relativePath.split(path.sep).join("/")] = publicUrl;
+    byPublicPath[publicUrl] = outputPath;
+  }
+
+  const manifest = {
+    byClientModule,
+    byPublicPath,
+  };
+
+  await writeJson(path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY, "client-assets.json"), manifest);
+  return manifest;
 }

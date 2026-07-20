@@ -38,9 +38,11 @@ async function sendFileResponse(res, filePath, contentType = JAVASCRIPT_CONTENT_
   res.end(body);
 }
 
-async function createServer(projectRoot, mode, explicitPort) {
+async function createServer(projectRoot, mode, explicitPort, options = {}) {
   const resolveRequest = await createRouteResolver(projectRoot, mode);
-  const assetResolver = createAssetResolver(projectRoot);
+  const assetResolver = createAssetResolver(projectRoot, {
+    assetManifest: options.assetManifest,
+  });
   const frameworkImportMap = await createFrameworkImportMap();
   const importMapMarkup = `<script type="importmap">${JSON.stringify(frameworkImportMap)}</script>`;
   const ssrAdapter = createSsrAdapter({
@@ -61,6 +63,17 @@ async function createServer(projectRoot, mode, explicitPort) {
 
       if (pathname.startsWith("/_nextsx/client/")) {
         const assetPath = getClientAssetFilePath(projectRoot, mode, pathname);
+        await sendFileResponse(res, assetPath);
+        return;
+      }
+
+      if (pathname.startsWith("/_nextsx/static/")) {
+        const assetPath = options.assetManifest?.byPublicPath?.[pathname] ?? null;
+        if (!assetPath) {
+          res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+          res.end("Asset not found.");
+          return;
+        }
         await sendFileResponse(res, assetPath);
         return;
       }
@@ -137,6 +150,8 @@ export async function createStartServer(projectRoot, options = {}) {
     throw new Error("Build output not found. Run `yarn build` before `yarn start`.");
   }
 
-  await readJson(manifestPath);
-  return createServer(projectRoot, "production", options.port);
+  const manifest = await readJson(manifestPath);
+  return createServer(projectRoot, "production", options.port, {
+    assetManifest: manifest.clientAssets ?? null,
+  });
 }
