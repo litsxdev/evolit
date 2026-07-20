@@ -5,6 +5,7 @@ export const DEV_DIRECTORY = "dev";
 export const SERVER_DIRECTORY = "server";
 export const CLIENT_DIRECTORY = "client";
 export const STATIC_DIRECTORY = "static";
+export const ROUTE_CACHE_DIRECTORY = "route-cache";
 export const MANIFEST_FILENAME = "manifest.json";
 
 export const MODULE_EXTENSIONS = [

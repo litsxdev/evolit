@@ -1,5 +1,6 @@
 import { discoverAppRoutes, matchRoute } from "./app-discovery.js";
 import { importCompiledModule } from "./compiler.js";
+import { mergeRouteConfig, normalizeRouteCachePolicy } from "./route-config.js";
 import {
   LITSX_COMPONENT,
   LITSX_SERVER_COMPONENT,
@@ -60,7 +61,7 @@ function mergeMetadata(modules) {
 export async function createRouteResolver(projectRoot, mode = "development") {
   const routes = await discoverAppRoutes(projectRoot);
 
-  return async function resolveRequest(request) {
+  async function resolveMatchedRequest(request, options = {}) {
     const url = new URL(request.url);
     const match = matchRoute(url.pathname, routes);
 
@@ -76,6 +77,21 @@ export async function createRouteResolver(projectRoot, mode = "development") {
     const layoutModules = await Promise.all(
       match.route.layouts.map((layoutPath) => importCompiledModule(layoutPath, moduleOptions)),
     );
+    const routeConfig = mergeRouteConfig([...layoutModules, pageModule]);
+    const cachePolicy = normalizeRouteCachePolicy(routeConfig);
+
+    if (options.renderTree === false) {
+      return {
+        type: "route",
+        status: 200,
+        route: match.route,
+        params: match.params,
+        searchParams: collectSearchParams(url),
+        routeConfig,
+        cachePolicy,
+        cacheKey: url.pathname,
+      };
+    }
 
     const pageComponent = assertServerComponent(
       await resolveDefaultExport(pageModule, match.route.page),
@@ -112,6 +128,19 @@ export async function createRouteResolver(projectRoot, mode = "development") {
       route: match.route,
       params: match.params,
       searchParams: collectSearchParams(url),
+      routeConfig,
+      cachePolicy,
+      cacheKey: url.pathname,
     };
+  }
+
+  return {
+    routes,
+    async resolveRoutePolicy(request) {
+      return resolveMatchedRequest(request, { renderTree: false });
+    },
+    async resolveRequest(request) {
+      return resolveMatchedRequest(request, { renderTree: true });
+    },
   };
 }

@@ -8,6 +8,7 @@ import {
   BUILD_DIRECTORY,
   INTERNAL_DIRECTORY,
   MANIFEST_FILENAME,
+  ROUTE_CACHE_DIRECTORY,
 } from "./constants.js";
 import {
   createAssetResolver,
@@ -22,6 +23,12 @@ import {
 } from "./client-assets.js";
 import { pathExists, readJson } from "./fs-utils.js";
 import { createRequire } from "node:module";
+import {
+  createCachedRouteResponse,
+  FileSystemResponseCacheStore,
+  isCachedRouteResponseFresh,
+  MemoryResponseCacheStore,
+} from "./response-cache.js";
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -64,12 +71,40 @@ async function sendFileResponse(res, filePath, contentType = getContentType(file
   res.end(body);
 }
 
+function getDefaultResponseCacheStore(projectRoot, mode) {
+  if (mode === "development") {
+    return new MemoryResponseCacheStore();
+  }
+
+  return new FileSystemResponseCacheStore(
+    path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY, ROUTE_CACHE_DIRECTORY),
+  );
+}
+
+function applyRouteCacheHeaders(response, cachePolicy) {
+  const headers = { ...(response.headers ?? {}) };
+
+  if (cachePolicy?.mode === "static") {
+    headers["cache-control"] = "public, max-age=31536000, immutable";
+  } else if (cachePolicy?.mode === "revalidate") {
+    headers["cache-control"] = `public, max-age=${cachePolicy.ttlSeconds}`;
+  } else {
+    headers["cache-control"] = "no-store";
+  }
+
+  return {
+    ...response,
+    headers,
+  };
+}
+
 async function createServer(projectRoot, mode, explicitPort, options = {}) {
   const assetManifest = normalizeClientAssetManifest(options.assetManifest);
-  const resolveRequest = await createRouteResolver(projectRoot, mode);
+  const routeResolver = await createRouteResolver(projectRoot, mode);
   const assetResolver = createAssetResolver(projectRoot, {
     assetManifest,
   });
+  const responseCacheStore = options.responseCacheStore ?? getDefaultResponseCacheStore(projectRoot, mode);
   const frameworkImportMap = await createFrameworkImportMap();
   const importMapMarkup = `<script type="importmap">${JSON.stringify(frameworkImportMap)}</script>`;
   const ssrAdapter = createSsrAdapter({
@@ -138,7 +173,27 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         method: req.method,
         headers: req.headers,
       });
-      const routeResult = await resolveRequest(request);
+      const routePolicyResult = await routeResolver.resolveRoutePolicy(request);
+
+      if (routePolicyResult.type === "route" && routePolicyResult.cachePolicy.mode !== "dynamic") {
+        const cachedResponse = await responseCacheStore.get(routePolicyResult.cacheKey);
+        if (isCachedRouteResponseFresh(cachedResponse)) {
+          const response = applyRouteCacheHeaders({
+            status: cachedResponse.status,
+            headers: {
+              ...cachedResponse.headers,
+              "x-nextsx-cache": "HIT",
+            },
+            body: cachedResponse.body,
+          }, routePolicyResult.cachePolicy);
+
+          res.writeHead(response.status, response.headers);
+          res.end(response.body);
+          return;
+        }
+      }
+
+      const routeResult = await routeResolver.resolveRequest(request);
 
       if (routeResult.type === "route") {
         await compileModuleGraph(routeResult.route.page, {
@@ -158,7 +213,26 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         }
       }
 
-      const response = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
+      let response = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
+
+      if (routeResult.type === "route") {
+        response = applyRouteCacheHeaders(response, routeResult.cachePolicy);
+        if (routeResult.cachePolicy.mode !== "dynamic" && response.status === 200) {
+          await responseCacheStore.put(
+            routeResult.cacheKey,
+            createCachedRouteResponse(response, routeResult.cachePolicy),
+          );
+          response.headers = {
+            ...response.headers,
+            "x-nextsx-cache": "MISS",
+          };
+        } else {
+          response.headers = {
+            ...response.headers,
+            "x-nextsx-cache": "SKIP",
+          };
+        }
+      }
 
       res.writeHead(response.status, response.headers);
       res.end(response.body);

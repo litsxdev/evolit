@@ -16,6 +16,20 @@ let baseUrl;
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 const cardBadgeSpecialPngFile = "card badge@2x.png";
 
+function createCounterPageSource(cacheExport, counterKey, label) {
+  return [
+    cacheExport,
+    "globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0 };",
+    "",
+    `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page() {`,
+    `  globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
+    `  const value = globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey};`,
+    `  return \`<main data-cache-label="${label}" data-cache-value="\${value}">${label}:\${value}</main>\`;`,
+    "}",
+    "",
+  ].join("\n");
+}
+
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
     const socket = net.createServer();
@@ -111,6 +125,36 @@ before(async () => {
       "}",
       "",
     ].join("\n"),
+    "utf8",
+  );
+  await fs.mkdir(path.join(fixtureRoot, "app", "cached-static"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "cached-dynamic"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "cached-revalidate"), { recursive: true });
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "cached-static", "page.litsx"),
+    createCounterPageSource(
+      'export const routeConfig = { cache: "static" };',
+      "static",
+      "static",
+    ),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "cached-dynamic", "page.litsx"),
+    createCounterPageSource(
+      'export const routeConfig = { cache: "dynamic" };',
+      "dynamic",
+      "dynamic",
+    ),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "cached-revalidate", "page.litsx"),
+    createCounterPageSource(
+      "export const routeConfig = { cache: { revalidate: 1 } };",
+      "revalidate",
+      "revalidate",
+    ),
     "utf8",
   );
   const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
@@ -217,4 +261,50 @@ test("non-hydrated route omits the generated hydration bootstrap", async () => {
   assert.doesNotMatch(html, /registerHydrationModules/);
   assert.doesNotMatch(html, /await hydratePage\(\)/);
   assert.doesNotMatch(html, /id="__LITSX_HYDRATION__"/);
+});
+
+test("dev server caches static routes across requests", async () => {
+  const firstResponse = await fetch(`${baseUrl}/cached-static`);
+  const firstHtml = await firstResponse.text();
+  const secondResponse = await fetch(`${baseUrl}/cached-static`);
+  const secondHtml = await secondResponse.text();
+
+  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.match(firstHtml, /static:1/);
+  assert.equal(secondHtml, firstHtml);
+});
+
+test("dev server keeps dynamic routes uncached", async () => {
+  const firstResponse = await fetch(`${baseUrl}/cached-dynamic`);
+  const firstHtml = await firstResponse.text();
+  const secondResponse = await fetch(`${baseUrl}/cached-dynamic`);
+  const secondHtml = await secondResponse.text();
+
+  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "SKIP");
+  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "SKIP");
+  assert.match(firstHtml, /dynamic:1/);
+  assert.match(secondHtml, /dynamic:2/);
+});
+
+test("dev server revalidates cached routes after the configured ttl", async () => {
+  const firstResponse = await fetch(`${baseUrl}/cached-revalidate`);
+  const firstHtml = await firstResponse.text();
+  const secondResponse = await fetch(`${baseUrl}/cached-revalidate`);
+  const secondHtml = await secondResponse.text();
+
+  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.equal(secondHtml, firstHtml);
+
+  await new Promise((resolve) => {
+    setTimeout(resolve, 1100);
+  });
+
+  const thirdResponse = await fetch(`${baseUrl}/cached-revalidate`);
+  const thirdHtml = await thirdResponse.text();
+
+  assert.equal(thirdResponse.headers.get("x-nextsx-cache"), "MISS");
+  assert.match(firstHtml, /revalidate:1/);
+  assert.match(thirdHtml, /revalidate:2/);
 });
