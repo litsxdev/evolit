@@ -13,6 +13,7 @@ const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 let fixtureRoot;
 let server;
 let baseUrl;
+const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
@@ -59,13 +60,23 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", "card-badge.png"),
+    Buffer.from(cardBadgePngBase64, "base64"),
+  );
+  await fs.writeFile(
     path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
     [
       'import "./card-accent.css";',
       'import accentIcon from "./card-accent.svg";',
+      'import badgeIcon from "./card-badge.png";',
       "",
       "export default function CardAccent() {",
-      '  return <img src={accentIcon} className="card-accent" alt="" />;',
+      "  return (",
+      '    <span className="card-accent-wrap">',
+      '      <img src={accentIcon} className="card-accent" alt="" />',
+      '      <img src={badgeIcon} className="card-badge" alt="" />',
+      "    </span>",
+      "  );",
       "}",
       "",
     ].join("\n"),
@@ -78,8 +89,12 @@ before(async () => {
       "  display: inline-block;",
       "  width: 10px;",
       "  height: 10px;",
-      "  border-radius: 999px;",
       "  background: #ef9459;",
+      "}",
+      "",
+      ".card-badge {",
+      "  width: 6px;",
+      "  height: 6px;",
       "}",
       "",
     ].join("\n"),
@@ -156,6 +171,15 @@ test("dev server serves imported static svg assets", async () => {
   assert.equal(response.headers.get("content-type"), "image/svg+xml");
   assert.match(svg, /<svg/);
   assert.match(svg, /circle/);
+});
+
+test("dev server serves imported static png assets", async () => {
+  const response = await fetch(`${baseUrl}/_nextsx/client/app/components/card-badge.png`);
+  const pngBase64 = Buffer.from(await response.arrayBuffer()).toString("base64");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.equal(pngBase64, cardBadgePngBase64);
 });
 
 test("non-hydrated route omits the generated hydration bootstrap", async () => {

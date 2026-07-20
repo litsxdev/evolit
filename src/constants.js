@@ -20,6 +20,17 @@ export const MODULE_EXTENSIONS = [
 export const STATIC_ASSET_EXTENSIONS = [
   ".css",
   ".svg",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".ico",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
 ];
 
 export const CLIENT_ASSET_MANIFEST_VERSION = 1;

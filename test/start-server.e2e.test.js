@@ -15,6 +15,7 @@ let fixtureRoot;
 let server;
 let baseUrl;
 let buildManifest;
+const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
@@ -60,13 +61,23 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", "card-badge.png"),
+    Buffer.from(cardBadgePngBase64, "base64"),
+  );
+  await fs.writeFile(
     path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
     [
       'import "./card-accent.css";',
       'import accentIcon from "./card-accent.svg";',
+      'import badgeIcon from "./card-badge.png";',
       "",
       "export default function CardAccent() {",
-      '  return <img src={accentIcon} alt="" style={{ display: "inline-block", width: "10px", height: "10px" }} />;',
+      "  return (",
+      '    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>',
+      '      <img src={accentIcon} alt="" style={{ display: "inline-block", width: "10px", height: "10px" }} />',
+      '      <img src={badgeIcon} alt="" style={{ display: "inline-block", width: "6px", height: "6px" }} />',
+      "    </span>",
+      "  );",
       "}",
       "",
     ].join("\n"),
@@ -163,12 +174,16 @@ test("build manifest classifies entry and chunk client assets with structured me
   const cardAccentSvgAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-accent.svg",
   );
+  const cardBadgePngAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-badge.png",
+  );
 
   assert.ok(featureCardAsset);
   assert.ok(cardAccentAsset);
   assert.ok(homePageAsset);
   assert.ok(cardAccentStyleAsset);
   assert.ok(cardAccentSvgAsset);
+  assert.ok(cardBadgePngAsset);
   assert.equal(featureCardAsset.kind, "chunk");
   assert.equal(cardAccentAsset.kind, "chunk");
   assert.equal(homePageAsset.kind, "entry");
@@ -176,6 +191,8 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.equal(cardAccentStyleAsset.type, "style");
   assert.equal(cardAccentSvgAsset.kind, "asset");
   assert.equal(cardAccentSvgAsset.type, "asset");
+  assert.equal(cardBadgePngAsset.kind, "asset");
+  assert.equal(cardBadgePngAsset.type, "asset");
   assert.equal(buildManifest.clientAssets.version, 1);
   assert.equal(buildManifest.clientAssets.publicPathPrefix, "/_nextsx/static/");
   assert.equal(typeof homePageAsset.hash, "string");
@@ -186,6 +203,7 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.equal(buildManifest.clientAssets.chunks.includes("app/components/feature-card.mjs"), true);
   assert.equal(buildManifest.clientAssets.styles.includes("app/components/card-accent.css"), true);
   assert.equal(buildManifest.clientAssets.resources.includes("app/components/card-accent.svg"), true);
+  assert.equal(buildManifest.clientAssets.resources.includes("app/components/card-badge.png"), true);
 });
 
 test("start server serves hashed client asset files", async () => {
@@ -219,6 +237,21 @@ test("start server serves hashed static svg assets", async () => {
   assert.match(svg, /circle/);
 });
 
+test("start server serves hashed static png assets", async () => {
+  const pngAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-badge.png",
+  );
+
+  assert.ok(pngAsset);
+
+  const response = await fetch(`${baseUrl}${pngAsset.publicUrl}`);
+  const pngBase64 = Buffer.from(await response.arrayBuffer()).toString("base64");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.equal(pngBase64, cardBadgePngBase64);
+});
+
 test("start server emits hashed modulepreload links that match the asset manifest", async () => {
   const response = await fetch(`${baseUrl}/`);
   const html = await response.text();
@@ -234,11 +267,15 @@ test("start server emits hashed modulepreload links that match the asset manifes
   const cardAccentSvgAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-accent.svg",
   );
+  const cardBadgePngAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-badge.png",
+  );
 
   assert.ok(featureCardAsset);
   assert.ok(cardAccentAsset);
   assert.ok(cardAccentStyleAsset);
   assert.ok(cardAccentSvgAsset);
+  assert.ok(cardBadgePngAsset);
   assert.match(
     html,
     new RegExp(
@@ -261,8 +298,14 @@ test("start server emits hashed modulepreload links that match the asset manifes
   assert.deepEqual(featureCardAsset.importUrls, [cardAccentAsset.publicUrl]);
   assert.deepEqual(cardAccentAsset.styleImports, ["app/components/card-accent.css"]);
   assert.deepEqual(cardAccentAsset.styleUrls, [cardAccentStyleAsset.publicUrl]);
-  assert.deepEqual(cardAccentAsset.assetImports, ["app/components/card-accent.svg"]);
-  assert.deepEqual(cardAccentAsset.assetUrls, [cardAccentSvgAsset.publicUrl]);
+  assert.deepEqual(cardAccentAsset.assetImports, [
+    "app/components/card-accent.svg",
+    "app/components/card-badge.png",
+  ]);
+  assert.deepEqual(cardAccentAsset.assetUrls, [
+    cardAccentSvgAsset.publicUrl,
+    cardBadgePngAsset.publicUrl,
+  ]);
 });
 
 test("start server omits hashed hydration preload output for non-hydrated routes", async () => {

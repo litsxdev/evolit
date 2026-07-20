@@ -319,19 +319,21 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
       continue;
     }
     const relativePath = path.relative(clientRoot, filePath);
-    const source = await fs.readFile(filePath, "utf8");
+    const buffer = await fs.readFile(filePath);
+    const type = getAssetType(relativePath);
     assetEntries.push({
       filePath,
       relativePath,
-      source,
-      type: getAssetType(relativePath),
+      buffer,
+      type,
+      source: type === "script" ? buffer.toString("utf8") : null,
     });
   }
 
   for (const entry of assetEntries) {
     const hash = crypto
       .createHash("sha1")
-      .update(entry.source)
+      .update(entry.buffer)
       .digest("hex")
       .slice(0, 8);
     const hashedRelativePath = createHashedModulePath(entry.relativePath, hash);
@@ -398,7 +400,11 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
         .map((value) => `/_nextsx/static/${value.split(path.sep).join("/")}`);
     }
     await ensureDirectory(path.dirname(outputPath));
-    await fs.writeFile(outputPath, rewrittenSource, "utf8");
+    await fs.writeFile(
+      outputPath,
+      entry.type === "script" ? rewrittenSource : entry.buffer,
+      entry.type === "script" ? "utf8" : undefined,
+    );
 
     const publicUrl = `/_nextsx/static/${hashedRelativePath.split(path.sep).join("/")}`;
     const hash = path.basename(hashedRelativePath).match(/\.([a-f0-9]{8})\.[^.]+$/)?.[1] ?? null;
@@ -407,7 +413,9 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
       : entry.type === "asset"
         ? "asset"
         : entryClientModules.has(clientModule) ? "entry" : "chunk";
-    const size = Buffer.byteLength(rewrittenSource, "utf8");
+    const size = entry.type === "script"
+      ? Buffer.byteLength(rewrittenSource, "utf8")
+      : entry.buffer.byteLength;
 
     byClientModule[clientModule] = publicUrl;
     byPublicPath[publicUrl] = outputPath;
