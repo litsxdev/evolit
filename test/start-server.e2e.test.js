@@ -50,12 +50,23 @@ before(async () => {
     "dir",
   );
   await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", "card-accent.svg"),
+    [
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">',
+      '  <circle cx="5" cy="5" r="5" fill="#ef9459" />',
+      "</svg>",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
     path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
     [
       'import "./card-accent.css";',
+      'import accentIcon from "./card-accent.svg";',
       "",
       "export default function CardAccent() {",
-      '  return <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "999px", background: "#ef9459" }} />;',
+      '  return <img src={accentIcon} alt="" style={{ display: "inline-block", width: "10px", height: "10px" }} />;',
       "}",
       "",
     ].join("\n"),
@@ -149,16 +160,22 @@ test("build manifest classifies entry and chunk client assets with structured me
   const cardAccentStyleAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-accent.css",
   );
+  const cardAccentSvgAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-accent.svg",
+  );
 
   assert.ok(featureCardAsset);
   assert.ok(cardAccentAsset);
   assert.ok(homePageAsset);
   assert.ok(cardAccentStyleAsset);
+  assert.ok(cardAccentSvgAsset);
   assert.equal(featureCardAsset.kind, "chunk");
   assert.equal(cardAccentAsset.kind, "chunk");
   assert.equal(homePageAsset.kind, "entry");
   assert.equal(cardAccentStyleAsset.kind, "style");
   assert.equal(cardAccentStyleAsset.type, "style");
+  assert.equal(cardAccentSvgAsset.kind, "asset");
+  assert.equal(cardAccentSvgAsset.type, "asset");
   assert.equal(buildManifest.clientAssets.version, 1);
   assert.equal(buildManifest.clientAssets.publicPathPrefix, "/_nextsx/static/");
   assert.equal(typeof homePageAsset.hash, "string");
@@ -168,6 +185,7 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.equal(buildManifest.clientAssets.entries.includes("app/page.mjs"), true);
   assert.equal(buildManifest.clientAssets.chunks.includes("app/components/feature-card.mjs"), true);
   assert.equal(buildManifest.clientAssets.styles.includes("app/components/card-accent.css"), true);
+  assert.equal(buildManifest.clientAssets.resources.includes("app/components/card-accent.svg"), true);
 });
 
 test("start server serves hashed client asset files", async () => {
@@ -185,6 +203,22 @@ test("start server serves hashed client asset files", async () => {
   assert.match(source, /card-accent\.[a-f0-9]{8}\.mjs/);
 });
 
+test("start server serves hashed static svg assets", async () => {
+  const svgAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-accent.svg",
+  );
+
+  assert.ok(svgAsset);
+
+  const response = await fetch(`${baseUrl}${svgAsset.publicUrl}`);
+  const svg = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/svg+xml");
+  assert.match(svg, /<svg/);
+  assert.match(svg, /circle/);
+});
+
 test("start server emits hashed modulepreload links that match the asset manifest", async () => {
   const response = await fetch(`${baseUrl}/`);
   const html = await response.text();
@@ -197,10 +231,14 @@ test("start server emits hashed modulepreload links that match the asset manifes
   const cardAccentStyleAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-accent.css",
   );
+  const cardAccentSvgAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/card-accent.svg",
+  );
 
   assert.ok(featureCardAsset);
   assert.ok(cardAccentAsset);
   assert.ok(cardAccentStyleAsset);
+  assert.ok(cardAccentSvgAsset);
   assert.match(
     html,
     new RegExp(
@@ -223,6 +261,8 @@ test("start server emits hashed modulepreload links that match the asset manifes
   assert.deepEqual(featureCardAsset.importUrls, [cardAccentAsset.publicUrl]);
   assert.deepEqual(cardAccentAsset.styleImports, ["app/components/card-accent.css"]);
   assert.deepEqual(cardAccentAsset.styleUrls, [cardAccentStyleAsset.publicUrl]);
+  assert.deepEqual(cardAccentAsset.assetImports, ["app/components/card-accent.svg"]);
+  assert.deepEqual(cardAccentAsset.assetUrls, [cardAccentSvgAsset.publicUrl]);
 });
 
 test("start server omits hashed hydration preload output for non-hydrated routes", async () => {

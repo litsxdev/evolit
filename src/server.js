@@ -30,6 +30,10 @@ function getContentType(filePath) {
     return "text/css; charset=utf-8";
   }
 
+  if (filePath.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+
   return "text/javascript; charset=utf-8";
 }
 

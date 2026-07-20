@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { discoverAppRoutes } from "./app-discovery.js";
 import { compileModuleGraph } from "./compiler.js";
-import { emitHashedClientAssets } from "./client-assets.js";
+import { emitHashedClientAssets, rewriteServerAssetPlaceholders } from "./client-assets.js";
 import {
   BUILD_DIRECTORY,
   INTERNAL_DIRECTORY,
@@ -60,6 +60,7 @@ export async function buildProject(projectRoot) {
   const clientAssets = await emitHashedClientAssets(projectRoot, {
     entryClientModules,
   });
+  await rewriteServerAssetPlaceholders(projectRoot, clientAssets);
 
   const manifestPath = path.join(buildRoot, MANIFEST_FILENAME);
   await writeJson(manifestPath, {

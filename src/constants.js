@@ -19,6 +19,7 @@ export const MODULE_EXTENSIONS = [
 
 export const STATIC_ASSET_EXTENSIONS = [
   ".css",
+  ".svg",
 ];
 
 export const CLIENT_ASSET_MANIFEST_VERSION = 1;

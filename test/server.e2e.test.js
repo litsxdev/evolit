@@ -49,12 +49,23 @@ before(async () => {
     "dir",
   );
   await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", "card-accent.svg"),
+    [
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">',
+      '  <circle cx="5" cy="5" r="5" fill="#ef9459" />',
+      "</svg>",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
     path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
     [
       'import "./card-accent.css";',
+      'import accentIcon from "./card-accent.svg";',
       "",
       "export default function CardAccent() {",
-      '  return <span className="card-accent" />;',
+      '  return <img src={accentIcon} className="card-accent" alt="" />;',
       "}",
       "",
     ].join("\n"),
@@ -135,6 +146,16 @@ test("dev server serves imported client css assets", async () => {
   assert.equal(response.headers.get("content-type"), "text/css; charset=utf-8");
   assert.match(css, /\.card-accent/);
   assert.match(css, /background: #ef9459/);
+});
+
+test("dev server serves imported static svg assets", async () => {
+  const response = await fetch(`${baseUrl}/_nextsx/client/app/components/card-accent.svg`);
+  const svg = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/svg+xml");
+  assert.match(svg, /<svg/);
+  assert.match(svg, /circle/);
 });
 
 test("non-hydrated route omits the generated hydration bootstrap", async () => {

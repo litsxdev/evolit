@@ -28,6 +28,23 @@ function isStaticAssetPath(filePath) {
   return STATIC_ASSET_EXTENSIONS.some((extension) => filePath.endsWith(extension));
 }
 
+function isStyleAssetPath(filePath) {
+  return filePath.endsWith(".css");
+}
+
+function createStaticAssetStubSource(relativeAssetPath, mode) {
+  const normalizedAssetPath = relativeAssetPath.split(path.sep).join("/");
+  if (normalizedAssetPath.endsWith(".css")) {
+    return "export default {};\n";
+  }
+
+  if (mode === "development") {
+    return `export default "/_nextsx/client/${normalizedAssetPath}";\n`;
+  }
+
+  return `export default "__NEXTSX_ASSET_URL__:${normalizedAssetPath}";\n`;
+}
+
 async function resolveImportPath(importerPath, specifier) {
   const basePath = path.resolve(path.dirname(importerPath), specifier);
   const candidates = [basePath];
@@ -86,6 +103,7 @@ async function rewriteRelativeSpecifiers({
   code,
   compileModule,
   moduleMetadata,
+  mode,
   target,
 }) {
   let rewrittenCode = "";
@@ -113,15 +131,24 @@ async function rewriteRelativeSpecifiers({
       const stubOutputPath = `${assetOutputPath}.mjs`;
 
       await ensureDirectory(path.dirname(stubOutputPath));
-      await fs.writeFile(stubOutputPath, "export default {};\n", "utf8");
+      await fs.writeFile(
+        stubOutputPath,
+        createStaticAssetStubSource(relativeAssetPath, mode),
+        "utf8",
+      );
 
       if (target === "client") {
         await ensureDirectory(path.dirname(assetOutputPath));
         await fs.copyFile(resolvedImportPath, assetOutputPath);
         const sourceMetadata = moduleMetadata.get(sourcePath) ?? {
           styleImports: new Set(),
+          assetImports: new Set(),
         };
-        sourceMetadata.styleImports.add(relativeAssetPath.split(path.sep).join("/"));
+        if (isStyleAssetPath(resolvedImportPath)) {
+          sourceMetadata.styleImports.add(relativeAssetPath.split(path.sep).join("/"));
+        } else {
+          sourceMetadata.assetImports.add(relativeAssetPath.split(path.sep).join("/"));
+        }
         moduleMetadata.set(sourcePath, sourceMetadata);
       }
 
@@ -183,6 +210,7 @@ export async function compileModuleGraph(entryPath, options = {}) {
       code: transformed.code,
       compileModule,
       moduleMetadata,
+      mode,
       target,
     });
 
@@ -193,7 +221,8 @@ export async function compileModuleGraph(entryPath, options = {}) {
         await fs.writeFile(
           `${outputPath}.meta.json`,
           `${JSON.stringify({
-            styleImports: [...metadata.styleImports].sort(),
+            styleImports: [...(metadata.styleImports ?? [])].sort(),
+            assetImports: [...(metadata.assetImports ?? [])].sort(),
           }, null, 2)}\n`,
           "utf8",
         );

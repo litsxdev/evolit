@@ -8,6 +8,7 @@ import {
   CLIENT_ASSET_MANIFEST_VERSION,
   DEV_DIRECTORY,
   INTERNAL_DIRECTORY,
+  SERVER_DIRECTORY,
   STATIC_DIRECTORY,
 } from "./constants.js";
 import { ensureDirectory, walkFiles, writeJson } from "./fs-utils.js";
@@ -128,6 +129,15 @@ export function getStaticOutputRoot(projectRoot) {
   );
 }
 
+function getServerOutputRoot(projectRoot) {
+  return path.join(
+    projectRoot,
+    INTERNAL_DIRECTORY,
+    BUILD_DIRECTORY,
+    SERVER_DIRECTORY,
+  );
+}
+
 export function createAssetResolver(projectRoot, options = {}) {
   const assetManifest = normalizeClientAssetManifest(options.assetManifest);
 
@@ -208,7 +218,26 @@ function createHashedModulePath(relativePath, hash) {
 }
 
 function getAssetType(relativePath) {
-  return relativePath.endsWith(".css") ? "style" : "script";
+  if (relativePath.endsWith(".css")) {
+    return "style";
+  }
+
+  if (relativePath.endsWith(".mjs")) {
+    return "script";
+  }
+
+  return "asset";
+}
+
+function replaceStaticAssetPlaceholders(source, publicPathByRelativePath) {
+  return source.replaceAll(/__NEXTSX_ASSET_URL__:([A-Za-z0-9._/-]+)/g, (match, relativeAssetPath) => {
+    const rewrittenTarget = publicPathByRelativePath.get(relativeAssetPath);
+    if (!rewrittenTarget) {
+      return match;
+    }
+
+    return `/_nextsx/static/${rewrittenTarget.split(path.sep).join("/")}`;
+  });
 }
 
 function normalizeRelativeImportPath(value) {
@@ -315,9 +344,12 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
 
   for (const entry of assetEntries) {
     const rewrittenSource = entry.type === "script"
-      ? rewriteRelativeClientImports(
+      ? replaceStaticAssetPlaceholders(
+        rewriteRelativeClientImports(
         entry.source,
         entry.relativePath,
+        publicPathByRelativePath,
+        ),
         publicPathByRelativePath,
       )
       : entry.source;
@@ -345,15 +377,23 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
       .filter((value) => typeof value === "string");
     let styleImports = [];
     let styleUrls = [];
+    let assetImports = [];
+    let assetUrls = [];
     if (entry.type === "script") {
       try {
         const metadata = JSON.parse(await fs.readFile(`${entry.filePath}.meta.json`, "utf8"));
         styleImports = Array.isArray(metadata?.styleImports) ? metadata.styleImports : [];
+        assetImports = Array.isArray(metadata?.assetImports) ? metadata.assetImports : [];
       } catch {
         styleImports = [];
+        assetImports = [];
       }
       styleUrls = styleImports
         .map((importedStyle) => publicPathByRelativePath.get(importedStyle))
+        .filter((value) => typeof value === "string")
+        .map((value) => `/_nextsx/static/${value.split(path.sep).join("/")}`);
+      assetUrls = assetImports
+        .map((importedAsset) => publicPathByRelativePath.get(importedAsset))
         .filter((value) => typeof value === "string")
         .map((value) => `/_nextsx/static/${value.split(path.sep).join("/")}`);
     }
@@ -364,7 +404,9 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
     const hash = path.basename(hashedRelativePath).match(/\.([a-f0-9]{8})\.[^.]+$/)?.[1] ?? null;
     const kind = entry.type === "style"
       ? "style"
-      : entryClientModules.has(clientModule) ? "entry" : "chunk";
+      : entry.type === "asset"
+        ? "asset"
+        : entryClientModules.has(clientModule) ? "entry" : "chunk";
     const size = Buffer.byteLength(rewrittenSource, "utf8");
 
     byClientModule[clientModule] = publicUrl;
@@ -381,6 +423,8 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
       importUrls: importedPublicUrls,
       styleImports,
       styleUrls,
+      assetImports,
+      assetUrls,
     });
   }
 
@@ -396,6 +440,10 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
     .filter((asset) => asset.type === "style")
     .map((asset) => asset.clientModule)
     .sort();
+  const resources = assets
+    .filter((asset) => asset.type === "asset")
+    .map((asset) => asset.clientModule)
+    .sort();
 
   const manifest = {
     version: CLIENT_ASSET_MANIFEST_VERSION,
@@ -405,11 +453,40 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
     entries,
     chunks,
     styles,
+    resources,
     assets: assets.sort((left, right) => left.clientModule.localeCompare(right.clientModule)),
   };
 
   await writeJson(path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY, "client-assets.json"), manifest);
   return manifest;
+}
+
+export async function rewriteServerAssetPlaceholders(projectRoot, assetManifest) {
+  const normalizedManifest = normalizeClientAssetManifest(assetManifest);
+  if (!normalizedManifest) {
+    return;
+  }
+
+  const serverRoot = getServerOutputRoot(projectRoot);
+  const serverFiles = await walkFiles(serverRoot);
+  const assetUrlByClientModule = new Map(
+    normalizedManifest.assets.map((asset) => [asset.clientModule, asset.publicUrl]),
+  );
+
+  for (const filePath of serverFiles) {
+    if (!filePath.endsWith(".mjs")) {
+      continue;
+    }
+
+    const source = await fs.readFile(filePath, "utf8");
+    const rewritten = source.replaceAll(/__NEXTSX_ASSET_URL__:([A-Za-z0-9._/-]+)/g, (match, relativeAssetPath) => {
+      return assetUrlByClientModule.get(relativeAssetPath) ?? match;
+    });
+
+    if (rewritten !== source) {
+      await fs.writeFile(filePath, rewritten, "utf8");
+    }
+  }
 }
 
 export function collectTransitiveAssetPreloads(publicUrls, assetManifest) {
