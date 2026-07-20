@@ -84,11 +84,13 @@ document for each route. That gives the framework:
 
 - LitSX-authored SSR rendering
 - framework-owned metadata to document-shell mapping
+- LitSX-owned hydratable module registration through `@litsx/ssr/hydration`
 - a stable internal adapter boundary for future evolution
 
 The remaining SSR work in `nextsx` is mostly framework-specific:
 
-- client asset pipeline and hydration story
+- client asset pipeline and public client URL resolution
+- minimal framework bootstrap assembly around LitSX hydration primitives
 - asset resolution into public browser URLs
 - richer metadata and head management
 - streaming responses

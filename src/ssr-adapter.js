@@ -100,14 +100,16 @@ export function createSsrAdapter(options = {}) {
         template: options.template,
       });
 
-      const generatedClientEntry =
-        typeof options.resolveClientEntry === "function"
-          ? await options.resolveClientEntry({ routeResult, result })
-          : null;
+      const generatedBootstrap =
+        !options.bootstrap && !options.clientEntry && typeof options.resolveBootstrap === "function"
+          ? await options.resolveBootstrap({ routeResult, result })
+          : "";
 
-      if (generatedClientEntry && !options.bootstrap && !options.clientEntry) {
+      if (generatedBootstrap) {
         const bootstrapMarkup = renderBootstrap({
-          clientEntry: generatedClientEntry,
+          bootstrap: {
+            content: generatedBootstrap,
+          },
         });
         const documentWithBootstrap = result.document.replace(
           "</body>",

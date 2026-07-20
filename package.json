@@ -28,9 +28,9 @@
     "node": ">=20.19.5"
   },
   "dependencies": {
-    "@litsx/compiler": "canary-feat-ssr",
-    "@litsx/core": "canary-feat-ssr",
-    "@litsx/ssr": "canary-feat-ssr",
+    "@litsx/compiler": "0.9.5-canary-feat-ssr-20260720145007",
+    "@litsx/core": "0.17.0-canary-feat-ssr-20260720145007",
+    "@litsx/ssr": "0.2.0-canary-feat-ssr-20260720145007",
     "@litsx/typescript": "^0.9.0",
     "lit": "^3.3.3"
   },
