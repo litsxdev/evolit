@@ -13,6 +13,7 @@
     "dev": "node ./src/cli.js dev",
     "build": "node ./src/cli.js build",
     "start": "node ./src/cli.js start",
+    "test": "node --test",
     "typecheck": "litsx-tsc -p jsconfig.json --noEmit"
   },
   "keywords": [

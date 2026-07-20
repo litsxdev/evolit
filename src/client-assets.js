@@ -1,7 +1,10 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
+  BUILD_DIRECTORY,
   CLIENT_DIRECTORY,
+  DEV_DIRECTORY,
   INTERNAL_DIRECTORY,
 } from "./constants.js";
 
