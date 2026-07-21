@@ -4,11 +4,11 @@ import path from "node:path";
 import { createRouteResolver } from "./render.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 import { compileModuleGraph } from "./compiler.js";
+import { loadNextsxConfig } from "./config.js";
 import {
   BUILD_DIRECTORY,
   INTERNAL_DIRECTORY,
   MANIFEST_FILENAME,
-  ROUTE_CACHE_DIRECTORY,
 } from "./constants.js";
 import {
   createAssetResolver,
@@ -24,10 +24,10 @@ import {
 import { pathExists, readJson } from "./fs-utils.js";
 import { createRequire } from "node:module";
 import {
+  createDefaultRouteCacheKey,
   createCachedRouteResponse,
-  FileSystemResponseCacheStore,
   isCachedRouteResponseFresh,
-  MemoryResponseCacheStore,
+  resolveResponseCacheRuntime,
 } from "./response-cache.js";
 
 const requireFromHere = createRequire(import.meta.url);
@@ -71,16 +71,6 @@ async function sendFileResponse(res, filePath, contentType = getContentType(file
   res.end(body);
 }
 
-function getDefaultResponseCacheStore(projectRoot, mode) {
-  if (mode === "development") {
-    return new MemoryResponseCacheStore();
-  }
-
-  return new FileSystemResponseCacheStore(
-    path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY, ROUTE_CACHE_DIRECTORY),
-  );
-}
-
 function applyRouteCacheHeaders(response, cachePolicy) {
   const headers = { ...(response.headers ?? {}) };
 
@@ -99,12 +89,18 @@ function applyRouteCacheHeaders(response, cachePolicy) {
 }
 
 async function createServer(projectRoot, mode, explicitPort, options = {}) {
+  const nextsxConfig = options.nextsxConfig ?? await loadNextsxConfig(projectRoot);
   const assetManifest = normalizeClientAssetManifest(options.assetManifest);
   const routeResolver = await createRouteResolver(projectRoot, mode);
   const assetResolver = createAssetResolver(projectRoot, {
     assetManifest,
   });
-  const responseCacheStore = options.responseCacheStore ?? getDefaultResponseCacheStore(projectRoot, mode);
+  const responseCacheRuntime = options.responseCacheStore
+    ? {
+      store: options.responseCacheStore,
+      createKey: options.createResponseCacheKey ?? (({ request }) => createDefaultRouteCacheKey(request)),
+    }
+    : await resolveResponseCacheRuntime(projectRoot, mode, nextsxConfig);
   const frameworkImportMap = await createFrameworkImportMap();
   const importMapMarkup = `<script type="importmap">${JSON.stringify(frameworkImportMap)}</script>`;
   const ssrAdapter = createSsrAdapter({
@@ -176,7 +172,11 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       const routePolicyResult = await routeResolver.resolveRoutePolicy(request);
 
       if (routePolicyResult.type === "route" && routePolicyResult.cachePolicy.mode !== "dynamic") {
-        const cachedResponse = await responseCacheStore.get(routePolicyResult.cacheKey);
+        const cacheKey = await responseCacheRuntime.createKey({
+          request,
+          routeResult: routePolicyResult,
+        });
+        const cachedResponse = await responseCacheRuntime.store.get(cacheKey);
         if (isCachedRouteResponseFresh(cachedResponse)) {
           const response = applyRouteCacheHeaders({
             status: cachedResponse.status,
@@ -218,8 +218,12 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       if (routeResult.type === "route") {
         response = applyRouteCacheHeaders(response, routeResult.cachePolicy);
         if (routeResult.cachePolicy.mode !== "dynamic" && response.status === 200) {
-          await responseCacheStore.put(
-            routeResult.cacheKey,
+          const cacheKey = await responseCacheRuntime.createKey({
+            request,
+            routeResult,
+          });
+          await responseCacheRuntime.store.put(
+            cacheKey,
             createCachedRouteResponse(response, routeResult.cachePolicy),
           );
           response.headers = {

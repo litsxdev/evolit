@@ -49,7 +49,7 @@ export async function scaffoldSite(targetDirectory, options = {}) {
   await writeSitePackageJson(absoluteTargetDirectory, siteName);
   await fs.writeFile(
     path.join(absoluteTargetDirectory, "nextsx.config.js"),
-    `export default {\n  // Reserved for framework configuration.\n  // Client asset and hydration configuration will land here.\n};\n`,
+    `export default {\n  // Reserved for framework configuration.\n  // Response cache adapters and deployment-specific runtime hooks can live here.\n};\n`,
     "utf8",
   );
 

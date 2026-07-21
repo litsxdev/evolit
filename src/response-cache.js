@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import path from "node:path";
+import { BUILD_DIRECTORY, INTERNAL_DIRECTORY, ROUTE_CACHE_DIRECTORY } from "./constants.js";
 import { ensureDirectory, pathExists, readJson, writeJson } from "./fs-utils.js";
 
 function createCacheFileName(cacheKey) {
@@ -91,4 +92,54 @@ export class FileSystemResponseCacheStore {
       await fs.unlink(filePath);
     }
   }
+}
+
+export function createDefaultRouteCacheKey(request) {
+  return new URL(request.url).pathname;
+}
+
+export function createDefaultResponseCacheStore(projectRoot, mode) {
+  if (mode === "development") {
+    return new MemoryResponseCacheStore();
+  }
+
+  return new FileSystemResponseCacheStore(
+    path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY, ROUTE_CACHE_DIRECTORY),
+  );
+}
+
+function isResponseCacheStore(value) {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    typeof value.get === "function" &&
+    typeof value.put === "function"
+  );
+}
+
+export async function resolveResponseCacheRuntime(projectRoot, mode, nextsxConfig = {}) {
+  const defaultStore = createDefaultResponseCacheStore(projectRoot, mode);
+  const responseCacheConfig = nextsxConfig?.responseCache ?? {};
+
+  let store = defaultStore;
+  if (typeof responseCacheConfig?.createStore === "function") {
+    store = await responseCacheConfig.createStore({
+      projectRoot,
+      mode,
+      defaultStore,
+    });
+  }
+
+  if (!isResponseCacheStore(store)) {
+    throw new Error("Expected responseCache.createStore() to return an object with get() and put() methods.");
+  }
+
+  const createKey = typeof responseCacheConfig?.createKey === "function"
+    ? responseCacheConfig.createKey
+    : ({ request }) => createDefaultRouteCacheKey(request);
+
+  return {
+    store,
+    createKey,
+  };
 }

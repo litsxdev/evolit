@@ -11,19 +11,20 @@ import {
   rewriteServerAssetPlaceholders,
 } from "./client-assets.js";
 import { compileModuleGraph } from "./compiler.js";
+import { loadNextsxConfig } from "./config.js";
 import {
   BUILD_DIRECTORY,
   INTERNAL_DIRECTORY,
   MANIFEST_FILENAME,
-  ROUTE_CACHE_DIRECTORY,
 } from "./constants.js";
 import { createRouteResolver } from "./render.js";
-import { createCachedRouteResponse, FileSystemResponseCacheStore } from "./response-cache.js";
+import { createCachedRouteResponse, resolveResponseCacheRuntime } from "./response-cache.js";
 import { serializeRouteCachePolicy } from "./route-config.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 import { ensureDirectory, writeJson } from "./fs-utils.js";
 
 export async function buildProject(projectRoot) {
+  const nextsxConfig = await loadNextsxConfig(projectRoot);
   const routes = await discoverAppRoutes(projectRoot);
   const buildRoot = path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY);
   const entryClientModules = new Set();
@@ -104,9 +105,7 @@ export async function buildProject(projectRoot) {
       });
     },
   });
-  const responseCacheStore = new FileSystemResponseCacheStore(
-    path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY, ROUTE_CACHE_DIRECTORY),
-  );
+  const responseCacheRuntime = await resolveResponseCacheRuntime(projectRoot, "production", nextsxConfig);
   const prerenderedRoutes = [];
   const routeCache = [];
 
@@ -142,8 +141,11 @@ export async function buildProject(projectRoot) {
       continue;
     }
 
-    await responseCacheStore.put(
-      route.pathname,
+    await responseCacheRuntime.store.put(
+      await responseCacheRuntime.createKey({
+        request,
+        routeResult,
+      }),
       createCachedRouteResponse(response, routeResult.cachePolicy),
     );
     prerenderedRoutes.push(route.pathname);
