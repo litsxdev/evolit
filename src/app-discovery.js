@@ -29,6 +29,10 @@ function routePathFromSegments(segments) {
     .map((segment) => normalizeSegment(segment))
     .filter(Boolean)
     .map((segment) => {
+      if (segment.startsWith("[[...") && segment.endsWith("]]")) {
+        return `**${segment.slice(5, -2)}`;
+      }
+
       if (segment.startsWith("[...") && segment.endsWith("]")) {
         return `*${segment.slice(4, -1)}`;
       }
@@ -116,6 +120,13 @@ export function matchRoute(pathname, routes) {
       const routeSegment = routeSegments[index];
       const requestSegment = requestSegments[index];
 
+      if (routeSegment?.startsWith("**")) {
+        const paramName = routeSegment.slice(2);
+        const remainingSegments = requestSegments.slice(index);
+        params[paramName] = remainingSegments.length > 0 ? remainingSegments : undefined;
+        break;
+      }
+
       if (routeSegment?.startsWith("*")) {
         params[routeSegment.slice(1)] = requestSegments.slice(index);
         break;
@@ -142,7 +153,9 @@ export function matchRoute(pathname, routes) {
     }
 
     const lastSegment = routeSegments[routeSegments.length - 1] ?? null;
-    const hasCatchAll = Boolean(lastSegment?.startsWith("*"));
+    const hasCatchAll = Boolean(
+      lastSegment?.startsWith("*") || lastSegment?.startsWith("**"),
+    );
     if (!hasCatchAll && routeSegments.length !== requestSegments.length) {
       continue;
     }

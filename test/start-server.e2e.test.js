@@ -36,6 +36,15 @@ function createCounterPageSource(cacheExport, counterKey, label) {
   ].join("\n");
 }
 
+function createParamsPageSource(label, paramKey) {
+  return [
+    `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page({ params }) {`,
+    `  return \`<main data-route="${label}">${label}:\${JSON.stringify(params.${paramKey} ?? null)}</main>\`;`,
+    "}",
+    "",
+  ].join("\n");
+}
+
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
     const socket = net.createServer();
@@ -126,6 +135,9 @@ before(async () => {
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-static"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-dynamic"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-revalidate"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "blog", "[slug]"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "docs", "[...slug]"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "optional", "[[...slug]]"), { recursive: true });
   await fs.writeFile(
     path.join(fixtureRoot, "app", "cached-static", "page.litsx"),
     createCounterPageSource(
@@ -151,6 +163,21 @@ before(async () => {
       "revalidate",
       "revalidate",
     ),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "blog", "[slug]", "page.litsx"),
+    createParamsPageSource("blog", "slug"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "docs", "[...slug]", "page.litsx"),
+    createParamsPageSource("docs", "slug"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "optional", "[[...slug]]", "page.litsx"),
+    createParamsPageSource("optional", "slug"),
     "utf8",
   );
   const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
@@ -293,9 +320,12 @@ test("build manifest classifies entry and chunk client assets with structured me
     [
       { pathname: "/", cache: "dynamic" },
       { pathname: "/about", cache: "dynamic" },
+      { pathname: "/blog/:slug", cache: "dynamic" },
       { pathname: "/cached-dynamic", cache: "dynamic" },
       { pathname: "/cached-revalidate", cache: { revalidate: 1 } },
       { pathname: "/cached-static", cache: "static" },
+      { pathname: "/docs/*slug", cache: "dynamic" },
+      { pathname: "/optional/**slug", cache: "dynamic" },
     ],
   );
   assert.deepEqual(buildManifest.prerenderedRoutes, ["/cached-static"]);
@@ -321,6 +351,13 @@ test("build emits deploy route and asset manifests for external deployment pipel
         responsePath: null,
       },
       {
+        pathname: "/blog/:slug",
+        cache: "dynamic",
+        cacheKey: "/blog/:slug",
+        prerendered: false,
+        responsePath: null,
+      },
+      {
         pathname: "/cached-dynamic",
         cache: "dynamic",
         cacheKey: "/cached-dynamic",
@@ -340,6 +377,20 @@ test("build emits deploy route and asset manifests for external deployment pipel
         cacheKey: "/cached-static",
         prerendered: true,
         responsePath: deployRoutesManifest.routes.find((route) => route.pathname === "/cached-static")?.responsePath ?? null,
+      },
+      {
+        pathname: "/docs/*slug",
+        cache: "dynamic",
+        cacheKey: "/docs/*slug",
+        prerendered: false,
+        responsePath: null,
+      },
+      {
+        pathname: "/optional/**slug",
+        cache: "dynamic",
+        cacheKey: "/optional/**slug",
+        prerendered: false,
+        responsePath: null,
       },
     ],
   );
@@ -554,6 +605,34 @@ test("start server keeps dynamic routes uncached", async () => {
   assert.equal(secondResponse.headers.get("x-nextsx-cache"), "SKIP");
   assert.match(firstHtml, /dynamic:1/);
   assert.match(secondHtml, /dynamic:2/);
+});
+
+test("start server resolves single dynamic segments", async () => {
+  const response = await fetch(`${baseUrl}/blog/hello-world`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /blog:&quot;hello-world&quot;/);
+});
+
+test("start server resolves catch-all dynamic segments", async () => {
+  const response = await fetch(`${baseUrl}/docs/guides/routing/dynamic`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /docs:\[&quot;guides&quot;,&quot;routing&quot;,&quot;dynamic&quot;\]/);
+});
+
+test("start server resolves optional catch-all routes with and without trailing segments", async () => {
+  const withoutSegmentsResponse = await fetch(`${baseUrl}/optional`);
+  const withoutSegmentsHtml = await withoutSegmentsResponse.text();
+  const withSegmentsResponse = await fetch(`${baseUrl}/optional/a/b`);
+  const withSegmentsHtml = await withSegmentsResponse.text();
+
+  assert.equal(withoutSegmentsResponse.status, 200);
+  assert.match(withoutSegmentsHtml, /optional:null/);
+  assert.equal(withSegmentsResponse.status, 200);
+  assert.match(withSegmentsHtml, /optional:\[&quot;a&quot;,&quot;b&quot;\]/);
 });
 
 test("start server revalidates cached routes after the configured ttl", async () => {
