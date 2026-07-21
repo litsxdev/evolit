@@ -9,6 +9,7 @@ export const ROUTE_CACHE_DIRECTORY = "route-cache";
 export const MANIFEST_FILENAME = "manifest.json";
 export const DEPLOY_ROUTES_MANIFEST_FILENAME = "deploy-routes.json";
 export const DEPLOY_ASSETS_MANIFEST_FILENAME = "deploy-assets.json";
+export const DEPLOY_SERVER_MANIFEST_FILENAME = "deploy-server.json";
 
 export const MODULE_EXTENSIONS = [
   ".litsx",

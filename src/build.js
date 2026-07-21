@@ -16,6 +16,7 @@ import {
   BUILD_DIRECTORY,
   DEPLOY_ASSETS_MANIFEST_FILENAME,
   DEPLOY_ROUTES_MANIFEST_FILENAME,
+  DEPLOY_SERVER_MANIFEST_FILENAME,
   INTERNAL_DIRECTORY,
   MANIFEST_FILENAME,
 } from "./constants.js";
@@ -53,6 +54,56 @@ function getContentTypeForBuildArtifact(filePath) {
 
 function toBuildRelativePath(projectRoot, targetPath) {
   return path.relative(projectRoot, targetPath).split(path.sep).join("/");
+}
+
+async function writeDeploymentRuntimeEntry(buildRoot) {
+  const runtimeEntryPath = path.join(buildRoot, "runtime-entry.mjs");
+  const frameworkEntryUrl = new URL("./index.js", import.meta.url).href;
+  await fs.writeFile(
+    runtimeEntryPath,
+    [
+      'import fs from "node:fs/promises";',
+      'import path from "node:path";',
+      'import { fileURLToPath } from "node:url";',
+      "",
+      "let createDeploymentRuntime;",
+      "try {",
+      '  ({ createDeploymentRuntime } = await import("nextsx"));',
+      "} catch {",
+      `  ({ createDeploymentRuntime } = await import(${JSON.stringify(frameworkEntryUrl)}));`,
+      "}",
+      "",
+      "const buildRoot = path.dirname(fileURLToPath(import.meta.url));",
+      'const projectRoot = path.resolve(buildRoot, "..", "..");',
+      "let runtimePromise = null;",
+      "",
+      "export async function createBuiltDeploymentRuntime(options = {}) {",
+      '  const manifest = JSON.parse(await fs.readFile(path.join(buildRoot, "manifest.json"), "utf8"));',
+      "  return createDeploymentRuntime({",
+      "    projectRoot: options.projectRoot ?? projectRoot,",
+      '    mode: "production",',
+      "    assetManifest: manifest.clientAssets ?? null,",
+      "    responseCacheRuntime: options.responseCacheRuntime,",
+      "    routeResolver: options.routeResolver,",
+      "  });",
+      "}",
+      "",
+      "export async function getBuiltDeploymentRuntime(options = {}) {",
+      "  if (!runtimePromise) {",
+      "    runtimePromise = createBuiltDeploymentRuntime(options);",
+      "  }",
+      "  return runtimePromise;",
+      "}",
+      "",
+      "export async function handleRequest(request, options = {}) {",
+      "  const runtime = await getBuiltDeploymentRuntime(options);",
+      "  return runtime.handle(request);",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return runtimeEntryPath;
 }
 
 export async function buildProject(projectRoot) {
@@ -235,8 +286,19 @@ export async function buildProject(projectRoot) {
       })),
     ],
   };
-
   const manifestPath = path.join(buildRoot, MANIFEST_FILENAME);
+  const runtimeEntryPath = await writeDeploymentRuntimeEntry(buildRoot);
+  const deployServer = {
+    version: 1,
+    runtimeEntry: toBuildRelativePath(projectRoot, runtimeEntryPath),
+    exports: {
+      factory: "createBuiltDeploymentRuntime",
+      handler: "handleRequest",
+    },
+    manifestPath: toBuildRelativePath(projectRoot, manifestPath),
+    serverOutputRoot: toBuildRelativePath(projectRoot, path.join(buildRoot, "server")),
+  };
+
   await writeJson(manifestPath, {
     routes,
     routeCache: sortedRouteCache,
@@ -246,6 +308,7 @@ export async function buildProject(projectRoot) {
   });
   await writeJson(path.join(buildRoot, DEPLOY_ROUTES_MANIFEST_FILENAME), deployRoutes);
   await writeJson(path.join(buildRoot, DEPLOY_ASSETS_MANIFEST_FILENAME), deployAssets);
+  await writeJson(path.join(buildRoot, DEPLOY_SERVER_MANIFEST_FILENAME), deployServer);
 
   return manifestPath;
 }

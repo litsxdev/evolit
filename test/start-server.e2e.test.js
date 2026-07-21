@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildProject } from "../src/build.js";
 import { createStartServer } from "../src/server.js";
 import { scaffoldSite } from "../src/scaffold.js";
@@ -17,6 +17,8 @@ let baseUrl;
 let buildManifest;
 let deployRoutesManifest;
 let deployAssetsManifest;
+let deployServerManifest;
+let builtRuntimeEntry;
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 const cardBadgeSpecialPngFile = "card badge@2x.png";
 
@@ -187,6 +189,15 @@ before(async () => {
       "utf8",
     ),
   );
+  deployServerManifest = JSON.parse(
+    await fs.readFile(
+      path.join(fixtureRoot, ".nextsx", "build", "deploy-server.json"),
+      "utf8",
+    ),
+  );
+  builtRuntimeEntry = await import(
+    pathToFileURL(path.join(fixtureRoot, ".nextsx", "build", "runtime-entry.mjs")).href
+  );
 
   const port = await getAvailablePort();
   server = await createStartServer(fixtureRoot, { port });
@@ -356,6 +367,27 @@ test("build emits deploy route and asset manifests for external deployment pipel
   assert.equal(scriptAsset.contentType, "text/javascript; charset=utf-8");
   assert.equal(styleAsset.contentType, "text/css; charset=utf-8");
   assert.equal(resourceAsset.contentType, "image/svg+xml");
+});
+
+test("build emits a generic server runtime entry for external hosts", async () => {
+  assert.equal(deployServerManifest.version, 1);
+  assert.equal(deployServerManifest.runtimeEntry, ".nextsx/build/runtime-entry.mjs");
+  assert.equal(deployServerManifest.manifestPath, ".nextsx/build/manifest.json");
+  assert.equal(deployServerManifest.serverOutputRoot, ".nextsx/build/server");
+  assert.deepEqual(deployServerManifest.exports, {
+    factory: "createBuiltDeploymentRuntime",
+    handler: "handleRequest",
+  });
+  assert.equal(typeof builtRuntimeEntry.createBuiltDeploymentRuntime, "function");
+  assert.equal(typeof builtRuntimeEntry.handleRequest, "function");
+
+  const response = await builtRuntimeEntry.handleRequest(
+    new Request("http://nextsx.local/cached-static"),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers["x-nextsx-cache"], "HIT");
+  assert.match(String(response.body), /static:1/);
 });
 
 test("start server serves hashed client asset files", async () => {
