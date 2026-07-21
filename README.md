@@ -75,6 +75,125 @@ The current runtime is split into a few small layers:
 - `src/scaffold.js`: creates new site projects from templates
 - `src/cli.js`: framework entrypoint
 
+## Route Cache Policies
+
+Route modules can export a `routeConfig` object with a `cache` policy:
+
+```js
+export const routeConfig = {
+  cache: "dynamic",
+};
+```
+
+```js
+export const routeConfig = {
+  cache: "static",
+};
+```
+
+```js
+export const routeConfig = {
+  cache: { revalidate: 300 },
+};
+```
+
+`nextsx` currently normalizes those policies to:
+
+- `dynamic`: render on every request
+- `static`: prerender in `build` and serve from the response cache in `start`
+- `revalidate`: cache the HTML response for `N` seconds and regenerate on expiry
+
+The same semantics work in local development and in production runtimes. Only the backing cache
+store changes.
+
+## Response Cache Adapters
+
+By default, `nextsx` uses:
+
+- in `dev`: an in-memory response cache
+- in `start`: a filesystem-backed response cache under `.nextsx/build/route-cache`
+
+That runtime is configurable through `nextsx.config.js`:
+
+```js
+export default {
+  responseCache: {
+    async createStore({ projectRoot, mode, defaultStore }) {
+      return defaultStore;
+    },
+    createKey({ request, routeResult }) {
+      return new URL(request.url).pathname;
+    },
+  },
+};
+```
+
+The framework also exports `ObjectStorageResponseCacheStore`, which is intended for object-store
+backends such as S3. A concrete app can wire it to the AWS SDK without pulling AWS dependencies
+into `nextsx` itself.
+
+Example shape:
+
+```js
+import { ObjectStorageResponseCacheStore } from "nextsx";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+
+const s3 = new S3Client({ region: process.env.AWS_REGION });
+const bucket = process.env.NEXTSX_CACHE_BUCKET;
+
+export default {
+  responseCache: {
+    async createStore() {
+      return new ObjectStorageResponseCacheStore({
+        prefix: "routes",
+        async getObject(key) {
+          try {
+            const result = await s3.send(new GetObjectCommand({
+              Bucket: bucket,
+              Key: key,
+            }));
+            return await result.Body.transformToString();
+          } catch (error) {
+            if (error?.name === "NoSuchKey") {
+              return null;
+            }
+            throw error;
+          }
+        },
+        async putObject(key, value) {
+          await s3.send(new PutObjectCommand({
+            Bucket: bucket,
+            Key: key,
+            Body: value,
+            ContentType: "application/json; charset=utf-8",
+          }));
+        },
+        async deleteObject(key) {
+          await s3.send(new DeleteObjectCommand({
+            Bucket: bucket,
+            Key: key,
+          }));
+        },
+      });
+    },
+    createKey({ request }) {
+      return new URL(request.url).pathname;
+    },
+  },
+};
+```
+
+That is the intended path toward deployments where:
+
+- `CloudFront` fronts public traffic
+- `S3` stores prerendered/static route responses and cacheable regenerated HTML
+- `Lambda` renders only on cache misses or revalidation events
+
 ## SSR Status
 
 `nextsx` now renders route/layout trees through `@litsx/ssr`.
