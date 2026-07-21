@@ -6,6 +6,7 @@ export { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 export {
   FileSystemResponseCacheStore,
   MemoryResponseCacheStore,
+  ObjectStorageResponseCacheStore,
   createDefaultRouteCacheKey,
   resolveResponseCacheRuntime,
 } from "./response-cache.js";

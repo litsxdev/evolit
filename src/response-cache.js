@@ -8,6 +8,12 @@ function createCacheFileName(cacheKey) {
   return `${crypto.createHash("sha1").update(cacheKey).digest("hex")}.json`;
 }
 
+function createCacheObjectKey(cacheKey, prefix = "") {
+  const normalizedPrefix = typeof prefix === "string" ? prefix.replace(/\/+$/g, "") : "";
+  const fileName = createCacheFileName(cacheKey);
+  return normalizedPrefix ? `${normalizedPrefix}/${fileName}` : fileName;
+}
+
 export function createCachedRouteResponse(response, cachePolicy, now = new Date()) {
   const ttlSeconds = cachePolicy?.mode === "revalidate" ? cachePolicy.ttlSeconds : null;
   const createdAt = now.toISOString();
@@ -91,6 +97,60 @@ export class FileSystemResponseCacheStore {
     if (await pathExists(filePath)) {
       await fs.unlink(filePath);
     }
+  }
+}
+
+export class ObjectStorageResponseCacheStore {
+  #prefix;
+  #getObject;
+  #putObject;
+  #deleteObject;
+
+  constructor(options = {}) {
+    this.#prefix = options.prefix ?? "";
+    this.#getObject = options.getObject;
+    this.#putObject = options.putObject;
+    this.#deleteObject = options.deleteObject ?? null;
+
+    if (typeof this.#getObject !== "function") {
+      throw new Error("Expected ObjectStorageResponseCacheStore options.getObject to be a function.");
+    }
+
+    if (typeof this.#putObject !== "function") {
+      throw new Error("Expected ObjectStorageResponseCacheStore options.putObject to be a function.");
+    }
+  }
+
+  getObjectKey(cacheKey) {
+    return createCacheObjectKey(cacheKey, this.#prefix);
+  }
+
+  async get(cacheKey) {
+    const serializedEntry = await this.#getObject(this.getObjectKey(cacheKey));
+    if (typeof serializedEntry !== "string" || serializedEntry.length === 0) {
+      return null;
+    }
+
+    const entry = JSON.parse(serializedEntry);
+    return entry?.key === cacheKey ? entry.value ?? null : null;
+  }
+
+  async put(cacheKey, entry) {
+    await this.#putObject(
+      this.getObjectKey(cacheKey),
+      `${JSON.stringify({
+        key: cacheKey,
+        value: entry,
+      }, null, 2)}\n`,
+    );
+  }
+
+  async delete(cacheKey) {
+    if (typeof this.#deleteObject !== "function") {
+      return;
+    }
+
+    await this.#deleteObject(this.getObjectKey(cacheKey));
   }
 }
 

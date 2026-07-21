@@ -49,7 +49,22 @@ export async function scaffoldSite(targetDirectory, options = {}) {
   await writeSitePackageJson(absoluteTargetDirectory, siteName);
   await fs.writeFile(
     path.join(absoluteTargetDirectory, "nextsx.config.js"),
-    `export default {\n  // Reserved for framework configuration.\n  // Response cache adapters and deployment-specific runtime hooks can live here.\n};\n`,
+    [
+      "export default {",
+      "  // Reserved for framework configuration.",
+      "  // Response cache adapters and deployment-specific runtime hooks can live here.",
+      "  // Example for object storage adapters such as S3:",
+      "  // responseCache: {",
+      "  //   async createStore() {",
+      "  //     return {",
+      "  //       async get(cacheKey) { return null; },",
+      "  //       async put(cacheKey, entry) {},",
+      "  //     };",
+      "  //   },",
+      "  // },",
+      "};",
+      "",
+    ].join("\n"),
     "utf8",
   );
 
