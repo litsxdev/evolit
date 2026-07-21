@@ -158,6 +158,10 @@ export function createDefaultRouteCacheKey(request) {
   return new URL(request.url).pathname;
 }
 
+export function getRouteCacheArtifactFileName(cacheKey) {
+  return createCacheFileName(cacheKey);
+}
+
 export function createDefaultResponseCacheStore(projectRoot, mode) {
   if (mode === "development") {
     return new MemoryResponseCacheStore();

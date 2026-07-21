@@ -14,14 +14,46 @@ import { compileModuleGraph } from "./compiler.js";
 import { loadNextsxConfig } from "./config.js";
 import {
   BUILD_DIRECTORY,
+  DEPLOY_ASSETS_MANIFEST_FILENAME,
+  DEPLOY_ROUTES_MANIFEST_FILENAME,
   INTERNAL_DIRECTORY,
   MANIFEST_FILENAME,
 } from "./constants.js";
 import { createRouteResolver } from "./render.js";
-import { createCachedRouteResponse, resolveResponseCacheRuntime } from "./response-cache.js";
+import {
+  createCachedRouteResponse,
+  getRouteCacheArtifactFileName,
+  resolveResponseCacheRuntime,
+} from "./response-cache.js";
 import { serializeRouteCachePolicy } from "./route-config.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 import { ensureDirectory, writeJson } from "./fs-utils.js";
+
+const CONTENT_TYPE_BY_EXTENSION = new Map([
+  [".css", "text/css; charset=utf-8"],
+  [".svg", "image/svg+xml"],
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".gif", "image/gif"],
+  [".webp", "image/webp"],
+  [".avif", "image/avif"],
+  [".ico", "image/x-icon"],
+  [".woff", "font/woff"],
+  [".woff2", "font/woff2"],
+  [".ttf", "font/ttf"],
+  [".otf", "font/otf"],
+  [".mjs", "text/javascript; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+]);
+
+function getContentTypeForBuildArtifact(filePath) {
+  return CONTENT_TYPE_BY_EXTENSION.get(path.extname(filePath)) ?? "application/octet-stream";
+}
+
+function toBuildRelativePath(projectRoot, targetPath) {
+  return path.relative(projectRoot, targetPath).split(path.sep).join("/");
+}
 
 export async function buildProject(projectRoot) {
   const nextsxConfig = await loadNextsxConfig(projectRoot);
@@ -108,6 +140,7 @@ export async function buildProject(projectRoot) {
   const responseCacheRuntime = await resolveResponseCacheRuntime(projectRoot, "production", nextsxConfig);
   const prerenderedRoutes = [];
   const routeCache = [];
+  const prerenderedRouteArtifacts = [];
 
   for (const route of routes) {
     const request = new Request(`http://nextsx.local${route.pathname}`);
@@ -141,24 +174,78 @@ export async function buildProject(projectRoot) {
       continue;
     }
 
+    const cacheKey = await responseCacheRuntime.createKey({
+      request,
+      routeResult,
+    });
     await responseCacheRuntime.store.put(
-      await responseCacheRuntime.createKey({
-        request,
-        routeResult,
-      }),
+      cacheKey,
       createCachedRouteResponse(response, routeResult.cachePolicy),
     );
+    prerenderedRouteArtifacts.push({
+      pathname: route.pathname,
+      cacheKey,
+      outputPath: toBuildRelativePath(
+        projectRoot,
+        path.join(
+          buildRoot,
+          "route-cache",
+          getRouteCacheArtifactFileName(cacheKey),
+        ),
+      ),
+      contentType: "application/json; charset=utf-8",
+    });
     prerenderedRoutes.push(route.pathname);
   }
+
+  const sortedRouteCache = routeCache.sort((left, right) => left.pathname.localeCompare(right.pathname));
+  const deployRoutes = {
+    version: 1,
+    routes: sortedRouteCache.map((entry) => {
+      const prerenderedArtifact = prerenderedRouteArtifacts.find(
+        (artifact) => artifact.pathname === entry.pathname,
+      );
+
+      return {
+        pathname: entry.pathname,
+        cache: entry.cache,
+        cacheKey: entry.pathname,
+        prerendered: Boolean(prerenderedArtifact),
+        responsePath: prerenderedArtifact?.outputPath ?? null,
+      };
+    }),
+  };
+
+  const deployAssets = {
+    version: 1,
+    assets: [
+      ...clientAssets.assets.map((asset) => ({
+        kind: asset.type,
+        publicUrl: asset.publicUrl,
+        outputPath: toBuildRelativePath(projectRoot, asset.outputPath),
+        contentType: getContentTypeForBuildArtifact(asset.outputPath),
+      })),
+      ...prerenderedRouteArtifacts.map((artifact) => ({
+        kind: "html",
+        pathname: artifact.pathname,
+        cacheKey: artifact.cacheKey,
+        outputPath: artifact.outputPath,
+        contentType: artifact.contentType,
+        cache: "static",
+      })),
+    ],
+  };
 
   const manifestPath = path.join(buildRoot, MANIFEST_FILENAME);
   await writeJson(manifestPath, {
     routes,
-    routeCache: routeCache.sort((left, right) => left.pathname.localeCompare(right.pathname)),
+    routeCache: sortedRouteCache,
     prerenderedRoutes: prerenderedRoutes.sort(),
     clientAssets,
     builtAt: new Date().toISOString(),
   });
+  await writeJson(path.join(buildRoot, DEPLOY_ROUTES_MANIFEST_FILENAME), deployRoutes);
+  await writeJson(path.join(buildRoot, DEPLOY_ASSETS_MANIFEST_FILENAME), deployAssets);
 
   return manifestPath;
 }

@@ -15,6 +15,8 @@ let fixtureRoot;
 let server;
 let baseUrl;
 let buildManifest;
+let deployRoutesManifest;
+let deployAssetsManifest;
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 const cardBadgeSpecialPngFile = "card badge@2x.png";
 
@@ -173,6 +175,18 @@ before(async () => {
       "utf8",
     ),
   );
+  deployRoutesManifest = JSON.parse(
+    await fs.readFile(
+      path.join(fixtureRoot, ".nextsx", "build", "deploy-routes.json"),
+      "utf8",
+    ),
+  );
+  deployAssetsManifest = JSON.parse(
+    await fs.readFile(
+      path.join(fixtureRoot, ".nextsx", "build", "deploy-assets.json"),
+      "utf8",
+    ),
+  );
 
   const port = await getAvailablePort();
   server = await createStartServer(fixtureRoot, { port });
@@ -274,6 +288,74 @@ test("build manifest classifies entry and chunk client assets with structured me
     ],
   );
   assert.deepEqual(buildManifest.prerenderedRoutes, ["/cached-static"]);
+});
+
+test("build emits deploy route and asset manifests for external deployment pipelines", () => {
+  assert.equal(deployRoutesManifest.version, 1);
+  assert.deepEqual(
+    deployRoutesManifest.routes,
+    [
+      {
+        pathname: "/",
+        cache: "dynamic",
+        cacheKey: "/",
+        prerendered: false,
+        responsePath: null,
+      },
+      {
+        pathname: "/about",
+        cache: "dynamic",
+        cacheKey: "/about",
+        prerendered: false,
+        responsePath: null,
+      },
+      {
+        pathname: "/cached-dynamic",
+        cache: "dynamic",
+        cacheKey: "/cached-dynamic",
+        prerendered: false,
+        responsePath: null,
+      },
+      {
+        pathname: "/cached-revalidate",
+        cache: { revalidate: 1 },
+        cacheKey: "/cached-revalidate",
+        prerendered: false,
+        responsePath: null,
+      },
+      {
+        pathname: "/cached-static",
+        cache: "static",
+        cacheKey: "/cached-static",
+        prerendered: true,
+        responsePath: deployRoutesManifest.routes.find((route) => route.pathname === "/cached-static")?.responsePath ?? null,
+      },
+    ],
+  );
+
+  const htmlAsset = deployAssetsManifest.assets.find((asset) => asset.kind === "html");
+  const scriptAsset = deployAssetsManifest.assets.find((asset) => asset.kind === "script");
+  const styleAsset = deployAssetsManifest.assets.find((asset) => asset.kind === "style");
+  const resourceAsset = deployAssetsManifest.assets.find(
+    (asset) => asset.publicUrl === buildManifest.clientAssets.assets.find(
+      (entry) => entry.clientModule === "app/components/card-accent.svg",
+    )?.publicUrl,
+  );
+
+  assert.equal(deployAssetsManifest.version, 1);
+  assert.ok(htmlAsset);
+  assert.ok(scriptAsset);
+  assert.ok(styleAsset);
+  assert.ok(resourceAsset);
+  assert.equal(htmlAsset.pathname, "/cached-static");
+  assert.equal(htmlAsset.cacheKey, "/cached-static");
+  assert.equal(htmlAsset.cache, "static");
+  assert.equal(htmlAsset.contentType, "application/json; charset=utf-8");
+  assert.match(htmlAsset.outputPath, /^\.nextsx\/build\/route-cache\/[a-f0-9]{40}\.json$/);
+  assert.match(scriptAsset.outputPath, /^\.nextsx\/build\/static\//);
+  assert.equal(scriptAsset.contentType, "text/javascript; charset=utf-8");
+  assert.equal(styleAsset.contentType, "text/css; charset=utf-8");
+  assert.equal(resourceAsset.contentType, "image/svg+xml");
 });
 
 test("start server serves hashed client asset files", async () => {
