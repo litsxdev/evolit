@@ -59,7 +59,7 @@ function applyRouteCacheHeaders(response, cachePolicy) {
   if (cachePolicy?.mode === "static") {
     headers["cache-control"] = "public, max-age=31536000, immutable";
   } else if (cachePolicy?.mode === "revalidate") {
-    headers["cache-control"] = `public, max-age=${cachePolicy.ttlSeconds}`;
+    headers["cache-control"] = `public, max-age=${cachePolicy.ttlSeconds}, stale-while-revalidate=${cachePolicy.ttlSeconds}`;
   } else {
     headers["cache-control"] = "no-store";
   }
@@ -126,62 +126,80 @@ export function createPublicAssetOrigin({ projectRoot, mode, assetManifest }) {
 
 export function createResponseCacheController({ responseCacheRuntime }) {
   return {
+    async getCacheKey(request, routeResult) {
+      return responseCacheRuntime.createKey({
+        request,
+        routeResult,
+      });
+    },
+    createResponse(routeResult, response, cacheState) {
+      const nextResponse = applyRouteCacheHeaders(response, routeResult.cachePolicy);
+      if (!cacheState) {
+        return nextResponse;
+      }
+
+      return {
+        ...nextResponse,
+        headers: {
+          ...nextResponse.headers,
+          "x-nextsx-cache": cacheState,
+        },
+      };
+    },
     async read(request, routeResult) {
       if (routeResult.type !== "route" || routeResult.cachePolicy.mode === "dynamic") {
         return null;
       }
 
-      const cacheKey = await responseCacheRuntime.createKey({
-        request,
-        routeResult,
-      });
+      const cacheKey = await this.getCacheKey(request, routeResult);
       const cachedResponse = await responseCacheRuntime.store.get(cacheKey);
-      if (!isCachedRouteResponseFresh(cachedResponse)) {
+      if (!cachedResponse) {
         return null;
       }
 
-      return applyRouteCacheHeaders({
+      const response = this.createResponse(routeResult, {
         status: cachedResponse.status,
-        headers: {
-          ...cachedResponse.headers,
-          "x-nextsx-cache": "HIT",
-        },
+        headers: { ...cachedResponse.headers },
         body: cachedResponse.body,
-      }, routeResult.cachePolicy);
+      }, isCachedRouteResponseFresh(cachedResponse) ? "HIT" : "STALE");
+
+      return {
+        cacheKey,
+        entry: cachedResponse,
+        fresh: isCachedRouteResponseFresh(cachedResponse),
+        response,
+      };
     },
-    async write(request, routeResult, response) {
+    async store(request, routeResult, response, cacheKey) {
       if (routeResult.type !== "route") {
-        return response;
+        return false;
       }
 
-      let nextResponse = applyRouteCacheHeaders(response, routeResult.cachePolicy);
+      const nextResponse = applyRouteCacheHeaders(response, routeResult.cachePolicy);
       if (routeResult.cachePolicy.mode !== "dynamic" && nextResponse.status === 200) {
-        const cacheKey = await responseCacheRuntime.createKey({
-          request,
-          routeResult,
-        });
+        const effectiveCacheKey = cacheKey ?? await this.getCacheKey(request, routeResult);
         await responseCacheRuntime.store.put(
-          cacheKey,
+          effectiveCacheKey,
           createCachedRouteResponse(nextResponse, routeResult.cachePolicy),
         );
-        nextResponse = {
-          ...nextResponse,
-          headers: {
-            ...nextResponse.headers,
-            "x-nextsx-cache": "MISS",
-          },
-        };
-      } else {
-        nextResponse = {
-          ...nextResponse,
-          headers: {
-            ...nextResponse.headers,
-            "x-nextsx-cache": "SKIP",
-          },
-        };
+        return true;
       }
 
-      return nextResponse;
+      return false;
+    },
+    async write(request, routeResult, response, options = {}) {
+      const didStore = await this.store(
+        request,
+        routeResult,
+        response,
+        options.cacheKey,
+      );
+
+      return this.createResponse(
+        routeResult,
+        response,
+        options.cacheState ?? (didStore ? "MISS" : "SKIP"),
+      );
     },
   };
 }
@@ -298,6 +316,7 @@ export async function createDeploymentRuntime({
     cache: renderer.responseCacheController,
     renderer,
     async handle(request) {
+      const revalidationTasks = this.revalidationTasks ??= new Map();
       const pathname = new URL(request.url).pathname;
       const assetResponse = await assets.read(pathname);
       if (assetResponse) {
@@ -307,7 +326,32 @@ export async function createDeploymentRuntime({
       const routePolicyResult = await renderer.resolveRoutePolicy(request);
       const cachedResponse = await renderer.responseCacheController.read(request, routePolicyResult);
       if (cachedResponse) {
-        return cachedResponse;
+        if (cachedResponse.fresh) {
+          return cachedResponse.response;
+        }
+
+        if (
+          routePolicyResult.type === "route"
+          && routePolicyResult.cachePolicy.mode === "revalidate"
+          && !revalidationTasks.has(cachedResponse.cacheKey)
+        ) {
+          const revalidationTask = (async () => {
+            try {
+              const { routeResult, response } = await renderer.renderRoute(request);
+              await renderer.responseCacheController.store(
+                request,
+                routeResult,
+                response,
+                cachedResponse.cacheKey,
+              );
+            } finally {
+              revalidationTasks.delete(cachedResponse.cacheKey);
+            }
+          })();
+          revalidationTasks.set(cachedResponse.cacheKey, revalidationTask);
+        }
+
+        return cachedResponse.response;
       }
 
       const { routeResult, response } = await renderer.renderRoute(request);

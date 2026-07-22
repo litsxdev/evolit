@@ -25,7 +25,7 @@ const cardBadgeSpecialPngFile = "card badge@2x.png";
 function createCounterPageSource(cacheExport, counterKey, label) {
   return [
     cacheExport,
-    "globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0 };",
+    "globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
     "",
     `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page() {`,
     `  globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
@@ -40,6 +40,24 @@ function createParamsPageSource(label, paramKey) {
   return [
     `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page({ params }) {`,
     `  return \`<main data-route="${label}">${label}:\${JSON.stringify(params.${paramKey} ?? null)}</main>\`;`,
+    "}",
+    "",
+  ].join("\n");
+}
+
+function createRevalidateParamsPageSource(label, counterKey, paramKey) {
+  return [
+    "globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
+    'export const routeConfig = { cache: { revalidate: 1 } };',
+    "",
+    `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page({ params }) {`,
+    "  await new Promise((resolve) => {",
+    "    setTimeout(resolve, 50);",
+    "  });",
+    `  globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey} ??= 0;`,
+    `  globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
+    `  const value = globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey};`,
+    `  return \`<main data-route="${label}">${label}:\${JSON.stringify(params.${paramKey} ?? null)}:\${value}</main>\`;`,
     "}",
     "",
   ].join("\n");
@@ -135,6 +153,7 @@ before(async () => {
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-static"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-dynamic"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-revalidate"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "cached-revalidate", "[slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "blog", "[slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "docs", "[...slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "optional", "[[...slug]]"), { recursive: true });
@@ -163,6 +182,11 @@ before(async () => {
       "revalidate",
       "revalidate",
     ),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "cached-revalidate", "[slug]", "page.litsx"),
+    createRevalidateParamsPageSource("dynamic-revalidate", "dynamicRevalidate", "slug"),
     "utf8",
   );
   await fs.writeFile(
@@ -323,6 +347,7 @@ test("build manifest classifies entry and chunk client assets with structured me
       { pathname: "/blog/:slug", cache: "dynamic" },
       { pathname: "/cached-dynamic", cache: "dynamic" },
       { pathname: "/cached-revalidate", cache: { revalidate: 1 } },
+      { pathname: "/cached-revalidate/:slug", cache: { revalidate: 1 } },
       { pathname: "/cached-static", cache: "static" },
       { pathname: "/docs/*slug", cache: "dynamic" },
       { pathname: "/optional/**slug", cache: "dynamic" },
@@ -368,6 +393,13 @@ test("build emits deploy route and asset manifests for external deployment pipel
         pathname: "/cached-revalidate",
         cache: { revalidate: 1 },
         cacheKey: "/cached-revalidate",
+        prerendered: false,
+        responsePath: null,
+      },
+      {
+        pathname: "/cached-revalidate/:slug",
+        cache: { revalidate: 1 },
+        cacheKey: "/cached-revalidate/:slug",
         prerendered: false,
         responsePath: null,
       },
@@ -651,8 +683,48 @@ test("start server revalidates cached routes after the configured ttl", async ()
 
   const thirdResponse = await fetch(`${baseUrl}/cached-revalidate`);
   const thirdHtml = await thirdResponse.text();
+  await new Promise((resolve) => {
+    setTimeout(resolve, 100);
+  });
+  const fourthResponse = await fetch(`${baseUrl}/cached-revalidate`);
+  const fourthHtml = await fourthResponse.text();
 
-  assert.equal(thirdResponse.headers.get("x-nextsx-cache"), "MISS");
+  assert.equal(thirdResponse.headers.get("x-nextsx-cache"), "STALE");
+  assert.equal(thirdHtml, firstHtml);
+  assert.equal(fourthResponse.headers.get("x-nextsx-cache"), "HIT");
   assert.match(firstHtml, /revalidate:1/);
-  assert.match(thirdHtml, /revalidate:2/);
+  assert.match(fourthHtml, /revalidate:2/);
+});
+
+test("start server revalidates dynamic routes in the background per pathname", async () => {
+  const firstResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
+  const firstHtml = await firstResponse.text();
+  const secondResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
+  const secondHtml = await secondResponse.text();
+
+  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.equal(secondHtml, firstHtml);
+
+  await new Promise((resolve) => {
+    setTimeout(resolve, 1100);
+  });
+
+  const thirdResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
+  const thirdHtml = await thirdResponse.text();
+  await new Promise((resolve) => {
+    setTimeout(resolve, 150);
+  });
+  const fourthResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
+  const fourthHtml = await fourthResponse.text();
+  const otherPathResponse = await fetch(`${baseUrl}/cached-revalidate/beta`);
+  const otherPathHtml = await otherPathResponse.text();
+
+  assert.equal(thirdResponse.headers.get("x-nextsx-cache"), "STALE");
+  assert.equal(thirdHtml, firstHtml);
+  assert.equal(fourthResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.match(firstHtml, /dynamic-revalidate:&quot;alpha&quot;:1/);
+  assert.match(fourthHtml, /dynamic-revalidate:&quot;alpha&quot;:2/);
+  assert.equal(otherPathResponse.headers.get("x-nextsx-cache"), "MISS");
+  assert.match(otherPathHtml, /dynamic-revalidate:&quot;beta&quot;:3/);
 });
