@@ -9,6 +9,7 @@ import {
   createAssetResolver,
   createFrameworkImportMap,
   createHydrationBootstrap,
+  createStaticAssetPublicUrlMap,
   getAssetByPublicUrl,
   getClientOutputRoot,
   normalizeClientAssetManifest,
@@ -206,7 +207,10 @@ export function createResponseCacheController({ responseCacheRuntime }) {
 
 export async function createRequestRenderer({ projectRoot, mode, assetManifest, routeResolver, responseCacheRuntime }) {
   const normalizedAssetManifest = normalizeClientAssetManifest(assetManifest);
-  const effectiveRouteResolver = routeResolver ?? await createRouteResolver(projectRoot, mode);
+  const staticAssetPublicUrls = createStaticAssetPublicUrlMap(normalizedAssetManifest);
+  const effectiveRouteResolver = routeResolver ?? await createRouteResolver(projectRoot, mode, {
+    staticAssetPublicUrls,
+  });
   const assetResolver = createAssetResolver(projectRoot, {
     assetManifest: normalizedAssetManifest,
   });

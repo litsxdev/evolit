@@ -32,7 +32,7 @@ function isStyleAssetPath(filePath) {
   return filePath.endsWith(".css");
 }
 
-function createStaticAssetStubSource(relativeAssetPath, mode) {
+function createStaticAssetStubSource(relativeAssetPath, mode, target = "server", staticAssetPublicUrls = null) {
   const normalizedAssetPath = relativeAssetPath.split(path.sep).join("/");
   if (normalizedAssetPath.endsWith(".css")) {
     return "export default {};\n";
@@ -40,6 +40,10 @@ function createStaticAssetStubSource(relativeAssetPath, mode) {
 
   if (mode === "development") {
     return `export default "/_nextsx/client/${normalizedAssetPath}";\n`;
+  }
+
+  if (target === "server" && staticAssetPublicUrls?.has(normalizedAssetPath)) {
+    return `export default ${JSON.stringify(staticAssetPublicUrls.get(normalizedAssetPath))};\n`;
   }
 
   return `export default "__NEXTSX_ASSET_URL__:${normalizedAssetPath}";\n`;
@@ -105,6 +109,7 @@ async function rewriteRelativeSpecifiers({
   moduleMetadata,
   mode,
   target,
+  staticAssetPublicUrls,
 }) {
   let rewrittenCode = "";
   let previousIndex = 0;
@@ -133,7 +138,7 @@ async function rewriteRelativeSpecifiers({
       await ensureDirectory(path.dirname(stubOutputPath));
       await fs.writeFile(
         stubOutputPath,
-        createStaticAssetStubSource(relativeAssetPath, mode),
+        createStaticAssetStubSource(relativeAssetPath, mode, target, staticAssetPublicUrls),
         "utf8",
       );
 
@@ -182,6 +187,7 @@ export async function compileModuleGraph(entryPath, options = {}) {
     sourceMaps = mode === "development",
     ssr = false,
     target = "server",
+    staticAssetPublicUrls = null,
   } = options;
 
   const outputRoot = getTypedOutputRoot(projectRoot, mode, target);
@@ -212,6 +218,7 @@ export async function compileModuleGraph(entryPath, options = {}) {
       moduleMetadata,
       mode,
       target,
+      staticAssetPublicUrls,
     });
 
     await fs.writeFile(outputPath, rewrittenCode, "utf8");

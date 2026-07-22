@@ -726,6 +726,24 @@ export function normalizeClientAssetManifest(manifest) {
   };
 }
 
+export function createStaticAssetPublicUrlMap(manifest) {
+  const normalizedManifest = normalizeClientAssetManifest(manifest);
+  if (!normalizedManifest) {
+    return null;
+  }
+
+  const entries = normalizedManifest.assets
+    .filter(
+      (asset) =>
+        typeof asset?.clientModule === "string"
+        && typeof asset?.publicUrl === "string"
+        && asset.type === "asset",
+    )
+    .map((asset) => [asset.clientModule, asset.publicUrl]);
+
+  return new Map(entries);
+}
+
 export function getAssetByClientModule(manifest, clientModule) {
   const normalizedManifest = normalizeClientAssetManifest(manifest);
   if (!normalizedManifest || typeof clientModule !== "string") {

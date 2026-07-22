@@ -11,6 +11,7 @@ import {
   createAssetResolver,
   createFrameworkImportMap,
   createHydrationBootstrap,
+  createStaticAssetPublicUrlMap,
   emitHashedClientAssets,
   rewriteServerAssetPlaceholders,
 } from "./client-assets.js";
@@ -161,9 +162,12 @@ export async function buildProject(projectRoot) {
   const clientAssets = await emitHashedClientAssets(projectRoot, {
     entryClientModules,
   });
+  const staticAssetPublicUrls = createStaticAssetPublicUrlMap(clientAssets);
   await rewriteServerAssetPlaceholders(projectRoot, clientAssets);
 
-  const routeResolver = await createRouteResolver(projectRoot, "production");
+  const routeResolver = await createRouteResolver(projectRoot, "production", {
+    staticAssetPublicUrls,
+  });
   const assetResolver = createAssetResolver(projectRoot, {
     assetManifest: clientAssets,
   });
@@ -211,7 +215,9 @@ export async function buildProject(projectRoot) {
 
     const isDynamicRoute = routeHasDynamicSegments(route.pathname);
     const staticParamsResult = isDynamicRoute && routePolicyResult.cachePolicy.mode !== "dynamic"
-      ? await resolveStaticParamsForRoute(route, projectRoot, "production")
+      ? await resolveStaticParamsForRoute(route, projectRoot, "production", {
+        staticAssetPublicUrls,
+      })
       : { hasGenerateStaticParams: false, paramsList: [] };
     const prerenderTargets = [];
 

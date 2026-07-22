@@ -70,8 +70,13 @@ function getStaticParamsGenerator(moduleRecord) {
   return moduleRecord.generateStaticParams;
 }
 
-async function loadRouteModules(route, projectRoot, mode) {
-  const moduleOptions = { projectRoot, mode, ssr: true };
+async function loadRouteModules(route, projectRoot, mode, options = {}) {
+  const moduleOptions = {
+    projectRoot,
+    mode,
+    ssr: true,
+    staticAssetPublicUrls: options.staticAssetPublicUrls ?? null,
+  };
   const pageModule = await importCompiledModule(route.page, moduleOptions);
   const layoutModules = await Promise.all(
     route.layouts.map((layoutPath) => importCompiledModule(layoutPath, moduleOptions)),
@@ -83,8 +88,8 @@ async function loadRouteModules(route, projectRoot, mode) {
   };
 }
 
-export async function resolveStaticParamsForRoute(route, projectRoot, mode = "production") {
-  const { pageModule, layoutModules } = await loadRouteModules(route, projectRoot, mode);
+export async function resolveStaticParamsForRoute(route, projectRoot, mode = "production", options = {}) {
+  const { pageModule, layoutModules } = await loadRouteModules(route, projectRoot, mode, options);
   const generators = [...layoutModules, pageModule]
     .map((moduleRecord) => getStaticParamsGenerator(moduleRecord))
     .filter(Boolean);
@@ -124,7 +129,7 @@ export async function resolveStaticParamsForRoute(route, projectRoot, mode = "pr
   };
 }
 
-export async function createRouteResolver(projectRoot, mode = "development") {
+export async function createRouteResolver(projectRoot, mode = "development", resolverOptions = {}) {
   const routes = await discoverAppRoutes(projectRoot);
 
   async function resolveMatchedRequest(request, options = {}) {
@@ -138,7 +143,12 @@ export async function createRouteResolver(projectRoot, mode = "development") {
       };
     }
 
-    const { pageModule, layoutModules } = await loadRouteModules(match.route, projectRoot, mode);
+    const { pageModule, layoutModules } = await loadRouteModules(
+      match.route,
+      projectRoot,
+      mode,
+      resolverOptions,
+    );
     const routeConfig = mergeRouteConfig([...layoutModules, pageModule]);
     const cachePolicy = normalizeRouteCachePolicy(routeConfig);
 

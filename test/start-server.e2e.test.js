@@ -336,6 +336,7 @@ test("start server emits hashed public asset URLs for hydration bootstrap", asyn
     new RegExp(featureCardAsset.publicUrl.replaceAll(".", "\\.")),
   );
   assert.doesNotMatch(html, /\/_nextsx\/client\/app\/components\/feature-card\.mjs/);
+  assert.doesNotMatch(html, /__NEXTSX_ASSET_URL__/);
 });
 
 test("build manifest classifies entry and chunk client assets with structured metadata", () => {
