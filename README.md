@@ -106,6 +106,35 @@ export const routeConfig = {
 The same semantics work in local development and in production runtimes. Only the backing cache
 store changes.
 
+## Dynamic Route Prerendering
+
+Dynamic routes can opt into build-time prerendering by exporting `generateStaticParams()` from
+layouts and/or pages:
+
+```js
+export async function generateStaticParams() {
+  return [
+    { slug: "guide" },
+    { slug: "changelog" },
+  ];
+}
+```
+
+For nested dynamic routes, parent layouts and child pages compose through `params`, following the
+same general model as the Next.js App Router:
+
+```js
+export async function generateStaticParams({ params }) {
+  return params.category === "books"
+    ? [{ slug: "guide" }]
+    : [];
+}
+```
+
+`nextsx build` uses those params to prefill the route cache for concrete pathnames. Paths that were
+not prerendered still fall back to normal runtime rendering and cache population according to the
+route cache policy.
+
 ## Response Cache Adapters
 
 By default, `nextsx` uses:

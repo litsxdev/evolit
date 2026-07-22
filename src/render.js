@@ -58,6 +58,72 @@ function mergeMetadata(modules) {
   }, {});
 }
 
+function getStaticParamsGenerator(moduleRecord) {
+  if (moduleRecord?.generateStaticParams == null) {
+    return null;
+  }
+
+  if (typeof moduleRecord.generateStaticParams !== "function") {
+    throw new Error("Expected generateStaticParams to export a function.");
+  }
+
+  return moduleRecord.generateStaticParams;
+}
+
+async function loadRouteModules(route, projectRoot, mode) {
+  const moduleOptions = { projectRoot, mode, ssr: true };
+  const pageModule = await importCompiledModule(route.page, moduleOptions);
+  const layoutModules = await Promise.all(
+    route.layouts.map((layoutPath) => importCompiledModule(layoutPath, moduleOptions)),
+  );
+
+  return {
+    pageModule,
+    layoutModules,
+  };
+}
+
+export async function resolveStaticParamsForRoute(route, projectRoot, mode = "production") {
+  const { pageModule, layoutModules } = await loadRouteModules(route, projectRoot, mode);
+  const generators = [...layoutModules, pageModule]
+    .map((moduleRecord) => getStaticParamsGenerator(moduleRecord))
+    .filter(Boolean);
+
+  let paramsList = [{}];
+
+  for (const generateStaticParams of generators) {
+    const nextParamsList = [];
+
+    for (const params of paramsList) {
+      const generatedEntries = await generateStaticParams({
+        params: Object.freeze({ ...params }),
+      });
+
+      if (!Array.isArray(generatedEntries)) {
+        throw new Error("Expected generateStaticParams() to return an array.");
+      }
+
+      for (const entry of generatedEntries) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          throw new Error("Expected each generateStaticParams() entry to be an object.");
+        }
+
+        nextParamsList.push({
+          ...params,
+          ...entry,
+        });
+      }
+    }
+
+    paramsList = nextParamsList;
+  }
+
+  return {
+    hasGenerateStaticParams: generators.length > 0,
+    paramsList,
+  };
+}
+
 export async function createRouteResolver(projectRoot, mode = "development") {
   const routes = await discoverAppRoutes(projectRoot);
 
@@ -72,11 +138,7 @@ export async function createRouteResolver(projectRoot, mode = "development") {
       };
     }
 
-    const moduleOptions = { projectRoot, mode, ssr: true };
-    const pageModule = await importCompiledModule(match.route.page, moduleOptions);
-    const layoutModules = await Promise.all(
-      match.route.layouts.map((layoutPath) => importCompiledModule(layoutPath, moduleOptions)),
-    );
+    const { pageModule, layoutModules } = await loadRouteModules(match.route, projectRoot, mode);
     const routeConfig = mergeRouteConfig([...layoutModules, pageModule]);
     const cachePolicy = normalizeRouteCachePolicy(routeConfig);
 

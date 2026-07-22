@@ -1,6 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { discoverAppRoutes } from "./app-discovery.js";
+import {
+  discoverAppRoutes,
+  resolveRoutePathname,
+  routeHasDynamicSegments,
+} from "./app-discovery.js";
 import {
   collectTransitiveAssetPreloads,
   collectTransitiveStyleUrls,
@@ -20,7 +24,7 @@ import {
   INTERNAL_DIRECTORY,
   MANIFEST_FILENAME,
 } from "./constants.js";
-import { createRouteResolver } from "./render.js";
+import { createRouteResolver, resolveStaticParamsForRoute } from "./render.js";
 import {
   createCachedRouteResponse,
   getRouteCacheArtifactFileName,
@@ -205,48 +209,65 @@ export async function buildProject(projectRoot) {
       cache: serializeRouteCachePolicy(routePolicyResult.cachePolicy),
     });
 
-    if (routePolicyResult.cachePolicy.mode !== "static") {
-      continue;
+    const isDynamicRoute = routeHasDynamicSegments(route.pathname);
+    const staticParamsResult = isDynamicRoute && routePolicyResult.cachePolicy.mode !== "dynamic"
+      ? await resolveStaticParamsForRoute(route, projectRoot, "production")
+      : { hasGenerateStaticParams: false, paramsList: [] };
+    const prerenderTargets = [];
+
+    if (routePolicyResult.cachePolicy.mode === "static" && !isDynamicRoute) {
+      prerenderTargets.push(route.pathname);
     }
 
-    if (route.pathname.includes(":") || route.pathname.includes("*")) {
-      throw new Error(
-        `Static route caching is not supported for dynamic route patterns yet: ${route.pathname}`,
+    if (staticParamsResult.hasGenerateStaticParams) {
+      for (const params of staticParamsResult.paramsList) {
+        prerenderTargets.push(resolveRoutePathname(route.pathname, params));
+      }
+    }
+
+    const seenPrerenderTargets = new Set();
+
+    for (const targetPathname of prerenderTargets) {
+      if (seenPrerenderTargets.has(targetPathname)) {
+        continue;
+      }
+      seenPrerenderTargets.add(targetPathname);
+
+      const targetRequest = new Request(`http://nextsx.local${targetPathname}`);
+      const routeResult = await routeResolver.resolveRequest(targetRequest);
+      if (routeResult.type !== "route") {
+        continue;
+      }
+
+      const response = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
+      if (response.status !== 200) {
+        continue;
+      }
+
+      const cacheKey = await responseCacheRuntime.createKey({
+        request: targetRequest,
+        routeResult,
+      });
+      await responseCacheRuntime.store.put(
+        cacheKey,
+        createCachedRouteResponse(response, routeResult.cachePolicy),
       );
-    }
-
-    const routeResult = await routeResolver.resolveRequest(request);
-    if (routeResult.type !== "route") {
-      continue;
-    }
-
-    const response = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
-    if (response.status !== 200) {
-      continue;
-    }
-
-    const cacheKey = await responseCacheRuntime.createKey({
-      request,
-      routeResult,
-    });
-    await responseCacheRuntime.store.put(
-      cacheKey,
-      createCachedRouteResponse(response, routeResult.cachePolicy),
-    );
-    prerenderedRouteArtifacts.push({
-      pathname: route.pathname,
-      cacheKey,
-      outputPath: toBuildRelativePath(
-        projectRoot,
-        path.join(
-          buildRoot,
-          "route-cache",
-          getRouteCacheArtifactFileName(cacheKey),
+      prerenderedRouteArtifacts.push({
+        routePathname: route.pathname,
+        pathname: targetPathname,
+        cacheKey,
+        outputPath: toBuildRelativePath(
+          projectRoot,
+          path.join(
+            buildRoot,
+            "route-cache",
+            getRouteCacheArtifactFileName(cacheKey),
+          ),
         ),
-      ),
-      contentType: "application/json; charset=utf-8",
-    });
-    prerenderedRoutes.push(route.pathname);
+        contentType: "application/json; charset=utf-8",
+      });
+      prerenderedRoutes.push(targetPathname);
+    }
   }
 
   const sortedRouteCache = routeCache.sort((left, right) => left.pathname.localeCompare(right.pathname));
@@ -256,12 +277,17 @@ export async function buildProject(projectRoot) {
       const prerenderedArtifact = prerenderedRouteArtifacts.find(
         (artifact) => artifact.pathname === entry.pathname,
       );
+      const prerenderedPaths = prerenderedRouteArtifacts
+        .filter((artifact) => artifact.routePathname === entry.pathname)
+        .map((artifact) => artifact.pathname)
+        .sort();
 
       return {
         pathname: entry.pathname,
         cache: entry.cache,
         cacheKey: entry.pathname,
-        prerendered: Boolean(prerenderedArtifact),
+        prerendered: prerenderedPaths.length > 0,
+        prerenderedPaths,
         responsePath: prerenderedArtifact?.outputPath ?? null,
       };
     }),
@@ -282,7 +308,8 @@ export async function buildProject(projectRoot) {
         cacheKey: artifact.cacheKey,
         outputPath: artifact.outputPath,
         contentType: artifact.contentType,
-        cache: "static",
+        cache: sortedRouteCache.find((entry) => entry.pathname === artifact.routePathname)?.cache
+          ?? "static",
       })),
     ],
   };

@@ -48,6 +48,83 @@ function routePathFromSegments(segments) {
   return pathname ? `/${pathname}` : "/";
 }
 
+export function routeHasDynamicSegments(pathname) {
+  return pathname.includes(":") || pathname.includes("*");
+}
+
+function encodeRouteParamSegment(value, pathname, paramName) {
+  if (typeof value !== "string" && typeof value !== "number") {
+    throw new Error(
+      `Expected generateStaticParams() to provide a string or number for "${paramName}" in route ${pathname}.`,
+    );
+  }
+
+  return encodeURIComponent(String(value));
+}
+
+export function resolveRoutePathname(pathname, params = {}) {
+  if (pathname === "/") {
+    return "/";
+  }
+
+  const resolvedSegments = [];
+  const routeSegments = pathname.split("/").filter(Boolean);
+
+  for (const segment of routeSegments) {
+    if (segment.startsWith("**")) {
+      const paramName = segment.slice(2);
+      const value = params[paramName];
+      if (value == null) {
+        continue;
+      }
+
+      if (!Array.isArray(value)) {
+        throw new Error(
+          `Expected generateStaticParams() to provide an array for optional catch-all "${paramName}" in route ${pathname}.`,
+        );
+      }
+
+      resolvedSegments.push(
+        ...value.map((entry) => encodeRouteParamSegment(entry, pathname, paramName)),
+      );
+      continue;
+    }
+
+    if (segment.startsWith("*")) {
+      const paramName = segment.slice(1);
+      const value = params[paramName];
+      if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(
+          `Expected generateStaticParams() to provide a non-empty array for catch-all "${paramName}" in route ${pathname}.`,
+        );
+      }
+
+      resolvedSegments.push(
+        ...value.map((entry) => encodeRouteParamSegment(entry, pathname, paramName)),
+      );
+      continue;
+    }
+
+    if (segment.startsWith(":")) {
+      const paramName = segment.slice(1);
+      if (!Object.hasOwn(params, paramName)) {
+        throw new Error(
+          `Expected generateStaticParams() to provide a value for "${paramName}" in route ${pathname}.`,
+        );
+      }
+
+      resolvedSegments.push(
+        encodeRouteParamSegment(params[paramName], pathname, paramName),
+      );
+      continue;
+    }
+
+    resolvedSegments.push(segment);
+  }
+
+  return `/${resolvedSegments.join("/")}`;
+}
+
 function collectLayoutCandidates(routeDirectory, appRoot) {
   const layouts = [];
   let currentDirectory = routeDirectory;

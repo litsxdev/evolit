@@ -63,6 +63,41 @@ function createRevalidateParamsPageSource(label, counterKey, paramKey) {
   ].join("\n");
 }
 
+function createStaticParamsLayoutSource(categoryEntries) {
+  return [
+    "export async function generateStaticParams() {",
+    `  return ${JSON.stringify(categoryEntries)};`,
+    "}",
+    "",
+    "export default async function CatalogLayout({ children }) {",
+    "  return children;",
+    "}",
+    "",
+  ].join("\n");
+}
+
+function createStaticParamsPageSource(label, routesByCategory) {
+  return [
+    "export const routeConfig = { cache: \"static\" };",
+    "",
+    "export async function generateStaticParams({ params }) {",
+    "  switch (params.category) {",
+    ...Object.entries(routesByCategory).flatMap(([category, slugs]) => [
+      `    case ${JSON.stringify(category)}:`,
+      `      return ${JSON.stringify(slugs.map((slug) => ({ slug })))};`,
+    ]),
+    "    default:",
+    "      return [];",
+    "  }",
+    "}",
+    "",
+    `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page({ params }) {`,
+    `  return \`<main data-route="${label}">\${params.category}:\${params.slug}</main>\`;`,
+    "}",
+    "",
+  ].join("\n");
+}
+
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
     const socket = net.createServer();
@@ -155,6 +190,7 @@ before(async () => {
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-revalidate"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-revalidate", "[slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "blog", "[slug]"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "catalog", "[category]", "[slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "docs", "[...slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "optional", "[[...slug]]"), { recursive: true });
   await fs.writeFile(
@@ -192,6 +228,22 @@ before(async () => {
   await fs.writeFile(
     path.join(fixtureRoot, "app", "blog", "[slug]", "page.litsx"),
     createParamsPageSource("blog", "slug"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "catalog", "[category]", "layout.litsx"),
+    createStaticParamsLayoutSource([
+      { category: "books" },
+      { category: "games" },
+    ]),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "catalog", "[category]", "[slug]", "page.litsx"),
+    createStaticParamsPageSource("catalog", {
+      books: ["guide"],
+      games: ["chess"],
+    }),
     "utf8",
   );
   await fs.writeFile(
@@ -349,11 +401,16 @@ test("build manifest classifies entry and chunk client assets with structured me
       { pathname: "/cached-revalidate", cache: { revalidate: 1 } },
       { pathname: "/cached-revalidate/:slug", cache: { revalidate: 1 } },
       { pathname: "/cached-static", cache: "static" },
+      { pathname: "/catalog/:category/:slug", cache: "static" },
       { pathname: "/docs/*slug", cache: "dynamic" },
       { pathname: "/optional/**slug", cache: "dynamic" },
     ],
   );
-  assert.deepEqual(buildManifest.prerenderedRoutes, ["/cached-static"]);
+  assert.deepEqual(buildManifest.prerenderedRoutes, [
+    "/cached-static",
+    "/catalog/books/guide",
+    "/catalog/games/chess",
+  ]);
 });
 
 test("build emits deploy route and asset manifests for external deployment pipelines", () => {
@@ -366,6 +423,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
         cache: "dynamic",
         cacheKey: "/",
         prerendered: false,
+        prerenderedPaths: [],
         responsePath: null,
       },
       {
@@ -373,6 +431,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
         cache: "dynamic",
         cacheKey: "/about",
         prerendered: false,
+        prerenderedPaths: [],
         responsePath: null,
       },
       {
@@ -380,6 +439,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
         cache: "dynamic",
         cacheKey: "/blog/:slug",
         prerendered: false,
+        prerenderedPaths: [],
         responsePath: null,
       },
       {
@@ -387,6 +447,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
         cache: "dynamic",
         cacheKey: "/cached-dynamic",
         prerendered: false,
+        prerenderedPaths: [],
         responsePath: null,
       },
       {
@@ -394,6 +455,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
         cache: { revalidate: 1 },
         cacheKey: "/cached-revalidate",
         prerendered: false,
+        prerenderedPaths: [],
         responsePath: null,
       },
       {
@@ -401,6 +463,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
         cache: { revalidate: 1 },
         cacheKey: "/cached-revalidate/:slug",
         prerendered: false,
+        prerenderedPaths: [],
         responsePath: null,
       },
       {
@@ -408,13 +471,26 @@ test("build emits deploy route and asset manifests for external deployment pipel
         cache: "static",
         cacheKey: "/cached-static",
         prerendered: true,
+        prerenderedPaths: ["/cached-static"],
         responsePath: deployRoutesManifest.routes.find((route) => route.pathname === "/cached-static")?.responsePath ?? null,
+      },
+      {
+        pathname: "/catalog/:category/:slug",
+        cache: "static",
+        cacheKey: "/catalog/:category/:slug",
+        prerendered: true,
+        prerenderedPaths: [
+          "/catalog/books/guide",
+          "/catalog/games/chess",
+        ],
+        responsePath: null,
       },
       {
         pathname: "/docs/*slug",
         cache: "dynamic",
         cacheKey: "/docs/*slug",
         prerendered: false,
+        prerenderedPaths: [],
         responsePath: null,
       },
       {
@@ -422,12 +498,18 @@ test("build emits deploy route and asset manifests for external deployment pipel
         cache: "dynamic",
         cacheKey: "/optional/**slug",
         prerendered: false,
+        prerenderedPaths: [],
         responsePath: null,
       },
     ],
   );
 
-  const htmlAsset = deployAssetsManifest.assets.find((asset) => asset.kind === "html");
+  const htmlAsset = deployAssetsManifest.assets.find(
+    (asset) => asset.kind === "html" && asset.pathname === "/cached-static",
+  );
+  const catalogHtmlAsset = deployAssetsManifest.assets.find(
+    (asset) => asset.kind === "html" && asset.pathname === "/catalog/books/guide",
+  );
   const scriptAsset = deployAssetsManifest.assets.find((asset) => asset.kind === "script");
   const styleAsset = deployAssetsManifest.assets.find((asset) => asset.kind === "style");
   const resourceAsset = deployAssetsManifest.assets.find(
@@ -438,6 +520,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
 
   assert.equal(deployAssetsManifest.version, 1);
   assert.ok(htmlAsset);
+  assert.ok(catalogHtmlAsset);
   assert.ok(scriptAsset);
   assert.ok(styleAsset);
   assert.ok(resourceAsset);
@@ -446,6 +529,8 @@ test("build emits deploy route and asset manifests for external deployment pipel
   assert.equal(htmlAsset.cache, "static");
   assert.equal(htmlAsset.contentType, "application/json; charset=utf-8");
   assert.match(htmlAsset.outputPath, /^\.nextsx\/build\/route-cache\/[a-f0-9]{40}\.json$/);
+  assert.equal(catalogHtmlAsset.cache, "static");
+  assert.match(catalogHtmlAsset.outputPath, /^\.nextsx\/build\/route-cache\/[a-f0-9]{40}\.json$/);
   assert.match(scriptAsset.outputPath, /^\.nextsx\/build\/static\//);
   assert.equal(scriptAsset.contentType, "text/javascript; charset=utf-8");
   assert.equal(styleAsset.contentType, "text/css; charset=utf-8");
@@ -624,6 +709,30 @@ test("start server serves prerendered static routes from the build cache", async
   assert.equal(firstResponse.headers.get("x-nextsx-cache"), "HIT");
   assert.equal(secondResponse.headers.get("x-nextsx-cache"), "HIT");
   assert.match(firstHtml, /static:1/);
+  assert.equal(secondHtml, firstHtml);
+});
+
+test("start server serves prerendered dynamic static routes from the build cache", async () => {
+  const firstResponse = await fetch(`${baseUrl}/catalog/books/guide`);
+  const firstHtml = await firstResponse.text();
+  const secondResponse = await fetch(`${baseUrl}/catalog/books/guide`);
+  const secondHtml = await secondResponse.text();
+
+  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.match(firstHtml, /books:guide/);
+  assert.equal(secondHtml, firstHtml);
+});
+
+test("start server falls back to on-demand caching for non-prerendered dynamic static routes", async () => {
+  const firstResponse = await fetch(`${baseUrl}/catalog/books/novel`);
+  const firstHtml = await firstResponse.text();
+  const secondResponse = await fetch(`${baseUrl}/catalog/books/novel`);
+  const secondHtml = await secondResponse.text();
+
+  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.match(firstHtml, /books:novel/);
   assert.equal(secondHtml, firstHtml);
 });
 
