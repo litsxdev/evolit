@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
 import {
   buildSharedVendorRuntime,
   createBrowserSpecifierPublicUrl,
   createBrowserPackageBaseUrl,
   createHydrationBootstrap,
+  emitBundledClientAssets,
   getAssetByClientModule,
   getAssetByPublicUrl,
   getAssetsByKind,
@@ -16,6 +18,8 @@ import {
 } from "../src/client-assets.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { compileModuleGraph } from "../src/compiler.js";
+import { scaffoldSite } from "../src/scaffold.js";
 
 test("createHydrationBootstrap returns an empty string when no hydratable roots exist", () => {
   const bootstrap = createHydrationBootstrap({
@@ -250,4 +254,49 @@ test("browser package asset urls preserve package-relative paths", async () => {
     "/_nextsx/pkg/%40litsx/core/elements",
   );
   assert.match(exportedSubpathFilePath, /@litsx\/core\/src\/elements\/index\.js$/);
+});
+
+test("bundled static sourcemaps preserve original litsx sourcesContent", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-client-assets-"));
+  const fixtureRoot = path.join(tempRoot, "app");
+
+  try {
+    await scaffoldSite(fixtureRoot);
+    await fs.symlink(
+      path.join(process.cwd(), "node_modules"),
+      path.join(fixtureRoot, "node_modules"),
+      "dir",
+    );
+
+    await compileModuleGraph(path.join(fixtureRoot, "app", "page.litsx"), {
+      projectRoot: fixtureRoot,
+      mode: "development",
+      sourceMaps: true,
+      target: "client",
+    });
+
+    const manifest = await emitBundledClientAssets(fixtureRoot, {
+      mode: "development",
+      entryClientModules: new Set(["app/page.mjs"]),
+    });
+    const pageAsset = getAssetByClientModule(manifest, "app/page.mjs");
+    assert.ok(pageAsset);
+
+    const sourceMapPath = path.join(
+      fixtureRoot,
+      ".nextsx",
+      "dev",
+      "static",
+      pageAsset.publicUrl.replace("/_nextsx/static/", ""),
+    ) + ".map";
+    const sourceMap = JSON.parse(await fs.readFile(sourceMapPath, "utf8"));
+
+    assert.deepEqual(sourceMap.sources, ["/app/page.litsx"]);
+    assert.ok(Array.isArray(sourceMap.sourcesContent));
+    assert.match(sourceMap.sourcesContent[0], /export default async function HomePage/);
+    assert.match(sourceMap.sourcesContent[0], /<FeatureCard/);
+    assert.doesNotMatch(sourceMap.sourcesContent[0], /import \{ LitElement, css, html \} from "lit"/);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
 });

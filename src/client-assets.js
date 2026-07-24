@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -302,19 +302,40 @@ function resolveOriginalSourcePath(projectRoot, compiledClientRelativePath) {
 }
 
 function createStaticSourceMapPathTransform(projectRoot, clientRoot) {
+  const normalizedClientRoot = existsSync(clientRoot)
+    ? realpathSync(clientRoot)
+    : clientRoot;
+
   return function sourcemapPathTransform(relativeSourcePath, sourcemapPath) {
     const absoluteSourcePath = path.resolve(path.dirname(sourcemapPath), relativeSourcePath);
-    if (!absoluteSourcePath.startsWith(clientRoot)) {
+    const normalizedAbsoluteSourcePath = existsSync(absoluteSourcePath)
+      ? realpathSync(absoluteSourcePath)
+      : absoluteSourcePath;
+    if (!normalizedAbsoluteSourcePath.startsWith(normalizedClientRoot)) {
       return relativeSourcePath;
     }
 
-    const compiledClientRelativePath = path.relative(clientRoot, absoluteSourcePath).split(path.sep).join("/");
+    const compiledClientRelativePath = path.relative(
+      normalizedClientRoot,
+      normalizedAbsoluteSourcePath,
+    ).split(path.sep).join("/");
     if (isClientAssetStubModule(compiledClientRelativePath)) {
       return `/${compiledClientRelativePath.slice(0, -".mjs".length)}`;
     }
 
     return resolveOriginalSourcePath(projectRoot, compiledClientRelativePath) ?? relativeSourcePath;
   };
+}
+
+function resolveProjectSourcePath(projectRoot, sourcePath) {
+  if (typeof sourcePath !== "string" || !sourcePath.startsWith("/")) {
+    return null;
+  }
+
+  const relativeSourcePath = sourcePath.slice(1).split("/").join(path.sep);
+  const absoluteSourcePath = path.join(projectRoot, relativeSourcePath);
+
+  return existsSync(absoluteSourcePath) ? absoluteSourcePath : null;
 }
 
 async function rewriteEmittedStaticSourceMaps(projectRoot, clientRoot, staticRoot) {
@@ -338,12 +359,32 @@ async function rewriteEmittedStaticSourceMaps(projectRoot, clientRoot, staticRoo
     }
 
     const rewrittenSources = sourceMap.sources.map((sourcePath) => transformSourcePath(sourcePath, filePath));
-    const didChange = rewrittenSources.some((sourcePath, index) => sourcePath !== sourceMap.sources[index]);
-    if (!didChange) {
+    const rewrittenSourcesContent = await Promise.all(
+      rewrittenSources.map(async (sourcePath, index) => {
+        const resolvedSourcePath = resolveProjectSourcePath(projectRoot, sourcePath);
+        if (!resolvedSourcePath) {
+          return Array.isArray(sourceMap.sourcesContent) ? sourceMap.sourcesContent[index] ?? null : null;
+        }
+
+        try {
+          return await fs.readFile(resolvedSourcePath, "utf8");
+        } catch {
+          return Array.isArray(sourceMap.sourcesContent) ? sourceMap.sourcesContent[index] ?? null : null;
+        }
+      }),
+    );
+    const didChangeSources = rewrittenSources.some((sourcePath, index) => sourcePath !== sourceMap.sources[index]);
+    const existingSourcesContent = Array.isArray(sourceMap.sourcesContent) ? sourceMap.sourcesContent : [];
+    const didChangeSourcesContent = rewrittenSourcesContent.some(
+      (sourceContent, index) => sourceContent !== (existingSourcesContent[index] ?? null),
+    );
+
+    if (!didChangeSources && !didChangeSourcesContent) {
       continue;
     }
 
     sourceMap.sources = rewrittenSources;
+    sourceMap.sourcesContent = rewrittenSourcesContent;
     await fs.writeFile(filePath, `${JSON.stringify(sourceMap)}\n`, "utf8");
   }
 }
