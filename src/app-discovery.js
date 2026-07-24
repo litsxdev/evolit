@@ -140,6 +140,15 @@ function collectLayoutCandidates(routeDirectory, appRoot) {
   return layouts.reverse();
 }
 
+function collectConventionCandidates(routeDirectory, appRoot, filesByStem, stem) {
+  return collectLayoutCandidates(routeDirectory, appRoot)
+    .map((directory) => ({
+      directory,
+      module: findModuleByStem(filesByStem, directory, stem),
+    }))
+    .filter((entry) => entry.module);
+}
+
 function findModuleByStem(filesByStem, directory, stem) {
   for (const extension of MODULE_EXTENSIONS) {
     const candidate = path.join(directory, `${stem}${extension}`);
@@ -178,6 +187,18 @@ export async function discoverAppRoutes(projectRoot) {
       pathname: routePathFromSegments(routeSegments),
       page: pagePath,
       layouts: layoutFiles,
+      notFoundBoundaries: collectConventionCandidates(
+        routeDirectory,
+        appRoot,
+        filesByStem,
+        "not-found",
+      ),
+      errorBoundaries: collectConventionCandidates(
+        routeDirectory,
+        appRoot,
+        filesByStem,
+        "error",
+      ),
     };
   });
 }

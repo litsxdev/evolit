@@ -39,6 +39,12 @@ export default async function HomePage() {
         href="/news/launch-week"
         cache="revalidate"
       />
+      <RouteCard
+        title="Request Context"
+        body="Reads headers and cookies, writes a response cookie/header, and exposes redirect and not-found control flow."
+        href="/request-context"
+        cache="dynamic"
+      />
     </HomeHero>
   );
 }

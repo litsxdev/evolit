@@ -1,8 +1,10 @@
 import http from "node:http";
+import { watch } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { loadNextsxConfig } from "./config.js";
 import { createDeploymentRuntime } from "./deployment-runtime.js";
-import { BUILD_DIRECTORY, INTERNAL_DIRECTORY, MANIFEST_FILENAME } from "./constants.js";
+import { APP_DIRECTORY, BUILD_DIRECTORY, INTERNAL_DIRECTORY, MANIFEST_FILENAME } from "./constants.js";
 import { normalizeClientAssetManifest } from "./client-assets.js";
 import { pathExists, readJson } from "./fs-utils.js";
 import { createDefaultRouteCacheKey, resolveResponseCacheRuntime } from "./response-cache.js";
@@ -10,6 +12,78 @@ import { createDefaultRouteCacheKey, resolveResponseCacheRuntime } from "./respo
 function getPort(explicitPort) {
   const port = explicitPort ?? process.env.PORT ?? "3000";
   return Number.parseInt(String(port), 10);
+}
+
+async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
+  const watchers = new Map();
+  let closed = false;
+
+  async function watchDirectory(directory) {
+    if (closed || watchers.has(directory)) {
+      return;
+    }
+
+    let watcher;
+    try {
+      watcher = watch(directory, (eventType, fileName) => {
+        onChange();
+
+        if (eventType === "rename" && fileName) {
+          void watchNewDirectory(path.join(directory, fileName));
+        }
+      });
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw error;
+      }
+      return;
+    }
+
+    // A deleted directory may emit an error after its watcher has been installed.
+    watcher.on("error", () => {});
+    watchers.set(directory, watcher);
+
+    let entries;
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => watchDirectory(path.join(directory, entry.name))),
+    );
+  }
+
+  async function watchNewDirectory(candidate) {
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isDirectory()) {
+        await watchDirectory(candidate);
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  await watchDirectory(rootDirectory);
+
+  return {
+    close() {
+      closed = true;
+      for (const watcher of watchers.values()) {
+        watcher.close();
+      }
+      watchers.clear();
+    },
+  };
 }
 
 async function createServer(projectRoot, mode, explicitPort, options = {}) {
@@ -27,9 +101,45 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     responseCacheRuntime,
   });
   const port = getPort(explicitPort);
+  let invalidationTimer = null;
+  let pendingInvalidation = null;
+  let resolvePendingInvalidation = null;
+  let invalidationPromise = Promise.resolve();
+
+  function scheduleDevelopmentInvalidation() {
+    if (invalidationTimer) {
+      clearTimeout(invalidationTimer);
+    }
+
+    if (!pendingInvalidation) {
+      pendingInvalidation = new Promise((resolve) => {
+        resolvePendingInvalidation = resolve;
+      });
+    }
+
+    invalidationTimer = setTimeout(() => {
+      invalidationTimer = null;
+      const resolve = resolvePendingInvalidation;
+      pendingInvalidation = null;
+      resolvePendingInvalidation = null;
+      invalidationPromise = invalidationPromise
+        .catch(() => {})
+        .then(() => deploymentRuntime.invalidateDevelopmentState());
+      invalidationPromise.then(resolve, resolve);
+    }, 40);
+  }
+
+  const watcher = mode === "development"
+    ? await createRecursiveDirectoryWatcher(
+      path.join(projectRoot, APP_DIRECTORY),
+      scheduleDevelopmentInvalidation,
+    )
+    : null;
 
   const server = http.createServer(async (req, res) => {
     try {
+      await pendingInvalidation;
+      await invalidationPromise;
       const origin = `http://${req.headers.host ?? `localhost:${port}`}`;
       const request = new Request(new URL(req.url ?? "/", origin), {
         method: req.method,
@@ -55,6 +165,10 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       return server;
     },
     close() {
+      if (invalidationTimer) {
+        clearTimeout(invalidationTimer);
+      }
+      watcher?.close();
       server.close();
     },
   };

@@ -5,6 +5,15 @@ export { discoverAppRoutes } from "./app-discovery.js";
 export { scaffoldSite } from "./scaffold.js";
 export { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 export {
+  cookies,
+  headers,
+  notFound,
+  permanentRedirect,
+  redirect,
+  requestUrl,
+  responseHeaders,
+} from "./request-context.js";
+export {
   FileSystemResponseCacheStore,
   MemoryResponseCacheStore,
   ObjectStorageResponseCacheStore,

@@ -161,6 +161,32 @@ export async function buildProject(projectRoot) {
         path.relative(layoutClientBuild.outputRoot, layoutClientBuild.entrypoint).split(path.sep).join("/"),
       );
     }
+
+    const boundaryModules = [
+      ...(route.notFoundBoundaries ?? []).map((boundary) => boundary.module),
+      ...(route.errorBoundaries ?? []).map((boundary) => boundary.module),
+    ];
+    for (const boundaryPath of new Set(boundaryModules)) {
+      await compileModuleGraph(boundaryPath, {
+        projectRoot,
+        mode: "production",
+        sourceMaps: false,
+        ssr: true,
+        target: "server",
+      });
+
+      const boundaryClientBuild = await compileModuleGraph(boundaryPath, {
+        projectRoot,
+        mode: "production",
+        sourceMaps: true,
+        target: "client",
+      });
+      entryClientModules.add(
+        path.relative(boundaryClientBuild.outputRoot, boundaryClientBuild.entrypoint)
+          .split(path.sep)
+          .join("/"),
+      );
+    }
   }
 
   const clientAssets = await emitBundledClientAssets(projectRoot, {

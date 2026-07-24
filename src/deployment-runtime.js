@@ -220,11 +220,15 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
   );
   const devBundledEntries = new Set();
   let devRollupCache = null;
-  const effectiveRouteResolver = routeResolver ?? await createRouteResolver(projectRoot, mode, {
-    getStaticAssetPublicUrls() {
-      return createStaticAssetPublicUrlMap(currentAssetManifest);
-    },
-  });
+  const usesFrameworkRouteResolver = !routeResolver;
+  async function createFrameworkRouteResolver() {
+    return createRouteResolver(projectRoot, mode, {
+      getStaticAssetPublicUrls() {
+        return createStaticAssetPublicUrlMap(currentAssetManifest);
+      },
+    });
+  }
+  let effectiveRouteResolver = routeResolver ?? await createFrameworkRouteResolver();
   const ssrAdapter = createSsrAdapter({
     assetResolver(moduleId) {
       return currentAssetResolver(moduleId);
@@ -270,32 +274,45 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
   });
 
   return {
-    routeResolver: effectiveRouteResolver,
+    get routeResolver() {
+      return effectiveRouteResolver;
+    },
     responseCacheController,
-    async prepareRouteClientArtifacts(routeResult) {
-      if (routeResult.type !== "route") {
+    async invalidateDevelopmentState() {
+      if (mode !== "development") {
         return;
       }
 
-      const pageClientBuild = await compileModuleGraph(routeResult.route.page, {
-        projectRoot,
-        mode,
-        sourceMaps: mode === "development",
-        target: "client",
+      currentAssetManifest = null;
+      currentAssetResolver = createAssetResolver(projectRoot, {
+        assetManifest: currentAssetManifest,
       });
-      devBundledEntries.add(
-        path.relative(pageClientBuild.outputRoot, pageClientBuild.entrypoint).split(path.sep).join("/"),
-      );
+      devBundledEntries.clear();
+      devRollupCache = null;
 
-      for (const layoutPath of routeResult.route.layouts) {
-        const layoutClientBuild = await compileModuleGraph(layoutPath, {
+      if (usesFrameworkRouteResolver) {
+        effectiveRouteResolver = await createFrameworkRouteResolver();
+      }
+    },
+    async prepareRouteClientArtifacts(routeResult) {
+      if (routeResult.type !== "route" && !routeResult.boundaryModule) {
+        return;
+      }
+
+      const clientModules = [
+        ...(routeResult.type === "route" ? [routeResult.route.page, ...routeResult.route.layouts] : []),
+        ...(routeResult.boundaryModule ? [routeResult.boundaryModule] : []),
+      ];
+
+      for (const clientModule of new Set(clientModules)) {
+        const clientBuild = await compileModuleGraph(clientModule, {
           projectRoot,
           mode,
           sourceMaps: mode === "development",
           target: "client",
         });
         devBundledEntries.add(
-          path.relative(layoutClientBuild.outputRoot, layoutClientBuild.entrypoint).split(path.sep).join("/"),
+          path.relative(clientBuild.outputRoot, clientBuild.entrypoint).split(path.sep).join("/"),
         );
       }
 
@@ -332,7 +349,7 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
       }
 
       const routeResult = await effectiveRouteResolver.resolveRequest(request);
-      if (!shouldPrepareBeforeResolve) {
+      if (!shouldPrepareBeforeResolve || routeResult.boundaryModule) {
         await this.prepareRouteClientArtifacts(routeResult);
       }
       const response = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
@@ -382,6 +399,17 @@ export async function createDeploymentRuntime({
     assets,
     cache: renderer.responseCacheController,
     renderer,
+    async invalidateDevelopmentState() {
+      if (mode !== "development") {
+        return;
+      }
+
+      await renderer.invalidateDevelopmentState();
+      if (typeof effectiveResponseCacheRuntime.store.clear === "function") {
+        await effectiveResponseCacheRuntime.store.clear();
+      }
+      runtimeState.assetManifest = null;
+    },
     async handle(request) {
       const revalidationTasks = this.revalidationTasks ??= new Map();
       const pathname = new URL(request.url).pathname;

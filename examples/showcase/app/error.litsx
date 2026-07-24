@@ -1,0 +1,15 @@
+// @ts-nocheck
+import PageFrame from "./components/page-frame.litsx";
+
+export const metadata = {
+  title: "Application error | nextsx Showcase",
+};
+
+export default async function ErrorPage({ error }) {
+  return (
+    <PageFrame eyebrow="500" title="The route could not be rendered.">
+      <p>Error: <strong>{error instanceof Error ? error.message : "Unknown error"}</strong></p>
+      <p><a href="/">Return to the showcase</a></p>
+    </PageFrame>
+  );
+}

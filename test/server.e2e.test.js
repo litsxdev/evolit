@@ -97,6 +97,26 @@ function getAvailablePort() {
   });
 }
 
+async function waitForResponse(request, predicate, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastResponse = null;
+
+  while (Date.now() < deadline) {
+    const response = await request();
+    const body = await response.text();
+    lastResponse = { response, body };
+    if (predicate(lastResponse)) {
+      return lastResponse;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25);
+    });
+  }
+
+  throw new Error(`Timed out waiting for development watcher update: ${lastResponse?.response.status ?? "no response"}`);
+}
+
 before(async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-e2e-"));
   fixtureRoot = path.join(tempRoot, "app");
@@ -452,4 +472,50 @@ test("dev server revalidates dynamic routes in the background per pathname", asy
   assert.match(fourthHtml, /dynamic-revalidate:&quot;alpha&quot;:2/);
   assert.equal(otherPathResponse.headers.get("x-nextsx-cache"), "MISS");
   assert.match(otherPathHtml, /dynamic-revalidate:&quot;beta&quot;:3/);
+});
+
+test("dev server discovers new routes and invalidates cached route responses", async () => {
+  const routeDirectory = path.join(fixtureRoot, "app", "watcher-route");
+  const routePath = path.join(routeDirectory, "page.litsx");
+
+  const initialResponse = await fetch(`${baseUrl}/watcher-route`);
+  assert.equal(initialResponse.status, 404);
+
+  await fs.mkdir(routeDirectory, { recursive: true });
+  await fs.writeFile(
+    routePath,
+    [
+      'export const routeConfig = { cache: "static" };',
+      "",
+      "export default async function WatcherRoute() {",
+      '  return "<main>watcher version one</main>";',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const createdRoute = await waitForResponse(
+    () => fetch(`${baseUrl}/watcher-route`),
+    ({ response, body }) => response.status === 200 && body.includes("watcher version one"),
+  );
+  assert.equal(createdRoute.response.headers.get("x-nextsx-cache"), "MISS");
+
+  await fs.writeFile(
+    routePath,
+    [
+      'export const routeConfig = { cache: "static" };',
+      "",
+      "export default async function WatcherRoute() {",
+      '  return "<main>watcher version two</main>";',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await waitForResponse(
+    () => fetch(`${baseUrl}/watcher-route`),
+    ({ response, body }) => response.status === 200 && body.includes("watcher version two"),
+  );
 });

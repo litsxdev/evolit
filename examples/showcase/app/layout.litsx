@@ -36,6 +36,7 @@ export default async function RootLayout(props) {
       <NavLink slot="nav" href="/blog/hello-world" label="Dynamic Blog" />
       <NavLink slot="nav" href="/library/books/field-guide" label="Prerendered Library" />
       <NavLink slot="nav" href="/news/launch-week" label="ISR News" />
+      <NavLink slot="nav" href="/request-context" label="Request Context" />
       {children}
     </AppShell>
   );

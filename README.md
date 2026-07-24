@@ -106,6 +106,53 @@ export const routeConfig = {
 The same semantics work in local development and in production runtimes. Only the backing cache
 store changes.
 
+## Request APIs
+
+Server pages and layouts can access the active Web Request context through `nextsx/server`:
+
+```js
+import {
+  cookies,
+  headers,
+  notFound,
+  redirect,
+  requestUrl,
+  responseHeaders,
+} from "nextsx/server";
+
+export default async function AccountPage() {
+  if (!cookies().has("session")) {
+    redirect("/sign-in");
+  }
+
+  responseHeaders().set("x-account-page", "1");
+  return `<p>${headers().get("user-agent")} ${requestUrl().pathname}</p>`;
+}
+```
+
+`cookies()` can read, set, and delete cookies; mutations are emitted as `Set-Cookie` response
+headers. `redirect()` and `permanentRedirect()` end rendering with `307` and `308` responses, and
+`notFound()` renders a `404`. Reading headers, cookies, or the request URL makes the completed
+render dynamic, so it is not stored by the route response cache.
+
+## Route Boundaries
+
+`not-found.litsx` and `error.litsx` are resolved from the current route directory up to `app/`.
+The nearest file wins and its output is wrapped by the route layouts. A root `app/not-found.litsx`
+also handles unmatched URLs; without one, nextsx returns its minimal built-in 404 document.
+
+```js
+// app/blog/error.litsx
+export default async function BlogError({ error }) {
+  return `<p>Could not load this post: ${error.message}</p>`;
+}
+```
+
+Boundaries always bypass the route response cache. `loading.litsx` is intentionally not supported
+yet: it requires an end-to-end streaming document transport rather than an HTML-string fallback.
+In production, `error.litsx` receives a generic error with an opaque `digest`; the original error
+is reported only on the server.
+
 ## Dynamic Route Prerendering
 
 Dynamic routes can opt into build-time prerendering by exporting `generateStaticParams()` from

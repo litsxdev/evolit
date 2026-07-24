@@ -1,6 +1,16 @@
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { discoverAppRoutes, matchRoute } from "./app-discovery.js";
 import { importCompiledModule } from "./compiler.js";
+import { APP_DIRECTORY, MODULE_EXTENSIONS } from "./constants.js";
+import { pathExists } from "./fs-utils.js";
 import { mergeRouteConfig, normalizeRouteCachePolicy } from "./route-config.js";
+import {
+  createRequestContext,
+  getRequestContextResponse,
+  isNextsxHttpSignal,
+  runWithRequestContext,
+} from "./request-context.js";
 import {
   LITSX_COMPONENT,
   LITSX_SERVER_COMPONENT,
@@ -58,6 +68,30 @@ function mergeMetadata(modules) {
   }, {});
 }
 
+function createBoundaryError(error, { mode, route, reportRouteError }) {
+  const originalError = error instanceof Error ? error : new Error(String(error));
+
+  if (mode === "development") {
+    return originalError;
+  }
+
+  const digest = randomUUID();
+  const report = {
+    digest,
+    error: originalError,
+    route,
+  };
+  if (typeof reportRouteError === "function") {
+    reportRouteError(report);
+  } else {
+    console.error(`[nextsx] Route rendering failed (${digest}) at ${route.pathname}`, originalError);
+  }
+
+  const boundaryError = new Error("An unexpected server error occurred.");
+  boundaryError.digest = digest;
+  return boundaryError;
+}
+
 function getStaticParamsGenerator(moduleRecord) {
   if (moduleRecord?.generateStaticParams == null) {
     return null;
@@ -71,16 +105,7 @@ function getStaticParamsGenerator(moduleRecord) {
 }
 
 async function loadRouteModules(route, projectRoot, mode, options = {}) {
-  const resolvedStaticAssetPublicUrls =
-    typeof options.getStaticAssetPublicUrls === "function"
-      ? options.getStaticAssetPublicUrls()
-      : (options.staticAssetPublicUrls ?? null);
-  const moduleOptions = {
-    projectRoot,
-    mode,
-    ssr: true,
-    staticAssetPublicUrls: resolvedStaticAssetPublicUrls,
-  };
+  const moduleOptions = createRouteModuleOptions(projectRoot, mode, options);
   const pageModule = await importCompiledModule(route.page, moduleOptions);
   const layoutModules = await Promise.all(
     route.layouts.map((layoutPath) => importCompiledModule(layoutPath, moduleOptions)),
@@ -90,6 +115,57 @@ async function loadRouteModules(route, projectRoot, mode, options = {}) {
     pageModule,
     layoutModules,
   };
+}
+
+function createRouteModuleOptions(projectRoot, mode, options = {}) {
+  const resolvedStaticAssetPublicUrls =
+    typeof options.getStaticAssetPublicUrls === "function"
+      ? options.getStaticAssetPublicUrls()
+      : (options.staticAssetPublicUrls ?? null);
+
+  return {
+    projectRoot,
+    mode,
+    ssr: true,
+    staticAssetPublicUrls: resolvedStaticAssetPublicUrls,
+  };
+}
+
+async function findAppModule(projectRoot, stem) {
+  const appRoot = path.join(projectRoot, APP_DIRECTORY);
+
+  for (const extension of MODULE_EXTENSIONS) {
+    const candidate = path.join(appRoot, `${stem}${extension}`);
+    if (await pathExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function getNearestBoundary(route, boundaryName) {
+  return (route?.[boundaryName] ?? []).at(-1)?.module ?? null;
+}
+
+async function renderComponentTree(component, layoutComponents, requestContext, request, extraProps = {}) {
+  let renderedTree = await component({
+    params: requestContext.params,
+    searchParams: requestContext.searchParams,
+    request,
+    ...extraProps,
+  });
+
+  for (let index = layoutComponents.length - 1; index >= 0; index -= 1) {
+    renderedTree = await layoutComponents[index]({
+      params: requestContext.params,
+      searchParams: requestContext.searchParams,
+      request,
+      children: renderedTree,
+    });
+  }
+
+  return renderedTree;
 }
 
 export async function resolveStaticParamsForRoute(route, projectRoot, mode = "production", options = {}) {
@@ -135,16 +211,102 @@ export async function resolveStaticParamsForRoute(route, projectRoot, mode = "pr
 
 export async function createRouteResolver(projectRoot, mode = "development", resolverOptions = {}) {
   const routes = await discoverAppRoutes(projectRoot);
+  const rootLayoutPath = await findAppModule(projectRoot, "layout");
+  const rootNotFoundPath = await findAppModule(projectRoot, "not-found");
+
+  async function loadBoundaryComponent(boundaryPath) {
+    if (!boundaryPath) {
+      return null;
+    }
+
+    const moduleRecord = await importCompiledModule(
+      boundaryPath,
+      createRouteModuleOptions(projectRoot, mode, resolverOptions),
+    );
+    return {
+      moduleRecord,
+      component: assertServerComponent(
+        await resolveDefaultExport(moduleRecord, boundaryPath),
+        boundaryPath,
+      ),
+    };
+  }
+
+  async function renderNotFound(request, options = {}) {
+    const route = options.route ?? null;
+    const requestContext = options.requestContext ?? createRequestContext({
+      request,
+      params: options.params ?? {},
+      searchParams: options.searchParams ?? collectSearchParams(new URL(request.url)),
+    });
+    const boundaryPath = getNearestBoundary(route, "notFoundBoundaries") ?? rootNotFoundPath;
+
+    if (!boundaryPath) {
+      return {
+        type: "not-found",
+        status: 404,
+        boundaryModule: null,
+        route,
+        params: requestContext.params,
+        searchParams: requestContext.searchParams,
+        cachePolicy: { mode: "dynamic" },
+        cacheKey: new URL(request.url).pathname,
+        responseHeaders: getRequestContextResponse(requestContext).headers,
+      };
+    }
+
+    const boundary = await loadBoundaryComponent(boundaryPath);
+    const layoutModules = options.layoutModules ?? await Promise.all(
+      (rootLayoutPath ? [rootLayoutPath] : []).map((layoutPath) =>
+        importCompiledModule(
+          layoutPath,
+          createRouteModuleOptions(projectRoot, mode, resolverOptions),
+        ),
+      ),
+    );
+    const layoutComponents = options.layoutComponents ?? await Promise.all(
+      layoutModules.map((moduleRecord, index) => {
+        const layoutPath = route?.layouts[index] ?? rootLayoutPath;
+        return resolveDefaultExport(moduleRecord, layoutPath).then((entry) =>
+          assertServerComponent(entry, layoutPath),
+        );
+      }),
+    );
+    const tree = await runWithRequestContext(requestContext, () =>
+      renderComponentTree(boundary.component, layoutComponents, requestContext, request),
+    );
+    const contextResponse = getRequestContextResponse(requestContext);
+
+    return {
+      type: "not-found",
+      status: 404,
+      tree,
+      boundaryModule: boundaryPath,
+      metadata: mergeMetadata([...layoutModules, boundary.moduleRecord]),
+      route,
+      params: requestContext.params,
+      searchParams: requestContext.searchParams,
+      cachePolicy: { mode: "dynamic" },
+      cacheKey: new URL(request.url).pathname,
+      responseHeaders: contextResponse.headers,
+    };
+  }
 
   async function resolveMatchedRequest(request, options = {}) {
     const url = new URL(request.url);
     const match = matchRoute(url.pathname, routes);
 
     if (!match) {
-      return {
-        type: "not-found",
-        status: 404,
-      };
+      if (options.renderTree === false) {
+        return {
+          type: "not-found",
+          status: 404,
+          cachePolicy: { mode: "dynamic" },
+          cacheKey: url.pathname,
+        };
+      }
+
+      return renderNotFound(request);
     }
 
     const { pageModule, layoutModules } = await loadRouteModules(
@@ -181,33 +343,89 @@ export async function createRouteResolver(projectRoot, mode = "development", res
       ),
     );
 
-    const requestContext = {
-      params: match.params,
-      searchParams: collectSearchParams(url),
+    const requestContext = createRequestContext({
       request,
-    };
-
-    let tree = await pageComponent(requestContext);
-
-    for (let index = layoutComponents.length - 1; index >= 0; index -= 1) {
-      tree = await layoutComponents[index]({
-        ...requestContext,
-        children: tree,
-      });
-    }
-
-    return {
-      type: "route",
-      status: 200,
-      tree,
-      metadata: mergeMetadata([...layoutModules, pageModule]),
-      route: match.route,
       params: match.params,
       searchParams: collectSearchParams(url),
-      routeConfig,
-      cachePolicy,
-      cacheKey: url.pathname,
-    };
+    });
+
+    try {
+      const tree = await runWithRequestContext(requestContext, () =>
+        renderComponentTree(pageComponent, layoutComponents, requestContext, request),
+      );
+      const contextResponse = getRequestContextResponse(requestContext);
+
+      return {
+        type: "route",
+        status: 200,
+        tree,
+        metadata: mergeMetadata([...layoutModules, pageModule]),
+        route: match.route,
+        params: match.params,
+        searchParams: requestContext.searchParams,
+        routeConfig,
+        cachePolicy: contextResponse.didUseDynamicRequestData ? { mode: "dynamic" } : cachePolicy,
+        cacheKey: url.pathname,
+        responseHeaders: contextResponse.headers,
+      };
+    } catch (error) {
+      if (isNextsxHttpSignal(error)) {
+        if (error.type === "not-found") {
+          return renderNotFound(request, {
+            route: match.route,
+            requestContext,
+            layoutModules,
+            layoutComponents,
+          });
+        }
+
+        const contextResponse = getRequestContextResponse(requestContext);
+        return {
+          type: error.type,
+          status: error.status,
+          location: error.location,
+          route: match.route,
+          params: match.params,
+          searchParams: requestContext.searchParams,
+          routeConfig,
+          cachePolicy: { mode: "dynamic" },
+          cacheKey: url.pathname,
+          responseHeaders: contextResponse.headers,
+        };
+      }
+
+      const errorBoundaryPath = getNearestBoundary(match.route, "errorBoundaries");
+      if (!errorBoundaryPath) {
+        throw error;
+      }
+
+      const boundary = await loadBoundaryComponent(errorBoundaryPath);
+      const boundaryError = createBoundaryError(error, {
+        mode,
+        route: match.route,
+        reportRouteError: resolverOptions.reportRouteError,
+      });
+      const tree = await runWithRequestContext(requestContext, () =>
+        renderComponentTree(boundary.component, layoutComponents, requestContext, request, {
+          error: boundaryError,
+        }),
+      );
+      const contextResponse = getRequestContextResponse(requestContext);
+      return {
+        type: "error",
+        status: 500,
+        tree,
+        boundaryModule: errorBoundaryPath,
+        metadata: mergeMetadata([...layoutModules, boundary.moduleRecord]),
+        route: match.route,
+        params: match.params,
+        searchParams: requestContext.searchParams,
+        routeConfig,
+        cachePolicy: { mode: "dynamic" },
+        cacheKey: url.pathname,
+        responseHeaders: contextResponse.headers,
+      };
+    }
   }
 
   return {

@@ -62,15 +62,33 @@ ${metadata.head ? `    ${String(metadata.head).split("\n").join("\n    ")}` : ""
 </html>`;
 }
 
+function createRouteHeaders(routeResult, headers = {}) {
+  return {
+    ...headers,
+    ...(routeResult.responseHeaders ?? {}),
+  };
+}
+
 export function createSsrAdapter(options = {}) {
   return {
     name: options.name ?? "litsx-ssr",
     async renderRouteTree(routeResult) {
-      if (routeResult.type === "not-found") {
+      if (routeResult.type === "not-found" && !routeResult.tree) {
         return {
           status: 404,
-          headers: { "content-type": "text/html; charset=utf-8" },
+          headers: createRouteHeaders(routeResult, { "content-type": "text/html; charset=utf-8" }),
           body: "<!DOCTYPE html><html><body><h1>404</h1><p>Route not found.</p></body></html>",
+        };
+      }
+
+      if (routeResult.type === "redirect") {
+        return {
+          status: routeResult.status ?? 307,
+          headers: createRouteHeaders(routeResult, {
+            location: routeResult.location,
+            "content-type": "text/html; charset=utf-8",
+          }),
+          body: "<!DOCTYPE html><html><body><p>Redirecting...</p></body></html>",
         };
       }
 
@@ -78,7 +96,7 @@ export function createSsrAdapter(options = {}) {
         const metadata = resolveDocumentMetadata(routeResult.metadata, options);
         return {
           status: routeResult.status ?? 200,
-          headers: { "content-type": "text/html; charset=utf-8" },
+          headers: createRouteHeaders(routeResult, { "content-type": "text/html; charset=utf-8" }),
           body: createHtmlDocument({
             body: routeResult.tree,
             metadata: {
@@ -133,14 +151,14 @@ export function createSsrAdapter(options = {}) {
 
         return {
           status: routeResult.status ?? 200,
-          headers: { "content-type": "text/html; charset=utf-8" },
+          headers: createRouteHeaders(routeResult, { "content-type": "text/html; charset=utf-8" }),
           body: documentWithBootstrap,
         };
       }
 
       return {
         status: routeResult.status ?? 200,
-        headers: { "content-type": "text/html; charset=utf-8" },
+        headers: createRouteHeaders(routeResult, { "content-type": "text/html; charset=utf-8" }),
         body: transformedDocument,
       };
     },

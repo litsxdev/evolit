@@ -56,6 +56,10 @@ export class MemoryResponseCacheStore {
   async delete(cacheKey) {
     this.#entries.delete(cacheKey);
   }
+
+  async clear() {
+    this.#entries.clear();
+  }
 }
 
 export class FileSystemResponseCacheStore {
