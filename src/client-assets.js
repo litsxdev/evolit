@@ -302,6 +302,9 @@ function resolveOriginalSourcePath(projectRoot, compiledClientRelativePath) {
 }
 
 function createStaticSourceMapPathTransform(projectRoot, clientRoot) {
+  const normalizedProjectRoot = existsSync(projectRoot)
+    ? realpathSync(projectRoot)
+    : projectRoot;
   const normalizedClientRoot = existsSync(clientRoot)
     ? realpathSync(clientRoot)
     : clientRoot;
@@ -311,19 +314,31 @@ function createStaticSourceMapPathTransform(projectRoot, clientRoot) {
     const normalizedAbsoluteSourcePath = existsSync(absoluteSourcePath)
       ? realpathSync(absoluteSourcePath)
       : absoluteSourcePath;
-    if (!normalizedAbsoluteSourcePath.startsWith(normalizedClientRoot)) {
-      return relativeSourcePath;
+    const clientRelativePath = path.relative(normalizedClientRoot, normalizedAbsoluteSourcePath);
+    const isCompiledClientModule = clientRelativePath.length === 0 || (
+      !clientRelativePath.startsWith(`..${path.sep}`)
+      && clientRelativePath !== ".."
+      && !path.isAbsolute(clientRelativePath)
+    );
+    if (isCompiledClientModule) {
+      const compiledClientRelativePath = clientRelativePath.split(path.sep).join("/");
+      if (isClientAssetStubModule(compiledClientRelativePath)) {
+        return `/${compiledClientRelativePath.slice(0, -".mjs".length)}`;
+      }
+
+      return resolveOriginalSourcePath(projectRoot, compiledClientRelativePath) ?? relativeSourcePath;
     }
 
-    const compiledClientRelativePath = path.relative(
-      normalizedClientRoot,
-      normalizedAbsoluteSourcePath,
-    ).split(path.sep).join("/");
-    if (isClientAssetStubModule(compiledClientRelativePath)) {
-      return `/${compiledClientRelativePath.slice(0, -".mjs".length)}`;
+    const projectRelativePath = path.relative(normalizedProjectRoot, normalizedAbsoluteSourcePath);
+    const isProjectSource = projectRelativePath.length > 0
+      && !projectRelativePath.startsWith(`..${path.sep}`)
+      && projectRelativePath !== ".."
+      && !path.isAbsolute(projectRelativePath);
+    if (isProjectSource) {
+      return `/${projectRelativePath.split(path.sep).join("/")}`;
     }
 
-    return resolveOriginalSourcePath(projectRoot, compiledClientRelativePath) ?? relativeSourcePath;
+    return relativeSourcePath;
   };
 }
 
@@ -1513,6 +1528,24 @@ async function bundleClientAssets(projectRoot, options = {}) {
         return isBareSpecifier(id);
       },
       plugins: [
+        {
+          name: "nextsx-client-input-sourcemaps",
+          async load(id) {
+            if (!id.startsWith(clientRoot) || !id.endsWith(".mjs")) {
+              return null;
+            }
+
+            try {
+              const [code, map] = await Promise.all([
+                fs.readFile(id, "utf8"),
+                fs.readFile(`${id}.map`, "utf8"),
+              ]);
+              return { code, map: JSON.parse(map) };
+            } catch {
+              return null;
+            }
+          },
+        },
         nodeResolve({
           browser: true,
           exportConditions: ["browser", "import", "default"],

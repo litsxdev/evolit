@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { transformLitsx } from "@litsx/compiler";
+import MagicString from "magic-string";
+import remapping from "@jridgewell/remapping";
 import {
   BUILD_DIRECTORY,
   CLIENT_DIRECTORY,
@@ -121,9 +123,12 @@ async function rewriteRelativeSpecifiers({
   target,
   staticAssetPublicUrls,
   serverImportQuery,
+  sourceMaps,
+  outputPath,
+  inputSourceMap,
 }) {
-  let rewrittenCode = "";
-  let previousIndex = 0;
+  const magicSource = new MagicString(code);
+  let didRewrite = false;
 
   for (const match of code.matchAll(MODULE_SPECIFIER_PATTERN)) {
     const specifier = match[1] ?? match[2] ?? null;
@@ -219,14 +224,44 @@ async function rewriteRelativeSpecifiers({
       normalizedReplacement = `${normalizedReplacement}?${serverImportQuery}`;
     }
     const quotedSpecifierIndex = match.index + match[0].indexOf(specifier);
-
-    rewrittenCode += code.slice(previousIndex, quotedSpecifierIndex);
-    rewrittenCode += normalizedReplacement.split(path.sep).join("/");
-    previousIndex = quotedSpecifierIndex + specifier.length;
+    const replacementValue = normalizedReplacement.split(path.sep).join("/");
+    if (replacementValue !== specifier) {
+      didRewrite = true;
+      magicSource.update(
+        quotedSpecifierIndex,
+        quotedSpecifierIndex + specifier.length,
+        replacementValue,
+      );
+    }
   }
 
-  rewrittenCode += code.slice(previousIndex);
-  return rewrittenCode;
+  const rewrittenCode = magicSource.toString();
+  if (!sourceMaps || !didRewrite) {
+    return {
+      code: rewrittenCode,
+      map: sourceMaps ? inputSourceMap ?? null : null,
+    };
+  }
+
+  const intermediateSourceId = `${sourcePath.split(path.sep).join("/")}#nextsx-transform`;
+  const rewrittenMap = magicSource.generateMap({
+    hires: true,
+    includeContent: false,
+    source: intermediateSourceId,
+    file: outputPath.split(path.sep).join("/"),
+  });
+  const composedMap = inputSourceMap
+    ? remapping(rewrittenMap.toString(), (source) => (
+      // MagicString serializes the source relative to `file`, so compare the
+      // stable suffix rather than the absolute path we supplied above.
+      source.endsWith("#nextsx-transform") ? inputSourceMap : null
+    ))
+    : rewrittenMap;
+
+  return {
+    code: rewrittenCode,
+    map: composedMap,
+  };
 }
 
 export async function compileModuleGraph(entryPath, options = {}) {
@@ -261,7 +296,7 @@ export async function compileModuleGraph(entryPath, options = {}) {
       sourceMaps,
       ssr,
     });
-    const rewrittenCode = await rewriteRelativeSpecifiers({
+    const rewritten = await rewriteRelativeSpecifiers({
       projectRoot,
       outputRoot,
       sourcePath,
@@ -272,9 +307,12 @@ export async function compileModuleGraph(entryPath, options = {}) {
       target,
       staticAssetPublicUrls,
       serverImportQuery,
+      sourceMaps,
+      outputPath,
+      inputSourceMap: transformed.map ?? null,
     });
 
-    await fs.writeFile(outputPath, rewrittenCode, "utf8");
+    await fs.writeFile(outputPath, rewritten.code, "utf8");
     if (target === "client") {
       const metadata = moduleMetadata.get(sourcePath);
       if (metadata) {
@@ -290,8 +328,8 @@ export async function compileModuleGraph(entryPath, options = {}) {
         );
       }
     }
-    if (transformed.map && sourceMaps) {
-      await fs.writeFile(`${outputPath}.map`, JSON.stringify(transformed.map), "utf8");
+    if (rewritten.map && sourceMaps) {
+      await fs.writeFile(`${outputPath}.map`, JSON.stringify(rewritten.map), "utf8");
     }
 
     return outputPath;

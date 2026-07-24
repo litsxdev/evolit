@@ -18,6 +18,7 @@ import {
 } from "../src/client-assets.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
 import { compileModuleGraph } from "../src/compiler.js";
 import { scaffoldSite } from "../src/scaffold.js";
 
@@ -274,10 +275,16 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
       sourceMaps: true,
       target: "client",
     });
+    await compileModuleGraph(path.join(fixtureRoot, "app", "layout.litsx"), {
+      projectRoot: fixtureRoot,
+      mode: "development",
+      sourceMaps: true,
+      target: "client",
+    });
 
     const manifest = await emitBundledClientAssets(fixtureRoot, {
       mode: "development",
-      entryClientModules: new Set(["app/page.mjs"]),
+      entryClientModules: new Set(["app/page.mjs", "app/layout.mjs"]),
     });
     const pageAsset = getAssetByClientModule(manifest, "app/page.mjs");
     assert.ok(pageAsset);
@@ -296,6 +303,114 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
     assert.match(sourceMap.sourcesContent[0], /export default async function HomePage/);
     assert.match(sourceMap.sourcesContent[0], /<FeatureCard/);
     assert.doesNotMatch(sourceMap.sourcesContent[0], /import \{ LitElement, css, html \} from "lit"/);
+
+    const layoutAsset = getAssetByClientModule(manifest, "app/layout.mjs");
+    assert.ok(layoutAsset);
+    const layoutSourceMapPath = path.join(
+      fixtureRoot,
+      ".nextsx",
+      "dev",
+      "static",
+      layoutAsset.publicUrl.replace("/_nextsx/static/", ""),
+    ) + ".map";
+    const layoutSourceMap = JSON.parse(await fs.readFile(layoutSourceMapPath, "utf8"));
+    assert.deepEqual(layoutSourceMap.sources, ["/app/layout.litsx"]);
+
+    const emittedCode = await fs.readFile(sourceMapPath.slice(0, -".map".length), "utf8");
+    const traceMap = new TraceMap(sourceMap);
+    const sourceLineCount = sourceMap.sourcesContent[0].split("\n").length;
+    for (let generatedLine = 1; generatedLine <= emittedCode.split("\n").length; generatedLine += 1) {
+      const position = originalPositionFor(traceMap, { line: generatedLine, column: 0 });
+      if (position.source === sourceMap.sources[0]) {
+        assert.ok(
+          position.line <= sourceLineCount,
+          `generated line ${generatedLine} mapped outside the original LitSX source`,
+        );
+      }
+    }
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("rewriting client-relative imports preserves LitSX sourcemap sources", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-compiler-map-"));
+  const appRoot = path.join(tempRoot, "app");
+
+  try {
+    await fs.mkdir(path.join(appRoot, "components"), { recursive: true });
+    await fs.writeFile(
+      path.join(appRoot, "components", "shell.litsx"),
+      "export default function Shell(props) { return <section>{props.children}</section>; }\n",
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(appRoot, "page.litsx"),
+      [
+        'import Shell from "./components/shell.litsx";',
+        "",
+        "export default function Page() {",
+        "  return <Shell />;",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const { entrypoint } = await compileModuleGraph(path.join(appRoot, "page.litsx"), {
+      projectRoot: tempRoot,
+      mode: "development",
+      sourceMaps: true,
+      target: "client",
+    });
+    const sourceMap = JSON.parse(await fs.readFile(`${entrypoint}.map`, "utf8"));
+    const traceMap = new TraceMap(sourceMap);
+    const importPosition = originalPositionFor(traceMap, { line: 3, column: 0 });
+
+    assert.deepEqual(sourceMap.sources, [path.join(appRoot, "page.litsx")]);
+    assert.match(sourceMap.sourcesContent[0], /import Shell from "\.\/components\/shell\.litsx"/);
+    assert.equal(importPosition.source, path.join(appRoot, "page.litsx"));
+    assert.equal(importPosition.line, 1);
+    assert.doesNotMatch(sourceMap.sources[0], /#nextsx-transform$/);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("rewriting client-relative imports also works without sourcemaps", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-compiler-build-"));
+  const appRoot = path.join(tempRoot, "app");
+
+  try {
+    await fs.mkdir(path.join(appRoot, "components"), { recursive: true });
+    await fs.writeFile(
+      path.join(appRoot, "components", "shell.litsx"),
+      "export default function Shell() { return <section />; }\n",
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(appRoot, "page.litsx"),
+      [
+        'import Shell from "./components/shell.litsx";',
+        "",
+        "export default function Page() {",
+        "  return <Shell />;",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const { entrypoint } = await compileModuleGraph(path.join(appRoot, "page.litsx"), {
+      projectRoot: tempRoot,
+      mode: "production",
+      sourceMaps: false,
+      target: "client",
+    });
+    const output = await fs.readFile(entrypoint, "utf8");
+
+    assert.match(output, /from "\.\/components\/shell\.mjs"/);
+    await assert.rejects(fs.access(`${entrypoint}.map`));
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
