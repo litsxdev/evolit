@@ -136,6 +136,10 @@ dist
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+**/.yarn/install-state.gz
+
+# nextsx generated output
+**/.nextsx/
 
 # Vite files
 vite.config.js.timestamp-*
