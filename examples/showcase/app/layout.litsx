@@ -1,0 +1,42 @@
+// @ts-nocheck
+import AppShell from "./components/app-shell.litsx";
+
+export const metadata = {
+  title: "nextsx Showcase",
+  description: "Standalone validation app for nextsx routing, assets, and caching",
+};
+
+/**
+ * @param {{ href: string, label: string }} props
+ */
+function NavLink(props) {
+  static styles = `
+    a {
+      color: rgba(243, 240, 232, 0.92);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(243, 240, 232, 0.16);
+      padding-bottom: 2px;
+    }
+  `;
+
+  const { href, label } = props;
+
+  return <a href={href}>{label}</a>;
+}
+
+/**
+ * @param {{ children: unknown }} props
+ */
+export default async function RootLayout(props) {
+  const { children } = props;
+
+  return (
+    <AppShell>
+      <NavLink slot="nav" href="/" label="Home" />
+      <NavLink slot="nav" href="/blog/hello-world" label="Dynamic Blog" />
+      <NavLink slot="nav" href="/library/books/field-guide" label="Prerendered Library" />
+      <NavLink slot="nav" href="/news/launch-week" label="ISR News" />
+      {children}
+    </AppShell>
+  );
+}

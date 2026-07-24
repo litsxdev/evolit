@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": false,
+    "ignoreDeprecations": "6.0",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@litsx/core",
+    "baseUrl": "."
+  },
+  "include": [
+    "app/**/*.d.ts",
+    "app/**/*.js",
+    "app/**/*.jsx",
+    "app/**/*.mjs",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "app/**/*.litsx",
+    "nextsx.config.js"
+  ]
+}

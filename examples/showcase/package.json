@@ -1,0 +1,22 @@
+{
+  "name": "nextsx-showcase",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "yarn@4.10.3",
+  "scripts": {
+    "dev": "NODE_OPTIONS=--preserve-symlinks nextsx dev",
+    "build": "NODE_OPTIONS=--preserve-symlinks nextsx build",
+    "start": "NODE_OPTIONS=--preserve-symlinks nextsx start",
+    "typecheck": "litsx-tsc -p jsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@litsx/core": "0.17.0-canary-feat-ssr-20260722180828",
+    "lit": "^3.3.3",
+    "nextsx": "portal:../.."
+  },
+  "devDependencies": {
+    "@litsx/typescript": "^0.9.0",
+    "typescript": "^6.0.0"
+  }
+}
