@@ -159,10 +159,10 @@ before(async () => {
       "",
       "export default function CardAccent() {",
       "  return (",
-      '    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>',
-      '      <img src={accentIcon} alt="" style={{ display: "inline-block", width: "10px", height: "10px" }} />',
-      '      <img src={badgeIcon} alt="" style={{ display: "inline-block", width: "6px", height: "6px" }} />',
-      '      <img src={badgePoster} alt="" style={{ display: "inline-block", width: "6px", height: "6px" }} />',
+      '    <span className="card-accent-wrap">',
+      '      <img src={accentIcon} className="card-accent" alt="" />',
+      '      <img src={badgeIcon} className="card-badge" alt="" />',
+      '      <img src={badgePoster} className="card-badge-poster" alt="" />',
       "    </span>",
       "  );",
       "}",
@@ -173,13 +173,27 @@ before(async () => {
   await fs.writeFile(
     path.join(fixtureRoot, "app", "components", "card-accent.css"),
     [
+      ".card-accent-wrap {",
+      "  display: inline-flex;",
+      "  align-items: center;",
+      "  gap: 4px;",
+      "}",
+      "",
       ".card-accent {",
-      "  display: inline-block;",
       "  width: 10px;",
       "  height: 10px;",
-      "  border-radius: 999px;",
       "  background: #ef9459;",
       `  background-image: url("./${cardBadgeSpecialPngFile}");`,
+      "}",
+      "",
+      ".card-badge {",
+      "  width: 6px;",
+      "  height: 6px;",
+      "}",
+      "",
+      ".card-badge-poster {",
+      "  width: 6px;",
+      "  height: 6px;",
       "}",
       "",
     ].join("\n"),
@@ -261,13 +275,15 @@ before(async () => {
   await fs.writeFile(
     featureCardPath,
     [
+      'import { nanoid } from "nanoid";',
       'import CardAccent from "./card-accent.litsx";',
       "",
       featureCardSource.replace(
-        '      <h2 style={{ margin: "0 0 12px", fontSize: "1.25rem" }}>{title}</h2>',
+        '      <h2 class="title">{title}</h2>',
         [
           "      <CardAccent />",
-          '      <h2 style={{ margin: "0 0 12px", fontSize: "1.25rem" }}>{title}</h2>',
+          '      <p data-vendor-ready={typeof nanoid === "function" ? "yes" : "no"}></p>',
+          '      <h2 class="title">{title}</h2>',
         ].join("\n"),
       ),
     ].join("\n"),
@@ -329,6 +345,8 @@ test("start server emits hashed public asset URLs for hydration bootstrap", asyn
   );
 
   assert.equal(response.status, 200);
+  assert.doesNotMatch(html, /<script type="importmap">/);
+  assert.match(html, /import\s+\{\s*hydratePage,\s*registerHydrationModules\s*\}\s+from\s+"\/_nextsx\/shared\/litsx__ssr__hydration-[A-Za-z0-9_-]+\.mjs"/);
   assert.ok(featureCardAsset);
   assert.match(html, /registerHydrationModules/);
   assert.match(
@@ -337,6 +355,8 @@ test("start server emits hashed public asset URLs for hydration bootstrap", asyn
   );
   assert.doesNotMatch(html, /\/_nextsx\/client\/app\/components\/feature-card\.mjs/);
   assert.doesNotMatch(html, /__NEXTSX_ASSET_URL__/);
+  assert.doesNotMatch(html, /\/var\/folders\//);
+  assert.doesNotMatch(html, /\/Users\//);
 });
 
 test("build manifest classifies entry and chunk client assets with structured metadata", () => {
@@ -412,6 +432,31 @@ test("build manifest classifies entry and chunk client assets with structured me
     "/catalog/books/guide",
     "/catalog/games/chess",
   ]);
+});
+
+test("client compilation metadata captures module and vendor imports", async () => {
+  const featureCardMetadata = JSON.parse(
+    await fs.readFile(
+      path.join(
+        fixtureRoot,
+        ".nextsx",
+        "build",
+        "client",
+        "app",
+        "components",
+        "feature-card.mjs.meta.json",
+      ),
+      "utf8",
+    ),
+  );
+
+  assert.deepEqual(featureCardMetadata.moduleImports, ["app/components/card-accent.mjs"]);
+  assert.equal(featureCardMetadata.vendorImports.includes("nanoid"), true);
+  assert.equal(featureCardMetadata.vendorImports.includes("@litsx/core"), true);
+  assert.equal(featureCardMetadata.vendorImports.includes("@litsx/core/elements"), true);
+  assert.equal(featureCardMetadata.vendorImports.includes("lit"), true);
+  assert.deepEqual(featureCardMetadata.styleImports, []);
+  assert.deepEqual(featureCardMetadata.assetImports, []);
 });
 
 test("build emits deploy route and asset manifests for external deployment pipelines", () => {
@@ -560,18 +605,19 @@ test("build emits a generic server runtime entry for external hosts", async () =
 });
 
 test("start server serves hashed client asset files", async () => {
-  const pageResponse = await fetch(`${baseUrl}/`);
-  const html = await pageResponse.text();
-  const match = html.match(/(\/_nextsx\/static\/app\/components\/feature-card\.[a-f0-9]{8}\.mjs)/);
+  const featureCardAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/components/feature-card.mjs",
+  );
 
-  assert.ok(match);
+  assert.ok(featureCardAsset);
 
-  const assetResponse = await fetch(`${baseUrl}${match[1]}`);
+  const assetResponse = await fetch(`${baseUrl}${featureCardAsset.publicUrl}`);
   const source = await assetResponse.text();
 
   assert.equal(assetResponse.status, 200);
   assert.match(source, /litsx\.hydratableTag/);
-  assert.match(source, /card-accent\.[a-f0-9]{8}\.mjs/);
+  assert.match(source, /\/_nextsx\/shared\/nanoid-[A-Za-z0-9_-]+\.mjs/);
+  assert.match(source, /\/_nextsx\/shared\/lit-[A-Za-z0-9_-]+\.mjs/);
 });
 
 test("start server serves hashed static svg assets", async () => {
@@ -626,9 +672,6 @@ test("start server emits hashed modulepreload links that match the asset manifes
   const featureCardAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/feature-card.mjs",
   );
-  const cardAccentAsset = buildManifest.clientAssets.assets.find(
-    (asset) => asset.clientModule === "app/components/card-accent.mjs",
-  );
   const cardAccentStyleAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-accent.css",
   );
@@ -643,7 +686,6 @@ test("start server emits hashed modulepreload links that match the asset manifes
   );
 
   assert.ok(featureCardAsset);
-  assert.ok(cardAccentAsset);
   assert.ok(cardAccentStyleAsset);
   assert.ok(cardAccentSvgAsset);
   assert.ok(cardBadgePngAsset);
@@ -654,28 +696,24 @@ test("start server emits hashed modulepreload links that match the asset manifes
       `<link rel="modulepreload" href="${featureCardAsset.publicUrl.replaceAll(".", "\\.")}">`,
     ),
   );
-  assert.match(
-    html,
-    new RegExp(
-      `<link rel="modulepreload" href="${cardAccentAsset.publicUrl.replaceAll(".", "\\.")}">`,
-    ),
-  );
+  assert.doesNotMatch(html, /\/_nextsx\/static\/chunks\/vendor-/);
   assert.match(
     html,
     new RegExp(
       `<link rel="stylesheet" href="${cardAccentStyleAsset.publicUrl.replaceAll(".", "\\.")}">`,
     ),
   );
-  assert.deepEqual(featureCardAsset.imports, ["app/components/card-accent.mjs"]);
-  assert.deepEqual(featureCardAsset.importUrls, [cardAccentAsset.publicUrl]);
-  assert.deepEqual(cardAccentAsset.styleImports, ["app/components/card-accent.css"]);
-  assert.deepEqual(cardAccentAsset.styleUrls, [cardAccentStyleAsset.publicUrl]);
-  assert.deepEqual(cardAccentAsset.assetImports, [
+  if (featureCardAsset.importUrls.length > 0) {
+    assert.ok(featureCardAsset.importUrls.every((url) => /^\/_nextsx\/shared\//.test(url)));
+  }
+  assert.deepEqual(featureCardAsset.styleImports, ["app/components/card-accent.css"]);
+  assert.deepEqual(featureCardAsset.styleUrls, [cardAccentStyleAsset.publicUrl]);
+  assert.deepEqual(featureCardAsset.assetImports, [
     `app/components/${cardBadgeSpecialPngFile}`,
     "app/components/card-accent.svg",
     "app/components/card-badge.png",
   ]);
-  assert.deepEqual(cardAccentAsset.assetUrls, [
+  assert.deepEqual(featureCardAsset.assetUrls, [
     cardBadgeSpecialPngAsset.publicUrl,
     cardAccentSvgAsset.publicUrl,
     cardBadgePngAsset.publicUrl,

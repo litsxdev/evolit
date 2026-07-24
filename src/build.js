@@ -9,10 +9,13 @@ import {
   collectTransitiveAssetPreloads,
   collectTransitiveStyleUrls,
   createAssetResolver,
-  createFrameworkImportMap,
   createHydrationBootstrap,
   createStaticAssetPublicUrlMap,
+  emitBundledClientAssets,
   emitHashedClientAssets,
+  normalizeHydrationDataForClient,
+  resolveSharedVendorModuleUrl,
+  rewriteHydrationDataScript,
   rewriteServerAssetPlaceholders,
 } from "./client-assets.js";
 import { compileModuleGraph } from "./compiler.js";
@@ -49,6 +52,7 @@ const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".woff2", "font/woff2"],
   [".ttf", "font/ttf"],
   [".otf", "font/otf"],
+  [".map", "application/json; charset=utf-8"],
   [".mjs", "text/javascript; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
 ]);
@@ -131,7 +135,7 @@ export async function buildProject(projectRoot) {
     const pageClientBuild = await compileModuleGraph(route.page, {
       projectRoot,
       mode: "production",
-      sourceMaps: false,
+      sourceMaps: true,
       target: "client",
     });
     entryClientModules.add(
@@ -150,7 +154,7 @@ export async function buildProject(projectRoot) {
       const layoutClientBuild = await compileModuleGraph(layoutPath, {
         projectRoot,
         mode: "production",
-        sourceMaps: false,
+        sourceMaps: true,
         target: "client",
       });
       entryClientModules.add(
@@ -159,7 +163,7 @@ export async function buildProject(projectRoot) {
     }
   }
 
-  const clientAssets = await emitHashedClientAssets(projectRoot, {
+  const clientAssets = await emitBundledClientAssets(projectRoot, {
     entryClientModules,
   });
   const staticAssetPublicUrls = createStaticAssetPublicUrlMap(clientAssets);
@@ -171,18 +175,17 @@ export async function buildProject(projectRoot) {
   const assetResolver = createAssetResolver(projectRoot, {
     assetManifest: clientAssets,
   });
-  const frameworkImportMap = await createFrameworkImportMap();
-  const importMapMarkup = `<script type="importmap">${JSON.stringify(frameworkImportMap)}</script>`;
+  const hydrationModuleUrl = await resolveSharedVendorModuleUrl(
+    projectRoot,
+    "production",
+    "@litsx/ssr/hydration",
+  );
   const ssrAdapter = createSsrAdapter({
     assetResolver,
-    head: importMapMarkup,
     async resolveAdditionalHead({ result }) {
       const clientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
       const urls = collectTransitiveAssetPreloads(clientImports, clientAssets);
       const styleUrls = collectTransitiveStyleUrls(clientImports, clientAssets);
-      if (urls.length === 0 && styleUrls.length === 0) {
-        return "";
-      }
 
       return [
         ...urls.map((href) => `<link rel="modulepreload" href="${href}">`),
@@ -191,9 +194,16 @@ export async function buildProject(projectRoot) {
     },
     resolveBootstrap({ result }) {
       return createHydrationBootstrap({
-        hydrationData: result.hydrationData,
+        hydrationData: normalizeHydrationDataForClient(result.hydrationData, projectRoot),
         assetResolver,
+        hydrationModuleUrl,
       });
+    },
+    transformDocument({ result, document }) {
+      return rewriteHydrationDataScript(
+        document,
+        normalizeHydrationDataForClient(result.hydrationData, projectRoot),
+      );
     },
   });
   const responseCacheRuntime = await resolveResponseCacheRuntime(projectRoot, "production", nextsxConfig);

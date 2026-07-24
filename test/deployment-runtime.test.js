@@ -62,7 +62,7 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
     const assetSource = String(assetResponse.body);
     assert.equal(assetResponse.status, 200);
     assert.equal(assetResponse.headers["content-type"], "text/javascript; charset=utf-8");
-    assert.match(assetSource, /feature-card\.[a-f0-9]{8}\.mjs/);
+    assert.match(assetSource, /\.\/components\/feature-card-[A-Za-z0-9_-]+\.mjs/);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

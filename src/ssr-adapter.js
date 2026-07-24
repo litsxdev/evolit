@@ -111,6 +111,14 @@ export function createSsrAdapter(options = {}) {
       const documentWithAdditionalHead = additionalHead
         ? result.document.replace("</head>", `${additionalHead}\n</head>`)
         : result.document;
+      const transformedDocument =
+        typeof options.transformDocument === "function"
+          ? await options.transformDocument({
+            routeResult,
+            result,
+            document: documentWithAdditionalHead,
+          })
+          : documentWithAdditionalHead;
 
       if (generatedBootstrap) {
         const bootstrapMarkup = renderBootstrap({
@@ -118,7 +126,7 @@ export function createSsrAdapter(options = {}) {
             content: generatedBootstrap,
           },
         });
-        const documentWithBootstrap = documentWithAdditionalHead.replace(
+        const documentWithBootstrap = transformedDocument.replace(
           "</body>",
           `${bootstrapMarkup}\n</body>`,
         );
@@ -133,7 +141,7 @@ export function createSsrAdapter(options = {}) {
       return {
         status: routeResult.status ?? 200,
         headers: { "content-type": "text/html; charset=utf-8" },
-        body: documentWithAdditionalHead,
+        body: transformedDocument,
       };
     },
   };

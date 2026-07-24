@@ -8,7 +8,7 @@ test("SSR adapter injects generated bootstrap only when resolveBootstrap returns
     resolveBootstrap() {
       return [
         'import { hydratePage, registerHydrationModules } from "@litsx/ssr/hydration";',
-        'await registerHydrationModules([() => import("/_nextsx/client/app/components/feature-card.mjs")]);',
+        'await registerHydrationModules([() => import("/_nextsx/static/app/components/feature-card.mjs")]);',
         "await hydratePage();",
       ].join("\n");
     },
@@ -50,7 +50,7 @@ test("SSR adapter respects explicit framework bootstrap options over generated b
   const adapter = createSsrAdapter({
     bootstrap: "/framework-bootstrap.js",
     resolveBootstrap() {
-      return 'await registerHydrationModules([() => import("/_nextsx/client/app/components/feature-card.mjs")]);';
+      return 'await registerHydrationModules([() => import("/_nextsx/static/app/components/feature-card.mjs")]);';
     },
   });
 

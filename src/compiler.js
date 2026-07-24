@@ -13,11 +13,25 @@ import {
 } from "./constants.js";
 import { ensureDirectory } from "./fs-utils.js";
 
-const RELATIVE_IMPORT_PATTERN =
+const MODULE_SPECIFIER_PATTERN =
   /\b(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 
 function isRelativeSpecifier(specifier) {
   return specifier.startsWith("./") || specifier.startsWith("../");
+}
+
+function isBareSpecifier(specifier) {
+  return (
+    typeof specifier === "string" &&
+    specifier.length > 0 &&
+    !specifier.startsWith(".") &&
+    !specifier.startsWith("/") &&
+    !specifier.startsWith("file:") &&
+    !specifier.startsWith("node:") &&
+    !specifier.startsWith("data:") &&
+    !specifier.startsWith("http:") &&
+    !specifier.startsWith("https:")
+  );
 }
 
 function shouldCompileModule(filePath) {
@@ -36,10 +50,6 @@ function createStaticAssetStubSource(relativeAssetPath, mode, target = "server",
   const normalizedAssetPath = relativeAssetPath.split(path.sep).join("/");
   if (normalizedAssetPath.endsWith(".css")) {
     return "export default {};\n";
-  }
-
-  if (mode === "development") {
-    return `export default "/_nextsx/client/${normalizedAssetPath}";\n`;
   }
 
   if (target === "server" && staticAssetPublicUrls?.has(normalizedAssetPath)) {
@@ -110,13 +120,30 @@ async function rewriteRelativeSpecifiers({
   mode,
   target,
   staticAssetPublicUrls,
+  serverImportQuery,
 }) {
   let rewrittenCode = "";
   let previousIndex = 0;
 
-  for (const match of code.matchAll(RELATIVE_IMPORT_PATTERN)) {
+  for (const match of code.matchAll(MODULE_SPECIFIER_PATTERN)) {
     const specifier = match[1] ?? match[2] ?? null;
-    if (!specifier || !isRelativeSpecifier(specifier)) {
+    if (!specifier) {
+      continue;
+    }
+
+    if (target === "client" && isBareSpecifier(specifier)) {
+      const sourceMetadata = moduleMetadata.get(sourcePath) ?? {
+        moduleImports: new Set(),
+        vendorImports: new Set(),
+        styleImports: new Set(),
+        assetImports: new Set(),
+      };
+      sourceMetadata.vendorImports.add(specifier);
+      moduleMetadata.set(sourcePath, sourceMetadata);
+      continue;
+    }
+
+    if (!isRelativeSpecifier(specifier)) {
       continue;
     }
 
@@ -146,6 +173,8 @@ async function rewriteRelativeSpecifiers({
         await ensureDirectory(path.dirname(assetOutputPath));
         await fs.copyFile(resolvedImportPath, assetOutputPath);
         const sourceMetadata = moduleMetadata.get(sourcePath) ?? {
+          moduleImports: new Set(),
+          vendorImports: new Set(),
           styleImports: new Set(),
           assetImports: new Set(),
         };
@@ -166,9 +195,29 @@ async function rewriteRelativeSpecifiers({
       path.dirname(importerOutputPath),
       compiledImportPath,
     );
-    const normalizedReplacement = replacementPath.startsWith(".")
+    if (target === "client" && shouldCompileModule(resolvedImportPath)) {
+      const sourceMetadata = moduleMetadata.get(sourcePath) ?? {
+        moduleImports: new Set(),
+        vendorImports: new Set(),
+        styleImports: new Set(),
+        assetImports: new Set(),
+      };
+      sourceMetadata.moduleImports.add(
+        path.relative(outputRoot, compiledImportPath).split(path.sep).join("/"),
+      );
+      moduleMetadata.set(sourcePath, sourceMetadata);
+    }
+    let normalizedReplacement = replacementPath.startsWith(".")
       ? replacementPath
       : `./${replacementPath}`;
+    if (
+      target === "server"
+      && mode === "development"
+      && typeof serverImportQuery === "string"
+      && serverImportQuery.length > 0
+    ) {
+      normalizedReplacement = `${normalizedReplacement}?${serverImportQuery}`;
+    }
     const quotedSpecifierIndex = match.index + match[0].indexOf(specifier);
 
     rewrittenCode += code.slice(previousIndex, quotedSpecifierIndex);
@@ -193,6 +242,9 @@ export async function compileModuleGraph(entryPath, options = {}) {
   const outputRoot = getTypedOutputRoot(projectRoot, mode, target);
   const visited = new Map();
   const moduleMetadata = new Map();
+  const serverImportQuery = target === "server" && mode === "development"
+    ? `t=${Date.now()}`
+    : null;
 
   async function compileModule(sourcePath) {
     if (visited.has(sourcePath)) {
@@ -219,6 +271,7 @@ export async function compileModuleGraph(entryPath, options = {}) {
       mode,
       target,
       staticAssetPublicUrls,
+      serverImportQuery,
     });
 
     await fs.writeFile(outputPath, rewrittenCode, "utf8");
@@ -228,6 +281,8 @@ export async function compileModuleGraph(entryPath, options = {}) {
         await fs.writeFile(
           `${outputPath}.meta.json`,
           `${JSON.stringify({
+            moduleImports: [...(metadata.moduleImports ?? [])].sort(),
+            vendorImports: [...(metadata.vendorImports ?? [])].sort(),
             styleImports: [...(metadata.styleImports ?? [])].sort(),
             assetImports: [...(metadata.assetImports ?? [])].sort(),
           }, null, 2)}\n`,

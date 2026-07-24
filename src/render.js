@@ -71,11 +71,15 @@ function getStaticParamsGenerator(moduleRecord) {
 }
 
 async function loadRouteModules(route, projectRoot, mode, options = {}) {
+  const resolvedStaticAssetPublicUrls =
+    typeof options.getStaticAssetPublicUrls === "function"
+      ? options.getStaticAssetPublicUrls()
+      : (options.staticAssetPublicUrls ?? null);
   const moduleOptions = {
     projectRoot,
     mode,
     ssr: true,
-    staticAssetPublicUrls: options.staticAssetPublicUrls ?? null,
+    staticAssetPublicUrls: resolvedStaticAssetPublicUrls,
   };
   const pageModule = await importCompiledModule(route.page, moduleOptions);
   const layoutModules = await Promise.all(

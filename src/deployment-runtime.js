@@ -1,18 +1,20 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { compileModuleGraph } from "./compiler.js";
 import {
-  collectDevStyleUrls,
   collectTransitiveAssetPreloads,
   collectTransitiveStyleUrls,
   createAssetResolver,
-  createFrameworkImportMap,
   createHydrationBootstrap,
   createStaticAssetPublicUrlMap,
+  emitBundledClientAssetsWithState,
   getAssetByPublicUrl,
-  getClientOutputRoot,
+  getSharedOutputRoot,
+  normalizeHydrationDataForClient,
   normalizeClientAssetManifest,
+  resolveSharedVendorModuleUrl,
+  resolveBrowserPackageAssetFilePath,
+  rewriteHydrationDataScript,
 } from "./client-assets.js";
 import { loadNextsxConfig } from "./config.js";
 import { createRouteResolver } from "./render.js";
@@ -23,9 +25,6 @@ import {
   resolveResponseCacheRuntime,
 } from "./response-cache.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
-
-const requireFromHere = createRequire(import.meta.url);
-
 const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".css", "text/css; charset=utf-8"],
   [".svg", "image/svg+xml"],
@@ -40,18 +39,13 @@ const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".woff2", "font/woff2"],
   [".ttf", "font/ttf"],
   [".otf", "font/otf"],
+  [".map", "application/json; charset=utf-8"],
   [".mjs", "text/javascript; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
 ]);
 
 function getContentType(filePath) {
   return CONTENT_TYPE_BY_EXTENSION.get(path.extname(filePath)) ?? "application/octet-stream";
-}
-
-function getClientAssetFilePath(projectRoot, mode, pathname) {
-  const clientRoot = getClientOutputRoot(projectRoot, mode);
-  const relativePath = decodeURIComponent(pathname.slice("/_nextsx/client/".length));
-  return path.join(clientRoot, relativePath);
 }
 
 function applyRouteCacheHeaders(response, cachePolicy) {
@@ -71,20 +65,17 @@ function applyRouteCacheHeaders(response, cachePolicy) {
   };
 }
 
-export function createPublicAssetOrigin({ projectRoot, mode, assetManifest }) {
-  const normalizedAssetManifest = normalizeClientAssetManifest(assetManifest);
+export function createPublicAssetOrigin({ projectRoot, mode, assetManifest, getAssetManifest }) {
+  function resolveAssetManifest() {
+    return normalizeClientAssetManifest(
+      typeof getAssetManifest === "function" ? getAssetManifest() : assetManifest,
+    );
+  }
 
   return {
     async resolve(pathname) {
-      if (pathname.startsWith("/_nextsx/client/")) {
-        const filePath = getClientAssetFilePath(projectRoot, mode, pathname);
-        return {
-          filePath,
-          contentType: getContentType(filePath),
-        };
-      }
-
       if (pathname.startsWith("/_nextsx/static/")) {
+        const normalizedAssetManifest = resolveAssetManifest();
         const decodedPathname = decodeURIComponent(pathname);
         const filePath = getAssetByPublicUrl(normalizedAssetManifest, decodedPathname)?.outputPath
           ?? getAssetByPublicUrl(normalizedAssetManifest, pathname)?.outputPath
@@ -99,9 +90,21 @@ export function createPublicAssetOrigin({ projectRoot, mode, assetManifest }) {
         };
       }
 
+      if (pathname.startsWith("/_nextsx/shared/")) {
+        const sharedRoot = getSharedOutputRoot(projectRoot, mode);
+        const relativePath = decodeURIComponent(pathname.slice("/_nextsx/shared/".length));
+        const filePath = path.join(sharedRoot, relativePath);
+        return {
+          filePath,
+          contentType: getContentType(filePath),
+        };
+      }
+
       if (pathname.startsWith("/_nextsx/pkg/")) {
-        const specifier = decodeURIComponent(pathname.slice("/_nextsx/pkg/".length));
-        const filePath = requireFromHere.resolve(specifier);
+        const filePath = await resolveBrowserPackageAssetFilePath(pathname);
+        if (!filePath) {
+          return null;
+        }
         return {
           filePath,
           contentType: getContentType(filePath),
@@ -206,27 +209,34 @@ export function createResponseCacheController({ responseCacheRuntime }) {
 }
 
 export async function createRequestRenderer({ projectRoot, mode, assetManifest, routeResolver, responseCacheRuntime }) {
-  const normalizedAssetManifest = normalizeClientAssetManifest(assetManifest);
-  const staticAssetPublicUrls = createStaticAssetPublicUrlMap(normalizedAssetManifest);
+  let currentAssetManifest = normalizeClientAssetManifest(assetManifest);
+  let currentAssetResolver = createAssetResolver(projectRoot, {
+    assetManifest: currentAssetManifest,
+  });
+  let currentHydrationModuleUrl = await resolveSharedVendorModuleUrl(
+    projectRoot,
+    mode,
+    "@litsx/ssr/hydration",
+  );
+  const devBundledEntries = new Set();
+  let devRollupCache = null;
   const effectiveRouteResolver = routeResolver ?? await createRouteResolver(projectRoot, mode, {
-    staticAssetPublicUrls,
+    getStaticAssetPublicUrls() {
+      return createStaticAssetPublicUrlMap(currentAssetManifest);
+    },
   });
-  const assetResolver = createAssetResolver(projectRoot, {
-    assetManifest: normalizedAssetManifest,
-  });
-  const frameworkImportMap = await createFrameworkImportMap();
-  const importMapMarkup = `<script type="importmap">${JSON.stringify(frameworkImportMap)}</script>`;
   const ssrAdapter = createSsrAdapter({
-    assetResolver,
-    head: importMapMarkup,
+    assetResolver(moduleId) {
+      return currentAssetResolver(moduleId);
+    },
     async resolveAdditionalHead({ result }) {
       const clientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
-      const urls = normalizedAssetManifest
-        ? collectTransitiveAssetPreloads(clientImports, normalizedAssetManifest)
+      const urls = currentAssetManifest
+        ? collectTransitiveAssetPreloads(clientImports, currentAssetManifest)
         : [];
-      const styleUrls = normalizedAssetManifest
-        ? collectTransitiveStyleUrls(clientImports, normalizedAssetManifest)
-        : await collectDevStyleUrls(projectRoot, clientImports, mode);
+      const styleUrls = currentAssetManifest
+        ? collectTransitiveStyleUrls(clientImports, currentAssetManifest)
+        : [];
       if (urls.length === 0 && styleUrls.length === 0) {
         return "";
       }
@@ -238,9 +248,18 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
     },
     resolveBootstrap({ result }) {
       return createHydrationBootstrap({
-        hydrationData: result.hydrationData,
-        assetResolver,
+        hydrationData: normalizeHydrationDataForClient(result.hydrationData, projectRoot),
+        assetResolver(moduleId) {
+          return currentAssetResolver(moduleId);
+        },
+        hydrationModuleUrl: currentHydrationModuleUrl,
       });
+    },
+    transformDocument({ result, document }) {
+      return rewriteHydrationDataScript(
+        document,
+        normalizeHydrationDataForClient(result.hydrationData, projectRoot),
+      );
     },
   });
   const responseCacheController = createResponseCacheController({
@@ -258,33 +277,72 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
         return;
       }
 
-      await compileModuleGraph(routeResult.route.page, {
+      const pageClientBuild = await compileModuleGraph(routeResult.route.page, {
         projectRoot,
         mode,
         sourceMaps: mode === "development",
         target: "client",
       });
+      devBundledEntries.add(
+        path.relative(pageClientBuild.outputRoot, pageClientBuild.entrypoint).split(path.sep).join("/"),
+      );
 
       for (const layoutPath of routeResult.route.layouts) {
-        await compileModuleGraph(layoutPath, {
+        const layoutClientBuild = await compileModuleGraph(layoutPath, {
           projectRoot,
           mode,
           sourceMaps: mode === "development",
           target: "client",
         });
+        devBundledEntries.add(
+          path.relative(layoutClientBuild.outputRoot, layoutClientBuild.entrypoint).split(path.sep).join("/"),
+        );
+      }
+
+      if (mode === "development") {
+        const bundledClientAssets = await emitBundledClientAssetsWithState(projectRoot, {
+          mode: "development",
+          entryClientModules: devBundledEntries,
+          rollupCache: devRollupCache,
+        });
+        currentAssetManifest = bundledClientAssets.manifest;
+        currentAssetResolver = createAssetResolver(projectRoot, {
+          assetManifest: currentAssetManifest,
+        });
+        currentHydrationModuleUrl = await resolveSharedVendorModuleUrl(
+          projectRoot,
+          mode,
+          "@litsx/ssr/hydration",
+          {
+            assetManifest: currentAssetManifest,
+            entryClientModules: [...devBundledEntries],
+          },
+        ) ?? currentHydrationModuleUrl;
+        devRollupCache = bundledClientAssets.rollupCache;
       }
     },
     async resolveRoutePolicy(request) {
       return effectiveRouteResolver.resolveRoutePolicy(request);
     },
-    async renderRoute(request) {
+    async renderRoute(request, routePolicyResult = null) {
+      const shouldPrepareBeforeResolve = mode === "development" && !currentAssetManifest;
+      if (shouldPrepareBeforeResolve) {
+        const resolvedRoutePolicyResult = routePolicyResult ?? await effectiveRouteResolver.resolveRoutePolicy(request);
+        await this.prepareRouteClientArtifacts(resolvedRoutePolicyResult);
+      }
+
       const routeResult = await effectiveRouteResolver.resolveRequest(request);
-      await this.prepareRouteClientArtifacts(routeResult);
+      if (!shouldPrepareBeforeResolve) {
+        await this.prepareRouteClientArtifacts(routeResult);
+      }
       const response = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
       return {
         routeResult,
         response,
       };
+    },
+    get assetManifest() {
+      return currentAssetManifest;
     },
   };
 }
@@ -302,15 +360,20 @@ export async function createDeploymentRuntime({
       mode,
       await loadNextsxConfig(projectRoot),
     );
+  const runtimeState = {
+    assetManifest: normalizeClientAssetManifest(assetManifest),
+  };
   const assets = createPublicAssetOrigin({
     projectRoot,
     mode,
-    assetManifest,
+    getAssetManifest() {
+      return runtimeState.assetManifest;
+    },
   });
   const renderer = await createRequestRenderer({
     projectRoot,
     mode,
-    assetManifest,
+    assetManifest: runtimeState.assetManifest,
     responseCacheRuntime: effectiveResponseCacheRuntime,
     routeResolver,
   });
@@ -341,7 +404,7 @@ export async function createDeploymentRuntime({
         ) {
           const revalidationTask = (async () => {
             try {
-              const { routeResult, response } = await renderer.renderRoute(request);
+              const { routeResult, response } = await renderer.renderRoute(request, routePolicyResult);
               await renderer.responseCacheController.store(
                 request,
                 routeResult,
@@ -358,7 +421,8 @@ export async function createDeploymentRuntime({
         return cachedResponse.response;
       }
 
-      const { routeResult, response } = await renderer.renderRoute(request);
+      const { routeResult, response } = await renderer.renderRoute(request, routePolicyResult);
+      runtimeState.assetManifest = normalizeClientAssetManifest(renderer.assetManifest);
       return renderer.responseCacheController.write(request, routeResult, response);
     },
   };

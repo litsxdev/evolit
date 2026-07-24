@@ -16,6 +16,22 @@ let baseUrl;
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 const cardBadgeSpecialPngFile = "card badge@2x.png";
 
+async function readDevClientAssetsManifest() {
+  return JSON.parse(
+    await fs.readFile(
+      path.join(fixtureRoot, ".nextsx", "dev", "client-assets.json"),
+      "utf8",
+    ),
+  );
+}
+
+async function getDevAssetPublicUrl(clientModule) {
+  const manifest = await readDevClientAssetsManifest();
+  const asset = manifest.assets.find((entry) => entry.clientModule === clientModule);
+  assert.ok(asset, `Expected dev asset manifest entry for ${clientModule}`);
+  return asset.publicUrl;
+}
+
 function createCounterPageSource(cacheExport, counterKey, label) {
   return [
     cacheExport,
@@ -213,13 +229,15 @@ before(async () => {
   await fs.writeFile(
     featureCardPath,
     [
+      'import { nanoid } from "nanoid";',
       'import CardAccent from "./card-accent.litsx";',
       "",
       featureCardSource.replace(
-        '      <h2 style={{ margin: "0 0 12px", fontSize: "1.25rem" }}>{title}</h2>',
+        '      <h2 class="title">{title}</h2>',
         [
           "      <CardAccent />",
-          '      <h2 style={{ margin: "0 0 12px", fontSize: "1.25rem" }}>{title}</h2>',
+          '      <p data-vendor-ready={typeof nanoid === "function" ? "yes" : "no"}></p>',
+          '      <h2 class="title">{title}</h2>',
         ].join("\n"),
       ),
     ].join("\n"),
@@ -250,11 +268,13 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /<script type="importmap">/);
+  assert.doesNotMatch(html, /<script type="importmap">/);
+  assert.match(html, /import \{ hydratePage, registerHydrationModules \} from "\/_nextsx\/shared\/litsx__ssr__hydration(?:-[A-Za-z0-9_-]+)?\.mjs"/);
   assert.match(html, /registerHydrationModules/);
-  assert.match(html, /await hydratePage\(\)/);
-  assert.match(html, /\/_nextsx\/client\/app\/components\/feature-card\.mjs/);
-  assert.match(html, /<link rel="stylesheet" href="\/_nextsx\/client\/app\/components\/card-accent\.css">/);
+  assert.match(html, /await hydratePage\(\{/);
+  assert.match(html, /clientImports: \[\]/);
+  assert.match(html, /\/_nextsx\/static\/app\/components\/feature-card\.mjs/);
+  assert.match(html, /<link rel="stylesheet" href="\/_nextsx\/static\/app\/components\/card-accent\.[a-f0-9]{8}\.css">/);
   assert.match(html, /id="__LITSX_HYDRATION__"/);
   assert.match(html, /data-litsx-root="litsx-root-0"/);
   assert.doesNotMatch(html, /__nextsx\/hydration/);
@@ -262,7 +282,9 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
 });
 
 test("dev server serves imported client css assets", async () => {
-  const response = await fetch(`${baseUrl}/_nextsx/client/app/components/card-accent.css`);
+  await fetch(`${baseUrl}/`);
+  const publicUrl = await getDevAssetPublicUrl("app/components/card-accent.css");
+  const response = await fetch(`${baseUrl}${publicUrl}`);
   const css = await response.text();
 
   assert.equal(response.status, 200);
@@ -272,7 +294,9 @@ test("dev server serves imported client css assets", async () => {
 });
 
 test("dev server serves imported static svg assets", async () => {
-  const response = await fetch(`${baseUrl}/_nextsx/client/app/components/card-accent.svg`);
+  await fetch(`${baseUrl}/`);
+  const publicUrl = await getDevAssetPublicUrl("app/components/card-accent.svg");
+  const response = await fetch(`${baseUrl}${publicUrl}`);
   const svg = await response.text();
 
   assert.equal(response.status, 200);
@@ -282,7 +306,9 @@ test("dev server serves imported static svg assets", async () => {
 });
 
 test("dev server serves imported static png assets", async () => {
-  const response = await fetch(`${baseUrl}/_nextsx/client/app/components/card-badge.png`);
+  await fetch(`${baseUrl}/`);
+  const publicUrl = await getDevAssetPublicUrl("app/components/card-badge.png");
+  const response = await fetch(`${baseUrl}${publicUrl}`);
   const pngBase64 = Buffer.from(await response.arrayBuffer()).toString("base64");
 
   assert.equal(response.status, 200);
@@ -291,9 +317,9 @@ test("dev server serves imported static png assets", async () => {
 });
 
 test("dev server serves imported static png assets with special characters in the file name", async () => {
-  const response = await fetch(
-    `${baseUrl}/_nextsx/client/app/components/${encodeURIComponent(cardBadgeSpecialPngFile)}`,
-  );
+  await fetch(`${baseUrl}/`);
+  const publicUrl = await getDevAssetPublicUrl(`app/components/${cardBadgeSpecialPngFile}`);
+  const response = await fetch(`${baseUrl}${publicUrl}`);
   const pngBase64 = Buffer.from(await response.arrayBuffer()).toString("base64");
 
   assert.equal(response.status, 200);
@@ -307,7 +333,7 @@ test("non-hydrated route omits the generated hydration bootstrap", async () => {
 
   assert.equal(response.status, 200);
   assert.match(html, /<title>About \| nextsx<\/title>/);
-  assert.match(html, /<script type="importmap">/);
+  assert.doesNotMatch(html, /<script type="importmap">/);
   assert.doesNotMatch(html, /rel="stylesheet"/);
   assert.doesNotMatch(html, /registerHydrationModules/);
   assert.doesNotMatch(html, /await hydratePage\(\)/);
