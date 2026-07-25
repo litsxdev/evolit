@@ -45,6 +45,12 @@ export default async function HomePage() {
         href="/request-context"
         cache="dynamic"
       />
+      <RouteCard
+        title="Route Handler"
+        body="/api/status is a Web Response endpoint with no HTML response cache."
+        href="/api/status"
+        cache="dynamic"
+      />
     </HomeHero>
   );
 }

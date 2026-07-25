@@ -22,6 +22,14 @@ export const MODULE_EXTENSIONS = [
   ".mjs",
 ];
 
+export const ROUTE_HANDLER_EXTENSIONS = [
+  ".tsx",
+  ".ts",
+  ".jsx",
+  ".js",
+  ".mjs",
+];
+
 export const STATIC_ASSET_EXTENSIONS = [
   ".css",
   ".svg",

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { APP_DIRECTORY, MODULE_EXTENSIONS } from "./constants.js";
+import { APP_DIRECTORY, MODULE_EXTENSIONS, ROUTE_HANDLER_EXTENSIONS } from "./constants.js";
 import { pathExists, walkFiles } from "./fs-utils.js";
 
 function stripExtension(filename) {
@@ -160,6 +160,17 @@ function findModuleByStem(filesByStem, directory, stem) {
   return null;
 }
 
+function findRouteHandlerByStem(filesByStem, directory) {
+  for (const extension of ROUTE_HANDLER_EXTENSIONS) {
+    const candidate = path.join(directory, `route${extension}`);
+    if (filesByStem.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 export async function discoverAppRoutes(projectRoot) {
   const appRoot = path.join(projectRoot, APP_DIRECTORY);
   if (!(await pathExists(appRoot))) {
@@ -201,6 +212,42 @@ export async function discoverAppRoutes(projectRoot) {
       ),
     };
   });
+}
+
+export async function discoverAppRouteHandlers(projectRoot) {
+  const appRoot = path.join(projectRoot, APP_DIRECTORY);
+  if (!(await pathExists(appRoot))) {
+    return [];
+  }
+
+  const allFiles = await walkFiles(appRoot);
+  const filesByStem = new Set(allFiles);
+  const routeDirectories = new Set(
+    allFiles
+      .filter((filePath) => path.basename(stripExtension(filePath)) === "route")
+      .map((filePath) => path.dirname(filePath)),
+  );
+
+  return [...routeDirectories].map((routeDirectory) => {
+    const handler = findRouteHandlerByStem(filesByStem, routeDirectory);
+    if (!handler) {
+      return null;
+    }
+
+    const page = findModuleByStem(filesByStem, routeDirectory, "page");
+    if (page) {
+      throw new Error(
+        `Route handler ${handler} cannot coexist with page module ${page}.`,
+      );
+    }
+
+    const relativeDirectory = path.relative(appRoot, routeDirectory);
+    const routeSegments = relativeDirectory === "" ? [] : relativeDirectory.split(path.sep);
+    return {
+      pathname: routePathFromSegments(routeSegments),
+      handler,
+    };
+  }).filter(Boolean);
 }
 
 export function matchRoute(pathname, routes) {

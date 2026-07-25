@@ -14,6 +14,27 @@ function getPort(explicitPort) {
   return Number.parseInt(String(port), 10);
 }
 
+async function writeResponseBody(response, body) {
+  if (!body || typeof body.getReader !== "function") {
+    response.end(body);
+    return;
+  }
+
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      response.write(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  response.end();
+}
+
 async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
   const watchers = new Map();
   let closed = false;
@@ -141,14 +162,16 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       await pendingInvalidation;
       await invalidationPromise;
       const origin = `http://${req.headers.host ?? `localhost:${port}`}`;
+      const method = req.method ?? "GET";
       const request = new Request(new URL(req.url ?? "/", origin), {
-        method: req.method,
+        method,
         headers: req.headers,
+        ...(method === "GET" || method === "HEAD" ? {} : { body: req, duplex: "half" }),
       });
       const response = await deploymentRuntime.handle(request);
 
       res.writeHead(response.status, response.headers);
-      res.end(response.body);
+      await writeResponseBody(res, response.body);
     } catch (error) {
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       res.end(error instanceof Error ? error.stack ?? error.message : String(error));

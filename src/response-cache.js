@@ -159,7 +159,8 @@ export class ObjectStorageResponseCacheStore {
 }
 
 export function createDefaultRouteCacheKey(request) {
-  return new URL(request.url).pathname;
+  const url = new URL(request.url);
+  return `${url.pathname}${url.search}`;
 }
 
 export function getRouteCacheArtifactFileName(cacheKey) {

@@ -22,6 +22,7 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
       "dir",
     );
     await fs.mkdir(path.join(fixtureRoot, "app", "cached-static"), { recursive: true });
+    await fs.mkdir(path.join(fixtureRoot, "app", "cached-request"), { recursive: true });
     await fs.writeFile(
       path.join(fixtureRoot, "app", "cached-static", "page.litsx"),
       [
@@ -29,6 +30,18 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
         "",
         "export default async function CachedStaticPage() {",
         '  return "<main>static runtime</main>";',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(fixtureRoot, "app", "cached-request", "page.litsx"),
+      [
+        'export const routeConfig = { cache: "static" };',
+        "",
+        "export default async function CachedRequestPage({ request }) {",
+        '  return `<main>request runtime:${request.headers.get("x-tenant")}</main>`;',
         "}",
         "",
       ].join("\n"),
@@ -52,6 +65,13 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
     const html = String(htmlResponse.body);
     assert.equal(htmlResponse.headers["x-nextsx-cache"], "HIT");
     assert.match(html, /static runtime/);
+
+    const dynamicRequestResponse = await runtime.handle(new Request(
+      "http://nextsx.local/cached-request",
+      { headers: { "x-tenant": "acme" } },
+    ));
+    assert.equal(dynamicRequestResponse.headers["x-nextsx-cache"], "SKIP");
+    assert.match(String(dynamicRequestResponse.body), /request runtime:acme/);
 
     const assetPublicUrl = buildManifest.clientAssets.assets.find(
       (asset) => asset.clientModule === "app/page.mjs",

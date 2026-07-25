@@ -106,6 +106,11 @@ export const routeConfig = {
 The same semantics work in local development and in production runtimes. Only the backing cache
 store changes.
 
+The default cache key includes the pathname and query string. Reading the `request` prop, request
+headers, cookies, or `requestUrl()` makes the completed render dynamic; it is never stored in the
+HTML response cache. `routeConfig.cache` is the sole authority for HTML caching; setting a
+`Cache-Control` response header does not alter that policy.
+
 ## Request APIs
 
 Server pages and layouts can access the active Web Request context through `nextsx/server`:
@@ -152,6 +157,27 @@ Boundaries always bypass the route response cache. `loading.litsx` is intentiona
 yet: it requires an end-to-end streaming document transport rather than an HTML-string fallback.
 In production, `error.litsx` receives a generic error with an opaque `digest`; the original error
 is reported only on the server.
+
+## Route Handlers
+
+`route.js`, `route.ts`, and the other supported JS/TS module variants expose HTTP endpoints from
+`app/`. Export a function named after each supported method and return a standard Web `Response`:
+
+```js
+// app/api/status/route.js
+import { cookies, responseHeaders } from "nextsx/server";
+
+export async function POST(request, { params, searchParams }) {
+  const body = await request.json();
+  cookies().set("last-action", "status", { httpOnly: true });
+  responseHeaders().set("x-api-version", "1");
+  return Response.json({ params, searchParams, body });
+}
+```
+
+Handlers receive a Web `Request` and `{ params, searchParams }`. They are always dynamic, bypass
+the HTML response cache, and return `405 Method Not Allowed` with `Allow` when the requested method
+is not exported. A handler and `page.*` cannot coexist in the same segment.
 
 ## Dynamic Route Prerendering
 

@@ -83,6 +83,31 @@ test("server route APIs translate redirect and notFound signals into HTTP respon
   }
 });
 
+test("reading the request prop marks an otherwise static route as dynamic", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-request-prop-"));
+
+  try {
+    await writePage(root, "", [
+      'export const routeConfig = { cache: "static" };',
+      "",
+      "export default async function Page({ request }) {",
+      '  return `<main>${request instanceof Request}:${request.headers.get("x-example")}</main>`;',
+      "}",
+      "",
+    ].join("\n"));
+
+    const resolver = await createRouteResolver(root);
+    const routeResult = await resolver.resolveRequest(new Request("http://nextsx.local/", {
+      headers: { "x-example": "request-prop" },
+    }));
+
+    assert.equal(routeResult.cachePolicy.mode, "dynamic");
+    assert.match(routeResult.tree, /true:request-prop/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("server route APIs share request context across duplicate module identities", async () => {
   const alternateContextModule = await import(`${requestContextUrl}?duplicate-context`);
   const context = createRequestContext({

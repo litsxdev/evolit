@@ -89,6 +89,19 @@ function createCookieStore(context) {
   });
 }
 
+function createRouteRequest(context) {
+  return new Proxy(context.request, {
+    get(target, property) {
+      if (property !== "constructor" && property !== Symbol.toStringTag) {
+        context.didUseDynamicRequestData = true;
+      }
+
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 export function createRequestContext({ request, params = {}, searchParams = {} }) {
   const context = {
     request,
@@ -99,6 +112,7 @@ export function createRequestContext({ request, params = {}, searchParams = {} }
     didUseDynamicRequestData: false,
   };
   context.cookieStore = createCookieStore(context);
+  context.routeRequest = createRouteRequest(context);
   return context;
 }
 
@@ -154,4 +168,24 @@ export function getRequestContextResponse(context) {
     headers,
     didUseDynamicRequestData: context.didUseDynamicRequestData,
   };
+}
+
+export function applyRequestContextToResponse(response, context) {
+  if (!(response instanceof Response)) {
+    throw new Error("Expected a route handler to return a Web Response.");
+  }
+
+  const headers = new Headers(response.headers);
+  for (const [name, value] of context.responseHeaders.entries()) {
+    headers.set(name, value);
+  }
+  for (const cookie of context.responseCookies) {
+    headers.append("set-cookie", cookie);
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }

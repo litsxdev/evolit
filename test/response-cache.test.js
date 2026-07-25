@@ -32,9 +32,9 @@ test("resolveResponseCacheRuntime returns deployable hooks from nextsx config", 
   );
 });
 
-test("createDefaultRouteCacheKey uses the request pathname", () => {
+test("createDefaultRouteCacheKey uses the request pathname and search", () => {
   const request = new Request("https://example.com/products?tenant=acme");
-  assert.equal(createDefaultRouteCacheKey(request), "/products");
+  assert.equal(createDefaultRouteCacheKey(request), "/products?tenant=acme");
 });
 
 test("ObjectStorageResponseCacheStore persists cached entries through object-store hooks", async () => {

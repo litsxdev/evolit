@@ -1,12 +1,13 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { discoverAppRoutes, matchRoute } from "./app-discovery.js";
+import { discoverAppRouteHandlers, discoverAppRoutes, matchRoute } from "./app-discovery.js";
 import { importCompiledModule } from "./compiler.js";
 import { APP_DIRECTORY, MODULE_EXTENSIONS } from "./constants.js";
 import { pathExists } from "./fs-utils.js";
 import { mergeRouteConfig, normalizeRouteCachePolicy } from "./route-config.js";
 import {
   createRequestContext,
+  applyRequestContextToResponse,
   getRequestContextResponse,
   isNextsxHttpSignal,
   runWithRequestContext,
@@ -30,6 +31,10 @@ function collectSearchParams(url) {
   }
 
   return values;
+}
+
+function createRequestCacheKey(url) {
+  return `${url.pathname}${url.search}`;
 }
 
 async function resolveDefaultExport(moduleRecord, filePath) {
@@ -211,6 +216,7 @@ export async function resolveStaticParamsForRoute(route, projectRoot, mode = "pr
 
 export async function createRouteResolver(projectRoot, mode = "development", resolverOptions = {}) {
   const routes = await discoverAppRoutes(projectRoot);
+  const routeHandlers = await discoverAppRouteHandlers(projectRoot);
   const rootLayoutPath = await findAppModule(projectRoot, "layout");
   const rootNotFoundPath = await findAppModule(projectRoot, "not-found");
 
@@ -250,7 +256,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         params: requestContext.params,
         searchParams: requestContext.searchParams,
         cachePolicy: { mode: "dynamic" },
-        cacheKey: new URL(request.url).pathname,
+        cacheKey: createRequestCacheKey(new URL(request.url)),
         responseHeaders: getRequestContextResponse(requestContext).headers,
       };
     }
@@ -273,7 +279,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
       }),
     );
     const tree = await runWithRequestContext(requestContext, () =>
-      renderComponentTree(boundary.component, layoutComponents, requestContext, request),
+      renderComponentTree(boundary.component, layoutComponents, requestContext, requestContext.routeRequest),
     );
     const contextResponse = getRequestContextResponse(requestContext);
 
@@ -287,13 +293,82 @@ export async function createRouteResolver(projectRoot, mode = "development", res
       params: requestContext.params,
       searchParams: requestContext.searchParams,
       cachePolicy: { mode: "dynamic" },
-      cacheKey: new URL(request.url).pathname,
+      cacheKey: createRequestCacheKey(new URL(request.url)),
       responseHeaders: contextResponse.headers,
+    };
+  }
+
+  async function resolveRouteHandler(request, match, options = {}) {
+    const url = new URL(request.url);
+    if (options.renderTree === false) {
+      return {
+        type: "handler",
+        status: 200,
+        route: match.route,
+        params: match.params,
+        searchParams: collectSearchParams(url),
+        cachePolicy: { mode: "dynamic" },
+        cacheKey: createRequestCacheKey(url),
+      };
+    }
+
+    const handlerModule = await importCompiledModule(
+      match.route.handler,
+      createRouteModuleOptions(projectRoot, mode, resolverOptions),
+    );
+    const method = (request.method || "GET").toUpperCase();
+    const allowedMethods = Object.keys(handlerModule)
+      .filter((name) => /^[A-Z]+$/.test(name) && typeof handlerModule[name] === "function")
+      .sort();
+    const handler = handlerModule[method];
+    if (typeof handler !== "function") {
+      const response = new Response(null, {
+        status: 405,
+        headers: { allow: allowedMethods.join(", ") },
+      });
+      return {
+        type: "handler",
+        status: response.status,
+        response,
+        route: match.route,
+        params: match.params,
+        searchParams: collectSearchParams(url),
+        cachePolicy: { mode: "dynamic" },
+        cacheKey: createRequestCacheKey(url),
+      };
+    }
+
+    const requestContext = createRequestContext({
+      request,
+      params: match.params,
+      searchParams: collectSearchParams(url),
+    });
+    const response = applyRequestContextToResponse(
+      await runWithRequestContext(requestContext, () => handler(requestContext.routeRequest, {
+        params: requestContext.params,
+        searchParams: requestContext.searchParams,
+      })),
+      requestContext,
+    );
+
+    return {
+      type: "handler",
+      status: response.status,
+      response,
+      route: match.route,
+      params: match.params,
+      searchParams: requestContext.searchParams,
+      cachePolicy: { mode: "dynamic" },
+      cacheKey: createRequestCacheKey(url),
     };
   }
 
   async function resolveMatchedRequest(request, options = {}) {
     const url = new URL(request.url);
+    const handlerMatch = matchRoute(url.pathname, routeHandlers);
+    if (handlerMatch) {
+      return resolveRouteHandler(request, handlerMatch, options);
+    }
     const match = matchRoute(url.pathname, routes);
 
     if (!match) {
@@ -302,7 +377,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
           type: "not-found",
           status: 404,
           cachePolicy: { mode: "dynamic" },
-          cacheKey: url.pathname,
+          cacheKey: createRequestCacheKey(url),
         };
       }
 
@@ -327,7 +402,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         searchParams: collectSearchParams(url),
         routeConfig,
         cachePolicy,
-        cacheKey: url.pathname,
+        cacheKey: createRequestCacheKey(url),
       };
     }
 
@@ -351,7 +426,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
 
     try {
       const tree = await runWithRequestContext(requestContext, () =>
-        renderComponentTree(pageComponent, layoutComponents, requestContext, request),
+        renderComponentTree(pageComponent, layoutComponents, requestContext, requestContext.routeRequest),
       );
       const contextResponse = getRequestContextResponse(requestContext);
 
@@ -365,7 +440,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         searchParams: requestContext.searchParams,
         routeConfig,
         cachePolicy: contextResponse.didUseDynamicRequestData ? { mode: "dynamic" } : cachePolicy,
-        cacheKey: url.pathname,
+        cacheKey: createRequestCacheKey(url),
         responseHeaders: contextResponse.headers,
       };
     } catch (error) {
@@ -389,7 +464,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
           searchParams: requestContext.searchParams,
           routeConfig,
           cachePolicy: { mode: "dynamic" },
-          cacheKey: url.pathname,
+          cacheKey: createRequestCacheKey(url),
           responseHeaders: contextResponse.headers,
         };
       }
@@ -406,7 +481,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         reportRouteError: resolverOptions.reportRouteError,
       });
       const tree = await runWithRequestContext(requestContext, () =>
-        renderComponentTree(boundary.component, layoutComponents, requestContext, request, {
+        renderComponentTree(boundary.component, layoutComponents, requestContext, requestContext.routeRequest, {
           error: boundaryError,
         }),
       );
@@ -422,7 +497,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         searchParams: requestContext.searchParams,
         routeConfig,
         cachePolicy: { mode: "dynamic" },
-        cacheKey: url.pathname,
+        cacheKey: createRequestCacheKey(url),
         responseHeaders: contextResponse.headers,
       };
     }
@@ -430,6 +505,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
 
   return {
     routes,
+    routeHandlers,
     async resolveRoutePolicy(request) {
       return resolveMatchedRequest(request, { renderTree: false });
     },

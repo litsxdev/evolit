@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
+  discoverAppRouteHandlers,
   discoverAppRoutes,
   resolveRoutePathname,
   routeHasDynamicSegments,
@@ -118,10 +119,21 @@ async function writeDeploymentRuntimeEntry(buildRoot) {
 export async function buildProject(projectRoot) {
   const nextsxConfig = await loadNextsxConfig(projectRoot);
   const routes = await discoverAppRoutes(projectRoot);
+  const routeHandlers = await discoverAppRouteHandlers(projectRoot);
   const buildRoot = path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY);
   const entryClientModules = new Set();
 
   await ensureDirectory(buildRoot);
+
+  for (const routeHandler of routeHandlers) {
+    await compileModuleGraph(routeHandler.handler, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: false,
+      ssr: true,
+      target: "server",
+    });
+  }
 
   for (const route of routes) {
     await compileModuleGraph(route.page, {
@@ -277,7 +289,7 @@ export async function buildProject(projectRoot) {
 
       const targetRequest = new Request(`http://nextsx.local${targetPathname}`);
       const routeResult = await routeResolver.resolveRequest(targetRequest);
-      if (routeResult.type !== "route") {
+      if (routeResult.type !== "route" || routeResult.cachePolicy.mode === "dynamic") {
         continue;
       }
 

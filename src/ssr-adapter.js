@@ -69,10 +69,29 @@ function createRouteHeaders(routeResult, headers = {}) {
   };
 }
 
+function responseHeadersToObject(headers) {
+  const values = Object.fromEntries(headers.entries());
+  if (typeof headers.getSetCookie === "function") {
+    const cookies = headers.getSetCookie();
+    if (cookies.length > 0) {
+      values["set-cookie"] = cookies;
+    }
+  }
+  return values;
+}
+
 export function createSsrAdapter(options = {}) {
   return {
     name: options.name ?? "litsx-ssr",
     async renderRouteTree(routeResult) {
+      if (routeResult.type === "handler") {
+        return {
+          status: routeResult.response.status,
+          headers: responseHeadersToObject(routeResult.response.headers),
+          body: routeResult.response.body,
+        };
+      }
+
       if (routeResult.type === "not-found" && !routeResult.tree) {
         return {
           status: 404,
