@@ -121,6 +121,26 @@ function getAvailablePort() {
   });
 }
 
+async function waitForResponse(request, predicate, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastResponse = null;
+
+  while (Date.now() < deadline) {
+    const response = await request();
+    const body = await response.text();
+    lastResponse = { response, body };
+    if (predicate(lastResponse)) {
+      return lastResponse;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25);
+    });
+  }
+
+  throw new Error(`Timed out waiting for cache revalidation: ${lastResponse?.response.headers.get("x-evolit-cache") ?? "no response"}`);
+}
+
 before(async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-start-e2e-"));
   fixtureRoot = path.join(tempRoot, "app");
@@ -846,11 +866,10 @@ test("start server revalidates cached routes after the configured ttl", async ()
 
   const thirdResponse = await fetch(`${baseUrl}/cached-revalidate`);
   const thirdHtml = await thirdResponse.text();
-  await new Promise((resolve) => {
-    setTimeout(resolve, 100);
-  });
-  const fourthResponse = await fetch(`${baseUrl}/cached-revalidate`);
-  const fourthHtml = await fourthResponse.text();
+  const { response: fourthResponse, body: fourthHtml } = await waitForResponse(
+    () => fetch(`${baseUrl}/cached-revalidate`),
+    ({ response }) => response.headers.get("x-evolit-cache") === "HIT",
+  );
 
   assert.equal(thirdResponse.headers.get("x-evolit-cache"), "STALE");
   assert.equal(thirdHtml, firstHtml);
@@ -875,11 +894,10 @@ test("start server revalidates dynamic routes in the background per pathname", a
 
   const thirdResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
   const thirdHtml = await thirdResponse.text();
-  await new Promise((resolve) => {
-    setTimeout(resolve, 150);
-  });
-  const fourthResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
-  const fourthHtml = await fourthResponse.text();
+  const { response: fourthResponse, body: fourthHtml } = await waitForResponse(
+    () => fetch(`${baseUrl}/cached-revalidate/alpha`),
+    ({ response }) => response.headers.get("x-evolit-cache") === "HIT",
+  );
   const otherPathResponse = await fetch(`${baseUrl}/cached-revalidate/beta`);
   const otherPathHtml = await otherPathResponse.text();
 
