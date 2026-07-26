@@ -117,6 +117,38 @@ async function waitForResponse(request, predicate, timeoutMs = 2_000) {
   throw new Error(`Timed out waiting for development watcher update: ${lastResponse?.response.status ?? "no response"}`);
 }
 
+async function waitForLiveReload(body, timeoutMs = 2_000) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for a development live reload event."));
+    }, timeoutMs);
+
+    function cleanup() {
+      clearTimeout(timeout);
+      body.off("data", onData);
+      body.off("error", onError);
+    }
+
+    function onData(chunk) {
+      if (!String(chunk).includes("event: reload")) {
+        return;
+      }
+
+      cleanup();
+      resolve();
+    }
+
+    function onError(error) {
+      cleanup();
+      reject(error);
+    }
+
+    body.on("data", onData);
+    body.on("error", onError);
+  });
+}
+
 before(async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-e2e-"));
   fixtureRoot = path.join(tempRoot, "app");
@@ -546,6 +578,8 @@ test("dev server revalidates dynamic routes in the background per pathname", asy
 test("dev server discovers new routes and invalidates cached route responses", async () => {
   const routeDirectory = path.join(fixtureRoot, "app", "watcher-route");
   const routePath = path.join(routeDirectory, "page.litsx");
+  const liveReloadResponse = await fetch(`${baseUrl}/_evolit/live-reload`);
+  const liveReloadEvent = waitForLiveReload(liveReloadResponse.body);
 
   const initialResponse = await fetch(`${baseUrl}/watcher-route`);
   assert.equal(initialResponse.status, 404);
@@ -569,6 +603,8 @@ test("dev server discovers new routes and invalidates cached route responses", a
     ({ response, body }) => response.status === 200 && body.includes("watcher version one"),
   );
   assert.equal(createdRoute.response.headers.get("x-evolit-cache"), "MISS");
+  await liveReloadEvent;
+  liveReloadResponse.body.destroy();
 
   await fs.writeFile(
     routePath,

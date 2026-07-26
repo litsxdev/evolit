@@ -205,7 +205,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         });
         res.write("retry: 1000\\n\\n");
         liveReloadConnections.add(res);
-        req.on("close", () => {
+        res.on("close", () => {
           liveReloadConnections.delete(res);
         });
         return;
