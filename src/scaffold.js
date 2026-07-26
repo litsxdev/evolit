@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyDirectory, ensureDirectory, pathExists, writeJson } from "./fs-utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const { version: frameworkVersion } = require("../package.json");
 const TEMPLATE_ROOT = path.resolve(__dirname, "../templates/default");
 
 async function writeSitePackageJson(targetDirectory, siteName) {
@@ -21,7 +24,7 @@ async function writeSitePackageJson(targetDirectory, siteName) {
     },
     dependencies: {
       "@litsx/core": "0.17.0-canary-feat-ssr-20260726130435",
-      nextsx: "^0.1.0",
+      nextsx: frameworkVersion,
     },
     devDependencies: {
       "@litsx/typescript": "^0.9.0",

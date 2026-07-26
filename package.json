@@ -1,7 +1,7 @@
 {
   "name": "nextsx",
-  "version": "0.1.0",
-  "description": "A Next.js-style application framework for LitSX",
+  "version": "0.1.0-alpha.0",
+  "description": "A convention-driven application framework for LitSX, inspired by the Next.js App Router.",
   "type": "module",
   "packageManager": "yarn@4.10.3",
   "repository": {

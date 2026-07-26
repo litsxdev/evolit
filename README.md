@@ -38,7 +38,7 @@ Supported authored module extensions:
 
 ```sh
 yarn install
-npx nextsx my-site
+npx nextsx@alpha my-site
 ```
 
 Additional commands:

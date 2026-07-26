@@ -6,6 +6,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import frameworkPackageJson from "../package.json" with { type: "json" };
 
 const execFileAsync = promisify(execFile);
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,6 +23,7 @@ test("CLI scaffolds a site from a directory argument", async () => {
   assert.match(stdout, /Created nextsx site:/);
   const packageJson = JSON.parse(await fs.readFile(path.join(targetDirectory, "package.json"), "utf8"));
   assert.equal(packageJson.name, "my-site");
+  assert.equal(packageJson.dependencies.nextsx, frameworkPackageJson.version);
   await fs.access(path.join(targetDirectory, "app", "page.litsx"));
 });
 
