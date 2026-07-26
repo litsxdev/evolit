@@ -7,12 +7,12 @@ import {
   resolveResponseCacheRuntime,
 } from "../src/response-cache.js";
 
-test("resolveResponseCacheRuntime returns deployable hooks from nexel config", async () => {
+test("resolveResponseCacheRuntime returns deployable hooks from evolit config", async () => {
   const customStore = new MemoryResponseCacheStore();
-  const runtime = await resolveResponseCacheRuntime("/tmp/nexel-app", "production", {
+  const runtime = await resolveResponseCacheRuntime("/tmp/evolit-app", "production", {
     responseCache: {
       async createStore({ projectRoot, mode }) {
-        assert.equal(projectRoot, "/tmp/nexel-app");
+        assert.equal(projectRoot, "/tmp/evolit-app");
         assert.equal(mode, "production");
         return customStore;
       },

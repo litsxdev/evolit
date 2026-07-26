@@ -2,7 +2,7 @@
 import PageFrame from "./components/page-frame.litsx";
 
 export const metadata = {
-  title: "Page not found | nexel Showcase",
+  title: "Page not found | evolit Showcase",
 };
 
 export default async function NotFoundPage() {

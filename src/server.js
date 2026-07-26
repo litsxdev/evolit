@@ -2,7 +2,7 @@ import http from "node:http";
 import { watch } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadNexelConfig } from "./config.js";
+import { loadEvolitConfig } from "./config.js";
 import { createDeploymentRuntime } from "./deployment-runtime.js";
 import { APP_DIRECTORY, BUILD_DIRECTORY, INTERNAL_DIRECTORY, MANIFEST_FILENAME } from "./constants.js";
 import { normalizeClientAssetManifest } from "./client-assets.js";
@@ -108,13 +108,13 @@ async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
 }
 
 async function createServer(projectRoot, mode, explicitPort, options = {}) {
-  const nexelConfig = options.nexelConfig ?? await loadNexelConfig(projectRoot);
+  const evolitConfig = options.evolitConfig ?? await loadEvolitConfig(projectRoot);
   const responseCacheRuntime = options.responseCacheStore
     ? {
       store: options.responseCacheStore,
       createKey: options.createResponseCacheKey ?? (({ request }) => createDefaultRouteCacheKey(request)),
     }
-    : await resolveResponseCacheRuntime(projectRoot, mode, nexelConfig);
+    : await resolveResponseCacheRuntime(projectRoot, mode, evolitConfig);
   const deploymentRuntime = await createDeploymentRuntime({
     projectRoot,
     mode,

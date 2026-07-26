@@ -1,10 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-const REQUEST_CONTEXT_STORAGE = Symbol.for("nexel.request-context.storage");
-const HTTP_SIGNAL_CLASS = Symbol.for("nexel.request-context.http-signal");
+const REQUEST_CONTEXT_STORAGE = Symbol.for("evolit.request-context.storage");
+const HTTP_SIGNAL_CLASS = Symbol.for("evolit.request-context.http-signal");
 
 const requestContextStorage = globalThis[REQUEST_CONTEXT_STORAGE] ??= new AsyncLocalStorage();
-const NexelHttpSignal = globalThis[HTTP_SIGNAL_CLASS] ??= class NexelHttpSignal extends Error {
+const EvolitHttpSignal = globalThis[HTTP_SIGNAL_CLASS] ??= class EvolitHttpSignal extends Error {
   constructor(type, options = {}) {
     super(type);
     this.type = type;
@@ -16,7 +16,7 @@ const NexelHttpSignal = globalThis[HTTP_SIGNAL_CLASS] ??= class NexelHttpSignal 
 function getActiveContext() {
   const context = requestContextStorage.getStore();
   if (!context) {
-    throw new Error("Request APIs can only be called while rendering a nexel route.");
+    throw new Error("Request APIs can only be called while rendering a evolit route.");
   }
 
   return context;
@@ -171,7 +171,7 @@ export function responseHeaders() {
  * @returns {never}
  */
 export function redirect(location, status = 307) {
-  throw new NexelHttpSignal("redirect", { location: String(location), status });
+  throw new EvolitHttpSignal("redirect", { location: String(location), status });
 }
 
 /**
@@ -190,11 +190,11 @@ export function permanentRedirect(location) {
  * @returns {never}
  */
 export function notFound() {
-  throw new NexelHttpSignal("not-found", { status: 404 });
+  throw new EvolitHttpSignal("not-found", { status: 404 });
 }
 
-export function isNexelHttpSignal(error) {
-  return error instanceof NexelHttpSignal;
+export function isEvolitHttpSignal(error) {
+  return error instanceof EvolitHttpSignal;
 }
 
 export function getRequestContextResponse(context) {

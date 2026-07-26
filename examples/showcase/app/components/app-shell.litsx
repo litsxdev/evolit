@@ -46,7 +46,7 @@ export default function AppShell(props) {
   return (
     <main class="shell">
       <header class="header">
-        <div class="eyebrow">nexel showcase</div>
+        <div class="eyebrow">evolit showcase</div>
         <nav class="nav">
           <slot name="nav"></slot>
         </nav>

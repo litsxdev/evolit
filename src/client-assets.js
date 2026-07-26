@@ -482,7 +482,7 @@ export async function buildSharedVendorRuntime(
           continue;
         }
 
-        imports[specifier] = `/_nexel/shared/${chunk.fileName}`;
+        imports[specifier] = `/_evolit/shared/${chunk.fileName}`;
       }
 
       return {
@@ -516,19 +516,19 @@ export async function createBrowserSpecifierPublicUrl(specifier) {
   ]);
   const relativeFilePath = path.relative(packageRoot, filePath).split(path.sep).join("/");
 
-  return `/_nexel/pkg/${encodePathForUrl(parsedSpecifier.packageName)}/${encodePathForUrl(relativeFilePath)}`;
+  return `/_evolit/pkg/${encodePathForUrl(parsedSpecifier.packageName)}/${encodePathForUrl(relativeFilePath)}`;
 }
 
 export function createBrowserPackageBaseUrl(packageName) {
-  return `/_nexel/pkg/${encodePathForUrl(packageName)}/`;
+  return `/_evolit/pkg/${encodePathForUrl(packageName)}/`;
 }
 
 export async function resolveBrowserPackageAssetFilePath(pathname) {
-  if (!pathname.startsWith("/_nexel/pkg/")) {
+  if (!pathname.startsWith("/_evolit/pkg/")) {
     return null;
   }
 
-  const decodedPath = decodeURIComponent(pathname.slice("/_nexel/pkg/".length));
+  const decodedPath = decodeURIComponent(pathname.slice("/_evolit/pkg/".length));
   const segments = decodedPath.split("/").filter(Boolean);
   if (segments.length < 2) {
     return null;
@@ -1073,7 +1073,7 @@ function getAssetType(relativePath) {
 }
 
 function replaceStaticAssetPlaceholders(source, publicPathByRelativePath) {
-  return source.replaceAll(/__NEXEL_ASSET_URL__:([^"]+)/g, (match, encodedRelativeAssetPath) => {
+  return source.replaceAll(/__EVOLIT_ASSET_URL__:([^"]+)/g, (match, encodedRelativeAssetPath) => {
     const relativeAssetPath = encodedRelativeAssetPath
       .replaceAll("\\\\", "\\")
       .replaceAll('\\"', '"');
@@ -1090,7 +1090,7 @@ function rewriteStaticAssetPlaceholdersWithMap(source, publicPathByRelativePath)
   const magicSource = new MagicString(source);
   let didRewrite = false;
 
-  for (const match of source.matchAll(/__NEXEL_ASSET_URL__:([^"]+)/g)) {
+  for (const match of source.matchAll(/__EVOLIT_ASSET_URL__:([^"]+)/g)) {
     const encodedRelativeAssetPath = match[1];
     const relativeAssetPath = encodedRelativeAssetPath
       .replaceAll("\\\\", "\\")
@@ -1176,7 +1176,7 @@ function encodePathForUrl(value) {
 }
 
 function toStaticPublicUrl(relativePath) {
-  return `/_nexel/static/${encodePathForUrl(relativePath)}`;
+  return `/_evolit/static/${encodePathForUrl(relativePath)}`;
 }
 
 function collectRelativeClientImportPaths(source, fileRelativePath, publicPathByRelativePath) {
@@ -1308,7 +1308,7 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
     const importedPublicUrls = importedClientModules
       .map((importedModule) => byClientModule[importedModule] ?? publicPathByRelativePath.get(importedModule))
       .map((value) => {
-        if (typeof value === "string" && value.startsWith("/_nexel/")) {
+        if (typeof value === "string" && value.startsWith("/_evolit/")) {
           return value;
         }
         if (typeof value !== "string") {
@@ -1395,7 +1395,7 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
 
   const manifest = {
     version: CLIENT_ASSET_MANIFEST_VERSION,
-    publicPathPrefix: "/_nexel/static/",
+    publicPathPrefix: "/_evolit/static/",
     byClientModule,
     byPublicPath,
     entries,
@@ -1529,7 +1529,7 @@ async function bundleClientAssets(projectRoot, options = {}) {
       },
       plugins: [
         {
-          name: "nexel-client-input-sourcemaps",
+          name: "evolit-client-input-sourcemaps",
           async load(id) {
             if (!id.startsWith(clientRoot) || !id.endsWith(".mjs")) {
               return null;
@@ -1553,7 +1553,7 @@ async function bundleClientAssets(projectRoot, options = {}) {
           preferBuiltins: false,
         }),
         {
-          name: "nexel-client-asset-placeholders",
+          name: "evolit-client-asset-placeholders",
           renderChunk(code) {
             return rewriteStaticAssetPlaceholdersWithMap(code, publicPathByRelativePath);
           },
@@ -1670,7 +1670,7 @@ async function bundleClientAssets(projectRoot, options = {}) {
     .sort((left, right) => left.clientModule.localeCompare(right.clientModule));
   const manifest = {
     version: CLIENT_ASSET_MANIFEST_VERSION,
-    publicPathPrefix: "/_nexel/static/",
+    publicPathPrefix: "/_evolit/static/",
     byClientModule,
     byPublicPath,
     entries: assets.filter((asset) => asset.kind === "entry").map((asset) => asset.clientModule).sort(),
@@ -1725,9 +1725,9 @@ export async function rewriteServerAssetPlaceholders(projectRoot, assetManifest)
     }
 
     const source = await fs.readFile(filePath, "utf8");
-    const rewritten = source.replaceAll(/__NEXEL_ASSET_URL__:([A-Za-z0-9._/-]+)/g, (match, relativeAssetPath) => {
+    const rewritten = source.replaceAll(/__EVOLIT_ASSET_URL__:([A-Za-z0-9._/-]+)/g, (match, relativeAssetPath) => {
       return assetUrlByClientModule.get(relativeAssetPath) ?? match;
-    }).replaceAll(/__NEXEL_ASSET_URL__:([^"]+)/g, (match, encodedRelativeAssetPath) => {
+    }).replaceAll(/__EVOLIT_ASSET_URL__:([^"]+)/g, (match, encodedRelativeAssetPath) => {
       const relativeAssetPath = encodedRelativeAssetPath
         .replaceAll("\\\\", "\\")
         .replaceAll('\\"', '"');
@@ -1824,7 +1824,7 @@ export function normalizeClientAssetManifest(manifest) {
 
   return {
     version: manifest.version ?? CLIENT_ASSET_MANIFEST_VERSION,
-    publicPathPrefix: manifest.publicPathPrefix ?? "/_nexel/static/",
+    publicPathPrefix: manifest.publicPathPrefix ?? "/_evolit/static/",
     byClientModule: manifest.byClientModule ?? {},
     byPublicPath: manifest.byPublicPath ?? {},
     entries: Array.isArray(manifest.entries) ? manifest.entries : [],

@@ -6,7 +6,7 @@ import {
   redirect,
   requestUrl,
   responseHeaders,
-} from "nexel/server";
+} from "evolit/server";
 import PageFrame from "../components/page-frame.litsx";
 
 export default async function RequestContextPage({ searchParams }) {
@@ -23,12 +23,12 @@ export default async function RequestContextPage({ searchParams }) {
   const url = requestUrl();
   const requestHeaders = headers();
   const requestCookies = cookies();
-  const visits = Number(requestCookies.get("nexel-showcase-visits")?.value ?? "0") + 1;
-  requestCookies.set("nexel-showcase-visits", String(visits), {
+  const visits = Number(requestCookies.get("evolit-showcase-visits")?.value ?? "0") + 1;
+  requestCookies.set("evolit-showcase-visits", String(visits), {
     httpOnly: true,
     sameSite: "Lax",
   });
-  responseHeaders().set("x-nexel-showcase-context", "active");
+  responseHeaders().set("x-evolit-showcase-context", "active");
 
   return (
     <PageFrame eyebrow="Request context" title="Headers, cookies, redirects">

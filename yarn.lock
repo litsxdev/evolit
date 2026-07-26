@@ -1115,6 +1115,26 @@ __metadata:
   languageName: node
   linkType: hard
 
+"evolit@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "evolit@workspace:."
+  dependencies:
+    "@jridgewell/remapping": "npm:^2.3.5"
+    "@litsx/compiler": "npm:0.9.5-canary-feat-ssr-20260726130435"
+    "@litsx/core": "npm:0.17.0-canary-feat-ssr-20260726130435"
+    "@litsx/ssr": "npm:0.2.0-canary-feat-ssr-20260726130435"
+    "@litsx/typescript": "npm:^0.9.0"
+    "@rollup/plugin-node-resolve": "npm:^16.0.3"
+    lit: "npm:^3.3.3"
+    magic-string: "npm:^1.1.0"
+    rollup: "npm:^4.46.1"
+    typescript: "npm:^6.0.0"
+    vite: "npm:^8.1.5"
+  bin:
+    evolit: ./src/cli.js
+  languageName: unknown
+  linkType: soft
+
 "exponential-backoff@npm:^3.1.1":
   version: 3.1.3
   resolution: "exponential-backoff@npm:3.1.3"
@@ -1459,26 +1479,6 @@ __metadata:
   checksum: 10c0/bbf2dcffe22d2b62d16de2711752070b539c0f644c7916f823ad6521986b2078cbe524f2d6240f58c46e9141ea0c7b87a029e100c0f7f175228cacaf30e41bba
   languageName: node
   linkType: hard
-
-"nexel@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "nexel@workspace:."
-  dependencies:
-    "@jridgewell/remapping": "npm:^2.3.5"
-    "@litsx/compiler": "npm:0.9.5-canary-feat-ssr-20260726130435"
-    "@litsx/core": "npm:0.17.0-canary-feat-ssr-20260726130435"
-    "@litsx/ssr": "npm:0.2.0-canary-feat-ssr-20260726130435"
-    "@litsx/typescript": "npm:^0.9.0"
-    "@rollup/plugin-node-resolve": "npm:^16.0.3"
-    lit: "npm:^3.3.3"
-    magic-string: "npm:^1.1.0"
-    rollup: "npm:^4.46.1"
-    typescript: "npm:^6.0.0"
-    vite: "npm:^8.1.5"
-  bin:
-    nexel: ./src/cli.js
-  languageName: unknown
-  linkType: soft
 
 "node-domexception@npm:^1.0.0":
   version: 1.0.0

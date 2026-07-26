@@ -1,5 +1,5 @@
 export const APP_DIRECTORY = "app";
-export const INTERNAL_DIRECTORY = ".nexel";
+export const INTERNAL_DIRECTORY = ".evolit";
 export const BUILD_DIRECTORY = "build";
 export const DEV_DIRECTORY = "dev";
 export const SERVER_DIRECTORY = "server";

@@ -1,6 +1,6 @@
 export function GET() {
   return Response.json({
-    framework: "nexel",
+    framework: "evolit",
     status: "ok",
   });
 }

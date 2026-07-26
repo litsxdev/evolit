@@ -19,7 +19,7 @@ async function writeAppFile(root, relativePath, source) {
 }
 
 test("route conventions render the nearest not-found boundary and server error boundary", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-route-conventions-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-route-conventions-"));
 
   try {
     await writeAppFile(root, "layout.litsx", [
@@ -61,13 +61,13 @@ test("route conventions render the nearest not-found boundary and server error b
     const resolver = await createRouteResolver(root);
     const adapter = createSsrAdapter();
     const unknownResponse = await adapter.renderRouteTree(
-      await resolver.resolveRequest(new Request("http://nexel.local/missing")),
+      await resolver.resolveRequest(new Request("http://evolit.local/missing")),
     );
     const nestedNotFoundResponse = await adapter.renderRouteTree(
-      await resolver.resolveRequest(new Request("http://nexel.local/blog")),
+      await resolver.resolveRequest(new Request("http://evolit.local/blog")),
     );
     const errorResponse = await adapter.renderRouteTree(
-      await resolver.resolveRequest(new Request("http://nexel.local/broken")),
+      await resolver.resolveRequest(new Request("http://evolit.local/broken")),
     );
     const reports = [];
     const productionResolver = await createRouteResolver(root, "production", {
@@ -76,7 +76,7 @@ test("route conventions render the nearest not-found boundary and server error b
       },
     });
     const productionErrorResult = await productionResolver.resolveRequest(
-      new Request("http://nexel.local/broken"),
+      new Request("http://evolit.local/broken"),
     );
     const productionErrorResponse = await adapter.renderRouteTree(productionErrorResult);
 

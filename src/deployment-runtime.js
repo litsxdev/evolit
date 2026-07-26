@@ -16,7 +16,7 @@ import {
   resolveBrowserPackageAssetFilePath,
   rewriteHydrationDataScript,
 } from "./client-assets.js";
-import { loadNexelConfig } from "./config.js";
+import { loadEvolitConfig } from "./config.js";
 import { createRouteResolver } from "./render.js";
 import {
   createCachedRouteResponse,
@@ -74,7 +74,7 @@ export function createPublicAssetOrigin({ projectRoot, mode, assetManifest, getA
 
   return {
     async resolve(pathname) {
-      if (pathname.startsWith("/_nexel/static/")) {
+      if (pathname.startsWith("/_evolit/static/")) {
         const normalizedAssetManifest = resolveAssetManifest();
         const decodedPathname = decodeURIComponent(pathname);
         const filePath = getAssetByPublicUrl(normalizedAssetManifest, decodedPathname)?.outputPath
@@ -90,9 +90,9 @@ export function createPublicAssetOrigin({ projectRoot, mode, assetManifest, getA
         };
       }
 
-      if (pathname.startsWith("/_nexel/shared/")) {
+      if (pathname.startsWith("/_evolit/shared/")) {
         const sharedRoot = getSharedOutputRoot(projectRoot, mode);
-        const relativePath = decodeURIComponent(pathname.slice("/_nexel/shared/".length));
+        const relativePath = decodeURIComponent(pathname.slice("/_evolit/shared/".length));
         const filePath = path.join(sharedRoot, relativePath);
         return {
           filePath,
@@ -100,7 +100,7 @@ export function createPublicAssetOrigin({ projectRoot, mode, assetManifest, getA
         };
       }
 
-      if (pathname.startsWith("/_nexel/pkg/")) {
+      if (pathname.startsWith("/_evolit/pkg/")) {
         const filePath = await resolveBrowserPackageAssetFilePath(pathname);
         if (!filePath) {
           return null;
@@ -146,7 +146,7 @@ export function createResponseCacheController({ responseCacheRuntime }) {
         ...nextResponse,
         headers: {
           ...nextResponse.headers,
-          "x-nexel-cache": cacheState,
+          "x-evolit-cache": cacheState,
         },
       };
     },
@@ -375,7 +375,7 @@ export async function createDeploymentRuntime({
     ?? await resolveResponseCacheRuntime(
       projectRoot,
       mode,
-      await loadNexelConfig(projectRoot),
+      await loadEvolitConfig(projectRoot),
     );
   const runtimeState = {
     assetManifest: normalizeClientAssetManifest(assetManifest),

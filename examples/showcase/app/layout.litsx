@@ -2,8 +2,8 @@
 import AppShell from "./components/app-shell.litsx";
 
 export const metadata = {
-  title: "nexel Showcase",
-  description: "Standalone validation app for nexel routing, assets, and caching",
+  title: "evolit Showcase",
+  description: "Standalone validation app for evolit routing, assets, and caching",
 };
 
 /**

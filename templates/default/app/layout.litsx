@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "nexel",
+  title: "evolit",
   description: "A Next.js-style runtime for LitSX",
 };
 
@@ -8,7 +8,7 @@ export default async function RootLayout({ children }) {
     <main>
       <div class="shell">
         <header>
-          <div class="wordmark">nexel</div>
+          <div class="wordmark">evolit</div>
         </header>
         {children}
       </div>

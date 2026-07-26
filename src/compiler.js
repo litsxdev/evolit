@@ -58,7 +58,7 @@ function createStaticAssetStubSource(relativeAssetPath, mode, target = "server",
     return `export default ${JSON.stringify(staticAssetPublicUrls.get(normalizedAssetPath))};\n`;
   }
 
-  return `export default "__NEXEL_ASSET_URL__:${normalizedAssetPath}";\n`;
+  return `export default "__EVOLIT_ASSET_URL__:${normalizedAssetPath}";\n`;
 }
 
 async function resolveImportPath(importerPath, specifier) {
@@ -243,7 +243,7 @@ async function rewriteRelativeSpecifiers({
     };
   }
 
-  const intermediateSourceId = `${sourcePath.split(path.sep).join("/")}#nexel-transform`;
+  const intermediateSourceId = `${sourcePath.split(path.sep).join("/")}#evolit-transform`;
   const rewrittenMap = magicSource.generateMap({
     hires: true,
     includeContent: false,
@@ -254,7 +254,7 @@ async function rewriteRelativeSpecifiers({
     ? remapping(rewrittenMap.toString(), (source) => (
       // MagicString serializes the source relative to `file`, so compare the
       // stable suffix rather than the absolute path we supplied above.
-      source.endsWith("#nexel-transform") ? inputSourceMap : null
+      source.endsWith("#evolit-transform") ? inputSourceMap : null
     ))
     : rewrittenMap;
 

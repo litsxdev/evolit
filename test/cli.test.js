@@ -13,22 +13,22 @@ const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 const cliPath = path.join(frameworkRoot, "src", "cli.js");
 
 test("CLI scaffolds a site from a directory argument", async () => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-cli-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-cli-"));
   const targetDirectory = path.join(workspace, "my-site");
 
   const { stdout } = await execFileAsync(process.execPath, [cliPath, "my-site"], {
     cwd: workspace,
   });
 
-  assert.match(stdout, /Created nexel site:/);
+  assert.match(stdout, /Created evolit site:/);
   const packageJson = JSON.parse(await fs.readFile(path.join(targetDirectory, "package.json"), "utf8"));
   assert.equal(packageJson.name, "my-site");
-  assert.equal(packageJson.dependencies.nexel, frameworkPackageJson.version);
+  assert.equal(packageJson.dependencies.evolit, frameworkPackageJson.version);
   await fs.access(path.join(targetDirectory, "app", "page.litsx"));
 });
 
 test("CLI keeps init as an explicit scaffolding alias", async () => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-cli-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-cli-"));
   const targetDirectory = path.join(workspace, "explicit-site");
 
   await execFileAsync(process.execPath, [cliPath, "init", "explicit-site"], {
@@ -43,5 +43,5 @@ test("CLI shows usage without a command", async () => {
     cwd: frameworkRoot,
   });
 
-  assert.match(stdout, /Usage: nexel <directory>/);
+  assert.match(stdout, /Usage: evolit <directory>/);
 });

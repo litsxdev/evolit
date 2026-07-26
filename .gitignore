@@ -141,6 +141,7 @@ dist
 # Framework generated output
 **/.nextsx/
 **/.nexel/
+**/.evolit/
 
 # Vite files
 vite.config.js.timestamp-*

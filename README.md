@@ -1,13 +1,13 @@
-# nexel
+# evolit
 
-`nexel` is a convention-driven application framework built around LitSX and web components.
+`evolit` is a convention-driven application framework built around LitSX and web components.
 
 This repository now contains the first framework MVP:
 
 - file-based routing from `app/`
 - nested `layout` composition
 - server rendering through `@litsx/ssr`
-- a small `nexel` CLI with `init`, `dev`, `build`, and `start`
+- a small `evolit` CLI with `init`, `dev`, `build`, and `start`
 - on-demand compilation of authored `.litsx` modules through `@litsx/compiler`
 - a starter template for generating new sites
 
@@ -38,7 +38,7 @@ Supported authored module extensions:
 
 ```sh
 yarn install
-npx nexel@alpha my-site
+npx evolit@alpha my-site
 ```
 
 Additional commands:
@@ -60,15 +60,15 @@ yarn start
 
 The framework ships a starter at `templates/default`.
 
-`nexel <directory>` copies that template, writes a site `package.json`, and leaves the app ready
-to run. `nexel init <directory>` is supported as an explicit equivalent.
+`evolit <directory>` copies that template, writes a site `package.json`, and leaves the app ready
+to run. `evolit init <directory>` is supported as an explicit equivalent.
 
 ## Architecture
 
 The current runtime is split into a few small layers:
 
 - `src/app-discovery.js`: scans `app/` and builds the route table
-- `src/compiler.js`: compiles LitSX-authored modules into `.nexel/`
+- `src/compiler.js`: compiles LitSX-authored modules into `.evolit/`
 - `src/render.js`: resolves route modules and builds the route render tree
 - `src/ssr-adapter.js`: internal boundary around `@litsx/ssr`
 - `src/server.js`: serves HTTP requests
@@ -97,7 +97,7 @@ export const routeConfig = {
 };
 ```
 
-`nexel` currently normalizes those policies to:
+`evolit` currently normalizes those policies to:
 
 - `dynamic`: render on every request
 - `static`: prerender in `build` and serve from the response cache in `start`
@@ -113,7 +113,7 @@ HTML response cache. `routeConfig.cache` is the sole authority for HTML caching;
 
 ## Request APIs
 
-Server pages and layouts can access the active Web Request context through `nexel/server`:
+Server pages and layouts can access the active Web Request context through `evolit/server`:
 
 ```js
 import {
@@ -123,7 +123,7 @@ import {
   redirect,
   requestUrl,
   responseHeaders,
-} from "nexel/server";
+} from "evolit/server";
 
 export default async function AccountPage() {
   if (!cookies().has("session")) {
@@ -144,7 +144,7 @@ render dynamic, so it is not stored by the route response cache.
 
 `not-found.litsx` and `error.litsx` are resolved from the current route directory up to `app/`.
 The nearest file wins and its output is wrapped by the route layouts. A root `app/not-found.litsx`
-also handles unmatched URLs; without one, nexel returns its minimal built-in 404 document.
+also handles unmatched URLs; without one, evolit returns its minimal built-in 404 document.
 
 ```js
 // app/blog/error.litsx
@@ -165,7 +165,7 @@ is reported only on the server.
 
 ```js
 // app/api/status/route.js
-import { cookies, responseHeaders } from "nexel/server";
+import { cookies, responseHeaders } from "evolit/server";
 
 export async function POST(request, { params, searchParams }) {
   const body = await request.json();
@@ -204,18 +204,18 @@ export async function generateStaticParams({ params }) {
 }
 ```
 
-`nexel build` uses those params to prefill the route cache for concrete pathnames. Paths that were
+`evolit build` uses those params to prefill the route cache for concrete pathnames. Paths that were
 not prerendered still fall back to normal runtime rendering and cache population according to the
 route cache policy.
 
 ## Response Cache Adapters
 
-By default, `nexel` uses:
+By default, `evolit` uses:
 
 - in `dev`: an in-memory response cache
-- in `start`: a filesystem-backed response cache under `.nexel/build/route-cache`
+- in `start`: a filesystem-backed response cache under `.evolit/build/route-cache`
 
-That runtime is configurable through `nexel.config.js`:
+That runtime is configurable through `evolit.config.js`:
 
 ```js
 export default {
@@ -232,12 +232,12 @@ export default {
 
 The framework also exports `ObjectStorageResponseCacheStore`, which is intended for object-store
 backends such as S3. A concrete app can wire it to the AWS SDK without pulling AWS dependencies
-into `nexel` itself.
+into `evolit` itself.
 
 Example shape:
 
 ```js
-import { ObjectStorageResponseCacheStore } from "nexel";
+import { ObjectStorageResponseCacheStore } from "evolit";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -246,7 +246,7 @@ import {
 } from "@aws-sdk/client-s3";
 
 const s3 = new S3Client({ region: process.env.AWS_REGION });
-const bucket = process.env.NEXEL_CACHE_BUCKET;
+const bucket = process.env.EVOLIT_CACHE_BUCKET;
 
 export default {
   responseCache: {
@@ -298,7 +298,7 @@ That is the intended path toward deployments where:
 
 ## Deployment Manifests
 
-`nexel build` emits `deploy-routes.json` as a platform-neutral routing contract. Version 2
+`evolit build` emits `deploy-routes.json` as a platform-neutral routing contract. Version 2
 contains separate collections for HTML routes and HTTP handlers:
 
 ```json
@@ -323,7 +323,7 @@ assets and cached HTML to object storage, while always sending declared handlers
 
 ## SSR Status
 
-`nexel` now renders route/layout trees through `@litsx/ssr`.
+`evolit` now renders route/layout trees through `@litsx/ssr`.
 
 The current integration uses `renderDocument(...)` to produce the final HTML
 document for each route. That gives the framework:
@@ -333,7 +333,7 @@ document for each route. That gives the framework:
 - LitSX-owned hydratable module registration through `@litsx/ssr/hydration`
 - a stable internal adapter boundary for future evolution
 
-The remaining SSR work in `nexel` is mostly framework-specific:
+The remaining SSR work in `evolit` is mostly framework-specific:
 
 - client asset pipeline and public client URL resolution
 - minimal framework bootstrap assembly around LitSX hydration primitives

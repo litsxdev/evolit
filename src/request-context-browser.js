@@ -1,5 +1,5 @@
 function throwServerOnlyApi(name) {
-  throw new Error(`${name}() is only available while rendering a nexel server route.`);
+  throw new Error(`${name}() is only available while rendering a evolit server route.`);
 }
 
 export function cookies() { return throwServerOnlyApi("cookies"); }

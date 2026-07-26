@@ -1,5 +1,5 @@
 {
-  "name": "nexel",
+  "name": "evolit",
   "version": "0.1.0-alpha.0",
   "description": "A convention-driven application framework for LitSX and web components.",
   "type": "module",
@@ -34,7 +34,7 @@
     "release:check": "yarn test && yarn typecheck && yarn pack --dry-run"
   },
   "keywords": [
-    "nexel",
+    "evolit",
     "litsx",
     "lit",
     "ssr",

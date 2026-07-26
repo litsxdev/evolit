@@ -17,6 +17,6 @@
   },
   "include": [
     "app/**/*",
-    "nexel.config.js"
+    "evolit.config.js"
   ]
 }

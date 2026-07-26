@@ -25,11 +25,11 @@ const cardBadgeSpecialPngFile = "card badge@2x.png";
 function createCounterPageSource(cacheExport, counterKey, label) {
   return [
     cacheExport,
-    "globalThis.__NEXEL_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
+    "globalThis.__EVOLIT_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
     "",
     `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page() {`,
-    `  globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
-    `  const value = globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey};`,
+    `  globalThis.__EVOLIT_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
+    `  const value = globalThis.__EVOLIT_ROUTE_CACHE_COUNTERS.${counterKey};`,
     `  return \`<main data-cache-label="${label}" data-cache-value="\${value}">${label}:\${value}</main>\`;`,
     "}",
     "",
@@ -47,16 +47,16 @@ function createParamsPageSource(label, paramKey) {
 
 function createRevalidateParamsPageSource(label, counterKey, paramKey) {
   return [
-    "globalThis.__NEXEL_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
+    "globalThis.__EVOLIT_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
     'export const routeConfig = { cache: { revalidate: 1 } };',
     "",
     `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page({ params }) {`,
     "  await new Promise((resolve) => {",
     "    setTimeout(resolve, 50);",
     "  });",
-    `  globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey} ??= 0;`,
-    `  globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
-    `  const value = globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey};`,
+    `  globalThis.__EVOLIT_ROUTE_CACHE_COUNTERS.${counterKey} ??= 0;`,
+    `  globalThis.__EVOLIT_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
+    `  const value = globalThis.__EVOLIT_ROUTE_CACHE_COUNTERS.${counterKey};`,
     `  return \`<main data-route="${label}">${label}:\${JSON.stringify(params.${paramKey} ?? null)}:\${value}</main>\`;`,
     "}",
     "",
@@ -122,7 +122,7 @@ function getAvailablePort() {
 }
 
 before(async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-start-e2e-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-start-e2e-"));
   fixtureRoot = path.join(tempRoot, "app");
 
   await scaffoldSite(fixtureRoot);
@@ -302,30 +302,30 @@ before(async () => {
   await buildProject(fixtureRoot);
   buildManifest = JSON.parse(
     await fs.readFile(
-      path.join(fixtureRoot, ".nexel", "build", "manifest.json"),
+      path.join(fixtureRoot, ".evolit", "build", "manifest.json"),
       "utf8",
     ),
   );
   deployRoutesManifest = JSON.parse(
     await fs.readFile(
-      path.join(fixtureRoot, ".nexel", "build", "deploy-routes.json"),
+      path.join(fixtureRoot, ".evolit", "build", "deploy-routes.json"),
       "utf8",
     ),
   );
   deployAssetsManifest = JSON.parse(
     await fs.readFile(
-      path.join(fixtureRoot, ".nexel", "build", "deploy-assets.json"),
+      path.join(fixtureRoot, ".evolit", "build", "deploy-assets.json"),
       "utf8",
     ),
   );
   deployServerManifest = JSON.parse(
     await fs.readFile(
-      path.join(fixtureRoot, ".nexel", "build", "deploy-server.json"),
+      path.join(fixtureRoot, ".evolit", "build", "deploy-server.json"),
       "utf8",
     ),
   );
   builtRuntimeEntry = await import(
-    pathToFileURL(path.join(fixtureRoot, ".nexel", "build", "runtime-entry.mjs")).href
+    pathToFileURL(path.join(fixtureRoot, ".evolit", "build", "runtime-entry.mjs")).href
   );
 
   const port = await getAvailablePort();
@@ -353,15 +353,15 @@ test("start server emits hashed public asset URLs for hydration bootstrap", asyn
 
   assert.equal(response.status, 200);
   assert.doesNotMatch(html, /<script type="importmap">/);
-  assert.match(html, /import\s+\{\s*hydratePage,\s*registerHydrationModules\s*\}\s+from\s+"\/_nexel\/shared\/litsx__ssr__hydration-[A-Za-z0-9_-]+\.mjs"/);
+  assert.match(html, /import\s+\{\s*hydratePage,\s*registerHydrationModules\s*\}\s+from\s+"\/_evolit\/shared\/litsx__ssr__hydration-[A-Za-z0-9_-]+\.mjs"/);
   assert.ok(featureCardAsset);
   assert.match(html, /registerHydrationModules/);
   assert.match(
     html,
     new RegExp(featureCardAsset.publicUrl.replaceAll(".", "\\.")),
   );
-  assert.doesNotMatch(html, /\/_nexel\/client\/app\/components\/feature-card\.mjs/);
-  assert.doesNotMatch(html, /__NEXEL_ASSET_URL__/);
+  assert.doesNotMatch(html, /\/_evolit\/client\/app\/components\/feature-card\.mjs/);
+  assert.doesNotMatch(html, /__EVOLIT_ASSET_URL__/);
   assert.doesNotMatch(html, /\/var\/folders\//);
   assert.doesNotMatch(html, /\/Users\//);
 });
@@ -408,7 +408,7 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.equal(cardBadgeSpecialPngAsset.kind, "asset");
   assert.equal(cardBadgeSpecialPngAsset.type, "asset");
   assert.equal(buildManifest.clientAssets.version, 1);
-  assert.equal(buildManifest.clientAssets.publicPathPrefix, "/_nexel/static/");
+  assert.equal(buildManifest.clientAssets.publicPathPrefix, "/_evolit/static/");
   assert.equal(typeof homePageAsset.hash, "string");
   assert.equal(homePageAsset.hash.length, 8);
   assert.equal(typeof homePageAsset.size, "number");
@@ -446,7 +446,7 @@ test("client compilation metadata captures module and vendor imports", async () 
     await fs.readFile(
       path.join(
         fixtureRoot,
-        ".nexel",
+        ".evolit",
         "build",
         "client",
         "app",
@@ -589,10 +589,10 @@ test("build emits deploy route and asset manifests for external deployment pipel
   assert.equal(htmlAsset.cacheKey, "/cached-static");
   assert.equal(htmlAsset.cache, "static");
   assert.equal(htmlAsset.contentType, "application/json; charset=utf-8");
-  assert.match(htmlAsset.outputPath, /^\.nexel\/build\/route-cache\/[a-f0-9]{40}\.json$/);
+  assert.match(htmlAsset.outputPath, /^\.evolit\/build\/route-cache\/[a-f0-9]{40}\.json$/);
   assert.equal(catalogHtmlAsset.cache, "static");
-  assert.match(catalogHtmlAsset.outputPath, /^\.nexel\/build\/route-cache\/[a-f0-9]{40}\.json$/);
-  assert.match(scriptAsset.outputPath, /^\.nexel\/build\/static\//);
+  assert.match(catalogHtmlAsset.outputPath, /^\.evolit\/build\/route-cache\/[a-f0-9]{40}\.json$/);
+  assert.match(scriptAsset.outputPath, /^\.evolit\/build\/static\//);
   assert.equal(scriptAsset.contentType, "text/javascript; charset=utf-8");
   assert.equal(styleAsset.contentType, "text/css; charset=utf-8");
   assert.equal(resourceAsset.contentType, "image/svg+xml");
@@ -600,9 +600,9 @@ test("build emits deploy route and asset manifests for external deployment pipel
 
 test("build emits a generic server runtime entry for external hosts", async () => {
   assert.equal(deployServerManifest.version, 1);
-  assert.equal(deployServerManifest.runtimeEntry, ".nexel/build/runtime-entry.mjs");
-  assert.equal(deployServerManifest.manifestPath, ".nexel/build/manifest.json");
-  assert.equal(deployServerManifest.serverOutputRoot, ".nexel/build/server");
+  assert.equal(deployServerManifest.runtimeEntry, ".evolit/build/runtime-entry.mjs");
+  assert.equal(deployServerManifest.manifestPath, ".evolit/build/manifest.json");
+  assert.equal(deployServerManifest.serverOutputRoot, ".evolit/build/server");
   assert.deepEqual(deployServerManifest.exports, {
     factory: "createBuiltDeploymentRuntime",
     handler: "handleRequest",
@@ -611,11 +611,11 @@ test("build emits a generic server runtime entry for external hosts", async () =
   assert.equal(typeof builtRuntimeEntry.handleRequest, "function");
 
   const response = await builtRuntimeEntry.handleRequest(
-    new Request("http://nexel.local/cached-static"),
+    new Request("http://evolit.local/cached-static"),
   );
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers["x-nexel-cache"], "HIT");
+  assert.equal(response.headers["x-evolit-cache"], "HIT");
   assert.match(String(response.body), /static:1/);
 });
 
@@ -631,8 +631,8 @@ test("start server serves hashed client asset files", async () => {
 
   assert.equal(assetResponse.status, 200);
   assert.match(source, /litsx\.hydratableTag/);
-  assert.match(source, /\/_nexel\/shared\/nanoid-[A-Za-z0-9_-]+\.mjs/);
-  assert.match(source, /\/_nexel\/shared\/lit-[A-Za-z0-9_-]+\.mjs/);
+  assert.match(source, /\/_evolit\/shared\/nanoid-[A-Za-z0-9_-]+\.mjs/);
+  assert.match(source, /\/_evolit\/shared\/lit-[A-Za-z0-9_-]+\.mjs/);
 });
 
 test("start server serves hashed static svg assets", async () => {
@@ -711,7 +711,7 @@ test("start server emits hashed modulepreload links that match the asset manifes
       `<link rel="modulepreload" href="${featureCardAsset.publicUrl.replaceAll(".", "\\.")}">`,
     ),
   );
-  assert.doesNotMatch(html, /\/_nexel\/static\/chunks\/vendor-/);
+  assert.doesNotMatch(html, /\/_evolit\/static\/chunks\/vendor-/);
   assert.match(
     html,
     new RegExp(
@@ -719,7 +719,7 @@ test("start server emits hashed modulepreload links that match the asset manifes
     ),
   );
   if (featureCardAsset.importUrls.length > 0) {
-    assert.ok(featureCardAsset.importUrls.every((url) => /^\/_nexel\/shared\//.test(url)));
+    assert.ok(featureCardAsset.importUrls.every((url) => /^\/_evolit\/shared\//.test(url)));
   }
   assert.deepEqual(featureCardAsset.styleImports, ["app/components/card-accent.css"]);
   assert.deepEqual(featureCardAsset.styleUrls, [cardAccentStyleAsset.publicUrl]);
@@ -760,8 +760,8 @@ test("start server serves prerendered static routes from the build cache", async
   const secondResponse = await fetch(`${baseUrl}/cached-static`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nexel-cache"), "HIT");
-  assert.equal(secondResponse.headers.get("x-nexel-cache"), "HIT");
+  assert.equal(firstResponse.headers.get("x-evolit-cache"), "HIT");
+  assert.equal(secondResponse.headers.get("x-evolit-cache"), "HIT");
   assert.match(firstHtml, /static:1/);
   assert.equal(secondHtml, firstHtml);
 });
@@ -772,8 +772,8 @@ test("start server serves prerendered dynamic static routes from the build cache
   const secondResponse = await fetch(`${baseUrl}/catalog/books/guide`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nexel-cache"), "HIT");
-  assert.equal(secondResponse.headers.get("x-nexel-cache"), "HIT");
+  assert.equal(firstResponse.headers.get("x-evolit-cache"), "HIT");
+  assert.equal(secondResponse.headers.get("x-evolit-cache"), "HIT");
   assert.match(firstHtml, /books:guide/);
   assert.equal(secondHtml, firstHtml);
 });
@@ -784,8 +784,8 @@ test("start server falls back to on-demand caching for non-prerendered dynamic s
   const secondResponse = await fetch(`${baseUrl}/catalog/books/novel`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nexel-cache"), "MISS");
-  assert.equal(secondResponse.headers.get("x-nexel-cache"), "HIT");
+  assert.equal(firstResponse.headers.get("x-evolit-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-evolit-cache"), "HIT");
   assert.match(firstHtml, /books:novel/);
   assert.equal(secondHtml, firstHtml);
 });
@@ -796,8 +796,8 @@ test("start server keeps dynamic routes uncached", async () => {
   const secondResponse = await fetch(`${baseUrl}/cached-dynamic`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nexel-cache"), "SKIP");
-  assert.equal(secondResponse.headers.get("x-nexel-cache"), "SKIP");
+  assert.equal(firstResponse.headers.get("x-evolit-cache"), "SKIP");
+  assert.equal(secondResponse.headers.get("x-evolit-cache"), "SKIP");
   assert.match(firstHtml, /dynamic:1/);
   assert.match(secondHtml, /dynamic:2/);
 });
@@ -836,8 +836,8 @@ test("start server revalidates cached routes after the configured ttl", async ()
   const secondResponse = await fetch(`${baseUrl}/cached-revalidate`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nexel-cache"), "MISS");
-  assert.equal(secondResponse.headers.get("x-nexel-cache"), "HIT");
+  assert.equal(firstResponse.headers.get("x-evolit-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-evolit-cache"), "HIT");
   assert.equal(secondHtml, firstHtml);
 
   await new Promise((resolve) => {
@@ -852,9 +852,9 @@ test("start server revalidates cached routes after the configured ttl", async ()
   const fourthResponse = await fetch(`${baseUrl}/cached-revalidate`);
   const fourthHtml = await fourthResponse.text();
 
-  assert.equal(thirdResponse.headers.get("x-nexel-cache"), "STALE");
+  assert.equal(thirdResponse.headers.get("x-evolit-cache"), "STALE");
   assert.equal(thirdHtml, firstHtml);
-  assert.equal(fourthResponse.headers.get("x-nexel-cache"), "HIT");
+  assert.equal(fourthResponse.headers.get("x-evolit-cache"), "HIT");
   assert.match(firstHtml, /revalidate:1/);
   assert.match(fourthHtml, /revalidate:2/);
 });
@@ -865,8 +865,8 @@ test("start server revalidates dynamic routes in the background per pathname", a
   const secondResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nexel-cache"), "MISS");
-  assert.equal(secondResponse.headers.get("x-nexel-cache"), "HIT");
+  assert.equal(firstResponse.headers.get("x-evolit-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-evolit-cache"), "HIT");
   assert.equal(secondHtml, firstHtml);
 
   await new Promise((resolve) => {
@@ -883,11 +883,11 @@ test("start server revalidates dynamic routes in the background per pathname", a
   const otherPathResponse = await fetch(`${baseUrl}/cached-revalidate/beta`);
   const otherPathHtml = await otherPathResponse.text();
 
-  assert.equal(thirdResponse.headers.get("x-nexel-cache"), "STALE");
+  assert.equal(thirdResponse.headers.get("x-evolit-cache"), "STALE");
   assert.equal(thirdHtml, firstHtml);
-  assert.equal(fourthResponse.headers.get("x-nexel-cache"), "HIT");
+  assert.equal(fourthResponse.headers.get("x-evolit-cache"), "HIT");
   assert.match(firstHtml, /dynamic-revalidate:&quot;alpha&quot;:1/);
   assert.match(fourthHtml, /dynamic-revalidate:&quot;alpha&quot;:2/);
-  assert.equal(otherPathResponse.headers.get("x-nexel-cache"), "MISS");
+  assert.equal(otherPathResponse.headers.get("x-evolit-cache"), "MISS");
   assert.match(otherPathHtml, /dynamic-revalidate:&quot;beta&quot;:3/);
 });

@@ -20,7 +20,7 @@ import {
   rewriteServerAssetPlaceholders,
 } from "./client-assets.js";
 import { compileModuleGraph, importCompiledModule } from "./compiler.js";
-import { loadNexelConfig } from "./config.js";
+import { loadEvolitConfig } from "./config.js";
 import {
   BUILD_DIRECTORY,
   DEPLOY_ASSETS_MANIFEST_FILENAME,
@@ -78,7 +78,7 @@ async function writeDeploymentRuntimeEntry(buildRoot) {
       "",
       "let createDeploymentRuntime;",
       "try {",
-      '  ({ createDeploymentRuntime } = await import("nexel"));',
+      '  ({ createDeploymentRuntime } = await import("evolit"));',
       "} catch {",
       `  ({ createDeploymentRuntime } = await import(${JSON.stringify(frameworkEntryUrl)}));`,
       "}",
@@ -117,7 +117,7 @@ async function writeDeploymentRuntimeEntry(buildRoot) {
 }
 
 export async function buildProject(projectRoot) {
-  const nexelConfig = await loadNexelConfig(projectRoot);
+  const evolitConfig = await loadEvolitConfig(projectRoot);
   const routes = await discoverAppRoutes(projectRoot);
   const routeHandlers = await discoverAppRouteHandlers(projectRoot);
   const buildRoot = path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY);
@@ -265,13 +265,13 @@ export async function buildProject(projectRoot) {
       );
     },
   });
-  const responseCacheRuntime = await resolveResponseCacheRuntime(projectRoot, "production", nexelConfig);
+  const responseCacheRuntime = await resolveResponseCacheRuntime(projectRoot, "production", evolitConfig);
   const prerenderedRoutes = [];
   const routeCache = [];
   const prerenderedRouteArtifacts = [];
 
   for (const route of routes) {
-    const request = new Request(`http://nexel.local${route.pathname}`);
+    const request = new Request(`http://evolit.local${route.pathname}`);
     const routePolicyResult = await routeResolver.resolveRoutePolicy(request);
     if (routePolicyResult.type !== "route") {
       continue;
@@ -308,7 +308,7 @@ export async function buildProject(projectRoot) {
       }
       seenPrerenderTargets.add(targetPathname);
 
-      const targetRequest = new Request(`http://nexel.local${targetPathname}`);
+      const targetRequest = new Request(`http://evolit.local${targetPathname}`);
       const routeResult = await routeResolver.resolveRequest(targetRequest);
       if (routeResult.type !== "route" || routeResult.cachePolicy.mode === "dynamic") {
         continue;
