@@ -441,20 +441,20 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@litsx/babel-plugin-shared-hooks@npm:0.8.1-canary-feat-ssr-20260726130435":
-  version: 0.8.1-canary-feat-ssr-20260726130435
-  resolution: "@litsx/babel-plugin-shared-hooks@npm:0.8.1-canary-feat-ssr-20260726130435"
+"@litsx/babel-plugin-shared-hooks@npm:0.8.1-canary-feat-ssr-20260726184312":
+  version: 0.8.1-canary-feat-ssr-20260726184312
+  resolution: "@litsx/babel-plugin-shared-hooks@npm:0.8.1-canary-feat-ssr-20260726184312"
   dependencies:
     "@babel/helper-plugin-utils": "npm:^7.28.6"
   peerDependencies:
     "@babel/core": ">=7"
-  checksum: 10c0/31a3059666548b4ae6983621ee2d1aa534b6bb3832dc20612c81e08131ab825c17161e87e2c985a8a8856b007b5a70d9b2dabebc9cbd68bd2c5d001e5321ccc6
+  checksum: 10c0/88afbc2c512e144b3bbdac8aa86ab754cfb97265fc0769c0962a5027fa5a73d4eb0fd7b2bd6d636077f7cc098fdc09aee820924579740f961bbddb43ca7bab79
   languageName: node
   linkType: hard
 
-"@litsx/babel-plugin-transform-jsx-html-template@npm:0.3.7-canary-feat-ssr-20260726130435":
-  version: 0.3.7-canary-feat-ssr-20260726130435
-  resolution: "@litsx/babel-plugin-transform-jsx-html-template@npm:0.3.7-canary-feat-ssr-20260726130435"
+"@litsx/babel-plugin-transform-jsx-html-template@npm:0.3.7-canary-feat-ssr-20260726184312":
+  version: 0.3.7-canary-feat-ssr-20260726184312
+  resolution: "@litsx/babel-plugin-transform-jsx-html-template@npm:0.3.7-canary-feat-ssr-20260726184312"
   dependencies:
     "@babel/generator": "npm:^7.29.1"
     "@babel/helper-plugin-utils": "npm:^7.28.6"
@@ -465,72 +465,72 @@ __metadata:
     source-map-js: "npm:^1.2.1"
   peerDependencies:
     "@babel/core": ">=7"
-  checksum: 10c0/d264759c5c989729765a60ec9681a9631900b9b07f52f18b74a11bacfd4c23c6ce3f0eded065e57080c9acfa2aa30a7e9bfe1626055c39539cdd89ed3ef496ce
+  checksum: 10c0/ff70c4107494a04f6c723f13930709bc1da3de1089a6a44db8f37e7d6321590df5394944fdb250a8169b2d6442b7b6ad14a95238d338e5d54025defbc7af4569
   languageName: node
   linkType: hard
 
-"@litsx/babel-plugin-transform-litsx-scoped-elements@npm:0.5.0-canary-feat-ssr-20260726130435":
-  version: 0.5.0-canary-feat-ssr-20260726130435
-  resolution: "@litsx/babel-plugin-transform-litsx-scoped-elements@npm:0.5.0-canary-feat-ssr-20260726130435"
+"@litsx/babel-plugin-transform-litsx-scoped-elements@npm:0.5.0-canary-feat-ssr-20260726184312":
+  version: 0.5.0-canary-feat-ssr-20260726184312
+  resolution: "@litsx/babel-plugin-transform-litsx-scoped-elements@npm:0.5.0-canary-feat-ssr-20260726184312"
   dependencies:
     "@babel/parser": "npm:^7.29.3"
     "@babel/plugin-syntax-jsx": "npm:^7.28.6"
     "@litsx/authoring": "npm:^0.5.0"
-    "@litsx/babel-plugin-shared-hooks": "npm:0.8.1-canary-feat-ssr-20260726130435"
-    "@litsx/typescript-session": "npm:^0.2.3"
+    "@litsx/babel-plugin-shared-hooks": "npm:0.8.1-canary-feat-ssr-20260726184312"
+    "@litsx/typescript-session": "npm:0.2.5-canary-feat-ssr-20260726184312"
   peerDependencies:
     "@babel/core": ">=7"
-  checksum: 10c0/cf28541fd72230149230e41479441ad4a86eb75373e34c542f20561bf3e621185389d7ac31689a02d55f46204e4032fda9ebe1c06c702821b9c8409346844444
+  checksum: 10c0/40efbfe65f73da64f9f5f46d4dabb3cc33eff09df303ecb1a0cd58afedc9611366273a8b1235a4fb55207d1b7ebb5b8a550c406eac3e34e0df1999196e93cac3
   languageName: node
   linkType: hard
 
-"@litsx/babel-preset-litsx@npm:0.16.0-canary-feat-ssr-20260726130435":
-  version: 0.16.0-canary-feat-ssr-20260726130435
-  resolution: "@litsx/babel-preset-litsx@npm:0.16.0-canary-feat-ssr-20260726130435"
+"@litsx/babel-preset-litsx@npm:0.16.0-canary-feat-ssr-20260726184312":
+  version: 0.16.0-canary-feat-ssr-20260726184312
+  resolution: "@litsx/babel-preset-litsx@npm:0.16.0-canary-feat-ssr-20260726184312"
   dependencies:
     "@babel/helper-plugin-utils": "npm:^7.28.6"
     "@babel/parser": "npm:^7.29.3"
     "@babel/plugin-syntax-jsx": "npm:^7.28.6"
     "@babel/traverse": "npm:^7.28.5"
     "@litsx/authoring": "npm:^0.5.0"
-    "@litsx/babel-plugin-shared-hooks": "npm:0.8.1-canary-feat-ssr-20260726130435"
-    "@litsx/babel-plugin-transform-jsx-html-template": "npm:0.3.7-canary-feat-ssr-20260726130435"
-    "@litsx/babel-plugin-transform-litsx-scoped-elements": "npm:0.5.0-canary-feat-ssr-20260726130435"
-    "@litsx/typescript-session": "npm:^0.2.3"
+    "@litsx/babel-plugin-shared-hooks": "npm:0.8.1-canary-feat-ssr-20260726184312"
+    "@litsx/babel-plugin-transform-jsx-html-template": "npm:0.3.7-canary-feat-ssr-20260726184312"
+    "@litsx/babel-plugin-transform-litsx-scoped-elements": "npm:0.5.0-canary-feat-ssr-20260726184312"
+    "@litsx/typescript-session": "npm:0.2.5-canary-feat-ssr-20260726184312"
   peerDependencies:
     "@babel/core": ">=7"
-  checksum: 10c0/41a5e23f53ead5c5ace783cae5762203a38d33e90c01439ed6193462ebdcb52234b3080e0c7bbdfcc352bcfb225fe5d0e143e9ba55b38af878342ffc711bfe82
+  checksum: 10c0/63aeb7cba1b2f9b21679a17a23c08022ad99a76242fd7e8475bf6e7a0f8b808332acd3d0c5c8dae2d0c1f23c024ef5ecbab0a99f8d13583aa1047150ce6a1b8d
   languageName: node
   linkType: hard
 
-"@litsx/compiler@npm:0.9.5-canary-feat-ssr-20260726130435, @litsx/compiler@npm:^0.9.5-canary-feat-ssr-20260726130435":
-  version: 0.9.5-canary-feat-ssr-20260726130435
-  resolution: "@litsx/compiler@npm:0.9.5-canary-feat-ssr-20260726130435"
+"@litsx/compiler@npm:0.9.5-canary-feat-ssr-20260726184312, @litsx/compiler@npm:^0.9.5-canary-feat-ssr-20260726184312":
+  version: 0.9.5-canary-feat-ssr-20260726184312
+  resolution: "@litsx/compiler@npm:0.9.5-canary-feat-ssr-20260726184312"
   dependencies:
     "@babel/core": "npm:^7.29.6"
     "@babel/parser": "npm:^7.29.3"
     "@babel/plugin-transform-typescript": "npm:^7.28.5"
     "@babel/types": "npm:^7.29.0"
     "@litsx/authoring": "npm:^0.5.0"
-    "@litsx/babel-plugin-transform-jsx-html-template": "npm:0.3.7-canary-feat-ssr-20260726130435"
-    "@litsx/babel-preset-litsx": "npm:0.16.0-canary-feat-ssr-20260726130435"
+    "@litsx/babel-plugin-transform-jsx-html-template": "npm:0.3.7-canary-feat-ssr-20260726184312"
+    "@litsx/babel-preset-litsx": "npm:0.16.0-canary-feat-ssr-20260726184312"
     "@litsx/typescript": "npm:^0.9.0"
-    "@litsx/typescript-session": "npm:^0.2.1"
+    "@litsx/typescript-session": "npm:0.2.5-canary-feat-ssr-20260726184312"
     source-map-js: "npm:^1.2.1"
-  checksum: 10c0/41d3bf1babaec0888c2a130f82721c548d64bc0314ea01e61b2f16037f1ae8313aa1620bfac5aa86cae2e133c208b52a4d0f5d83dc2a616dc30f8bed55c49ce3
+  checksum: 10c0/68ab928160a0ffbaff3f332644e0ba4a39bc6183eaa31fb1cf62341edb2dce7130ef1d4e1f2a85b69ca88b31a34c355c00f6bc44e6f3a71d828a49e13c90c326
   languageName: node
   linkType: hard
 
-"@litsx/core@npm:0.17.0-canary-feat-ssr-20260726130435, @litsx/core@npm:^0.17.0-canary-feat-ssr-20260726130435":
-  version: 0.17.0-canary-feat-ssr-20260726130435
-  resolution: "@litsx/core@npm:0.17.0-canary-feat-ssr-20260726130435"
+"@litsx/core@npm:0.17.0-canary-feat-ssr-20260726184312, @litsx/core@npm:^0.17.0-canary-feat-ssr-20260726184312":
+  version: 0.17.0-canary-feat-ssr-20260726184312
+  resolution: "@litsx/core@npm:0.17.0-canary-feat-ssr-20260726184312"
   dependencies:
     "@lit/context": "npm:^1.1.6"
     "@lit/reactive-element": "npm:^2.1.2"
     "@litsx/scoped-registry-shim": "npm:^0.2.6"
   peerDependencies:
     lit: ">=3"
-  checksum: 10c0/f5eeda3b4137896036fdc30b52364baa55c397da08b4031d5ac886b0e8a7e2171b3b109db960d145d2efd21f993064b40d63337f82b10391a9cfb55d3ced09e9
+  checksum: 10c0/4d76f30cf26ed3aecd00e9f773893ec50c21fdd93467a91816f7ec0343f62958cc10ebd0f8263792531a63a6a204e4895851ed5ee6e56d60d6c91df19a07678a
   languageName: node
   linkType: hard
 
@@ -541,26 +541,35 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@litsx/ssr@npm:0.2.0-canary-feat-ssr-20260726130435":
-  version: 0.2.0-canary-feat-ssr-20260726130435
-  resolution: "@litsx/ssr@npm:0.2.0-canary-feat-ssr-20260726130435"
+"@litsx/ssr@npm:0.2.0-canary-feat-ssr-20260726184312":
+  version: 0.2.0-canary-feat-ssr-20260726184312
+  resolution: "@litsx/ssr@npm:0.2.0-canary-feat-ssr-20260726184312"
   dependencies:
     "@lit-labs/ssr": "npm:^4.0.0"
     "@lit-labs/ssr-client": "npm:^1.1.7"
-    "@litsx/compiler": "npm:^0.9.5-canary-feat-ssr-20260726130435"
-    "@litsx/core": "npm:^0.17.0-canary-feat-ssr-20260726130435"
-    "@litsx/vite-plugin": "npm:^0.3.2-canary-feat-ssr-20260726130435"
+    "@litsx/compiler": "npm:^0.9.5-canary-feat-ssr-20260726184312"
+    "@litsx/core": "npm:^0.17.0-canary-feat-ssr-20260726184312"
+    "@litsx/vite-plugin": "npm:^0.3.2-canary-feat-ssr-20260726184312"
   peerDependencies:
     lit: ">=3"
     vite: ^7.3.2 || ^8.0.0
   peerDependenciesMeta:
     vite:
       optional: true
-  checksum: 10c0/2765d8fc6205e35c2762ebe1a445310edfc4dff095caf656f8df3bc44a15a5bd4fb48a664aea6dfd086cab55e3a716edea0d92b14ed8dce93883e06ba519b4ad
+  checksum: 10c0/820d3ab14723667100a8182f70c9bf5a2027986c07a2e82d24960cab56fcfab7bfac2d7660cf60c2e7062945f1d9bc0c0cd9ec3335033660ba26eb72ef03030a
   languageName: node
   linkType: hard
 
-"@litsx/typescript-session@npm:^0.2.1, @litsx/typescript-session@npm:^0.2.3, @litsx/typescript-session@npm:^0.2.4":
+"@litsx/typescript-session@npm:0.2.5-canary-feat-ssr-20260726184312":
+  version: 0.2.5-canary-feat-ssr-20260726184312
+  resolution: "@litsx/typescript-session@npm:0.2.5-canary-feat-ssr-20260726184312"
+  peerDependencies:
+    typescript: ">=5"
+  checksum: 10c0/4d4c69f0f356db12871a98c6c13ccf13e529898f708b858777ec106902d2aafe1984aee3d04a09f7de7dbcec38b8039795a941f96ac9573c45cd760fbf5d192c
+  languageName: node
+  linkType: hard
+
+"@litsx/typescript-session@npm:^0.2.4":
   version: 0.2.4
   resolution: "@litsx/typescript-session@npm:0.2.4"
   peerDependencies:
@@ -584,14 +593,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@litsx/vite-plugin@npm:^0.3.2-canary-feat-ssr-20260726130435":
-  version: 0.3.2-canary-feat-ssr-20260726130435
-  resolution: "@litsx/vite-plugin@npm:0.3.2-canary-feat-ssr-20260726130435"
+"@litsx/vite-plugin@npm:^0.3.2-canary-feat-ssr-20260726184312":
+  version: 0.3.2-canary-feat-ssr-20260726184312
+  resolution: "@litsx/vite-plugin@npm:0.3.2-canary-feat-ssr-20260726184312"
   dependencies:
-    "@litsx/compiler": "npm:0.9.5-canary-feat-ssr-20260726130435"
+    "@litsx/compiler": "npm:0.9.5-canary-feat-ssr-20260726184312"
   peerDependencies:
     vite: ^7.3.2 || ^8.0.0
-  checksum: 10c0/97e1b5afa4f811c8f835d2a6561117619b73a7cf398a761f7ea47c2cd0cd87820dd1081645634377ec74904835e8525688929e36cde33228fc4f4f738edaf793
+  checksum: 10c0/7a62965433b7490909dd327654d20fde341db1b5005b8ea1bc0ccc06a8f38423037c5113f2d72aa4377d67fe14406e054570b1a3288f9510bdddeda9a818730d
   languageName: node
   linkType: hard
 
@@ -1120,9 +1129,9 @@ __metadata:
   resolution: "evolit@workspace:."
   dependencies:
     "@jridgewell/remapping": "npm:^2.3.5"
-    "@litsx/compiler": "npm:0.9.5-canary-feat-ssr-20260726130435"
-    "@litsx/core": "npm:0.17.0-canary-feat-ssr-20260726130435"
-    "@litsx/ssr": "npm:0.2.0-canary-feat-ssr-20260726130435"
+    "@litsx/compiler": "npm:0.9.5-canary-feat-ssr-20260726184312"
+    "@litsx/core": "npm:0.17.0-canary-feat-ssr-20260726184312"
+    "@litsx/ssr": "npm:0.2.0-canary-feat-ssr-20260726184312"
     "@litsx/typescript": "npm:^0.9.0"
     "@rollup/plugin-node-resolve": "npm:^16.0.3"
     lit: "npm:^3.3.3"
