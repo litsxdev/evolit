@@ -296,6 +296,31 @@ That is the intended path toward deployments where:
 - `S3` stores prerendered/static route responses and cacheable regenerated HTML
 - `Lambda` renders only on cache misses or revalidation events
 
+## Deployment Manifests
+
+`nextsx build` emits `deploy-routes.json` as a platform-neutral routing contract. Version 2
+contains separate collections for HTML routes and HTTP handlers:
+
+```json
+{
+  "version": 2,
+  "routes": [
+    { "pathname": "/news/:slug", "cache": { "revalidate": 60 } }
+  ],
+  "handlers": [
+    {
+      "pathname": "/api/echo/:slug",
+      "methods": ["GET", "POST"],
+      "runtime": "server",
+      "cache": "dynamic"
+    }
+  ]
+}
+```
+
+The framework owns this manifest schema. A hosting-specific adapter can use it to route static
+assets and cached HTML to object storage, while always sending declared handlers to server compute.
+
 ## SSR Status
 
 `nextsx` now renders route/layout trees through `@litsx/ssr`.
@@ -321,6 +346,7 @@ The remaining SSR work in `nextsx` is mostly framework-specific:
 This MVP is enough to validate the direction. The likely next milestones are:
 
 - dev HMR instead of request-time recompilation
-- route handlers and data loading primitives
-- static generation and incremental caching
-- config surface and deployment adapter contracts
+- data loading primitives
+- middleware and rewrite rules
+- public asset directory support
+- hosting-specific deployment adapters

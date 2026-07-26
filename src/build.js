@@ -19,7 +19,7 @@ import {
   rewriteHydrationDataScript,
   rewriteServerAssetPlaceholders,
 } from "./client-assets.js";
-import { compileModuleGraph } from "./compiler.js";
+import { compileModuleGraph, importCompiledModule } from "./compiler.js";
 import { loadNextsxConfig } from "./config.js";
 import {
   BUILD_DIRECTORY,
@@ -122,6 +122,7 @@ export async function buildProject(projectRoot) {
   const routeHandlers = await discoverAppRouteHandlers(projectRoot);
   const buildRoot = path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY);
   const entryClientModules = new Set();
+  const deployHandlers = [];
 
   await ensureDirectory(buildRoot);
 
@@ -132,6 +133,26 @@ export async function buildProject(projectRoot) {
       sourceMaps: false,
       ssr: true,
       target: "server",
+    });
+
+    const handlerModule = await importCompiledModule(routeHandler.handler, {
+      projectRoot,
+      mode: "production",
+      ssr: true,
+      target: "server",
+    });
+    const methods = Object.keys(handlerModule)
+      .filter((name) => /^[A-Z]+$/.test(name) && typeof handlerModule[name] === "function")
+      .sort();
+    if (methods.length === 0) {
+      throw new Error(`Expected route handler ${routeHandler.handler} to export an HTTP method.`);
+    }
+
+    deployHandlers.push({
+      pathname: routeHandler.pathname,
+      methods,
+      runtime: "server",
+      cache: "dynamic",
     });
   }
 
@@ -326,7 +347,7 @@ export async function buildProject(projectRoot) {
 
   const sortedRouteCache = routeCache.sort((left, right) => left.pathname.localeCompare(right.pathname));
   const deployRoutes = {
-    version: 1,
+    version: 2,
     routes: sortedRouteCache.map((entry) => {
       const prerenderedArtifact = prerenderedRouteArtifacts.find(
         (artifact) => artifact.pathname === entry.pathname,
@@ -345,6 +366,7 @@ export async function buildProject(projectRoot) {
         responsePath: prerenderedArtifact?.outputPath ?? null,
       };
     }),
+    handlers: deployHandlers.sort((left, right) => left.pathname.localeCompare(right.pathname)),
   };
 
   const deployAssets = {

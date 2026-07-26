@@ -270,6 +270,16 @@ before(async () => {
     createParamsPageSource("optional", "slug"),
     "utf8",
   );
+  await fs.mkdir(path.join(fixtureRoot, "app", "api", "echo", "[slug]"), { recursive: true });
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "api", "echo", "[slug]", "route.js"),
+    [
+      "export function GET() { return new Response(\"get\"); }",
+      "export function POST() { return new Response(\"post\"); }",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
   const featureCardSource = await fs.readFile(featureCardPath, "utf8");
   await fs.writeFile(
@@ -460,7 +470,7 @@ test("client compilation metadata captures module and vendor imports", async () 
 });
 
 test("build emits deploy route and asset manifests for external deployment pipelines", () => {
-  assert.equal(deployRoutesManifest.version, 1);
+  assert.equal(deployRoutesManifest.version, 2);
   assert.deepEqual(
     deployRoutesManifest.routes,
     [
@@ -549,6 +559,14 @@ test("build emits deploy route and asset manifests for external deployment pipel
       },
     ],
   );
+  assert.deepEqual(deployRoutesManifest.handlers, [
+    {
+      pathname: "/api/echo/:slug",
+      methods: ["GET", "POST"],
+      runtime: "server",
+      cache: "dynamic",
+    },
+  ]);
 
   const htmlAsset = deployAssetsManifest.assets.find(
     (asset) => asset.kind === "html" && asset.pathname === "/cached-static",
