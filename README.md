@@ -38,7 +38,7 @@ Supported authored module extensions:
 
 ```sh
 yarn install
-node ./src/cli.js init my-site
+npx nextsx my-site
 ```
 
 Additional commands:
@@ -60,8 +60,8 @@ yarn start
 
 The framework ships a starter at `templates/default`.
 
-`nextsx init <directory>` copies that template, writes a site `package.json`, and leaves the
-app ready to run.
+`nextsx <directory>` copies that template, writes a site `package.json`, and leaves the app ready
+to run. `nextsx init <directory>` is supported as an explicit equivalent.
 
 ## Architecture
 

@@ -7,7 +7,7 @@ import { scaffoldSite } from "./scaffold.js";
 import { createDevServer, createStartServer } from "./server.js";
 
 function parseArguments(argv) {
-  const [command = "dev", ...rest] = argv;
+  const [command, ...rest] = argv;
   const options = {};
   const positionals = [];
 
@@ -25,18 +25,32 @@ function parseArguments(argv) {
   return { command, options, positionals };
 }
 
+function printUsage() {
+  console.log("Usage: nextsx <directory>");
+  console.log("       nextsx init <directory>");
+  console.log("       nextsx <dev|build|start> [--port 3000]");
+}
+
+async function createSite(projectRoot, targetDirectory) {
+  if (!targetDirectory) {
+    throw new Error("Usage: nextsx init <directory>");
+  }
+
+  const createdDirectory = await scaffoldSite(path.resolve(projectRoot, targetDirectory));
+  console.log(`Created nextsx site: ${createdDirectory}`);
+}
+
 async function run() {
   const { command, options, positionals } = parseArguments(process.argv.slice(2));
   const projectRoot = process.cwd();
 
-  if (command === "init") {
-    const targetDirectory = positionals[0];
-    if (!targetDirectory) {
-      throw new Error("Usage: nextsx init <directory>");
-    }
+  if (!command || command === "--help" || command === "-h") {
+    printUsage();
+    return;
+  }
 
-    const createdDirectory = await scaffoldSite(path.resolve(projectRoot, targetDirectory));
-    console.log(`Created nextsx site: ${createdDirectory}`);
+  if (command === "init") {
+    await createSite(projectRoot, positionals[0]);
     return;
   }
 
@@ -60,9 +74,7 @@ async function run() {
     return;
   }
 
-  console.error(`Unknown command: ${command}`);
-  console.error("Usage: nextsx <init|dev|build|start> [--port 3000]");
-  process.exitCode = 1;
+  await createSite(projectRoot, command);
 }
 
 run().catch((error) => {
