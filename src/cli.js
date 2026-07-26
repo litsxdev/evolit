@@ -2,9 +2,7 @@
 
 import path from "node:path";
 import process from "node:process";
-import { buildProject } from "./build.js";
 import { scaffoldSite } from "./scaffold.js";
-import { createDevServer, createStartServer } from "./server.js";
 
 function parseArguments(argv) {
   const [command, ...rest] = argv;
@@ -55,12 +53,14 @@ async function run() {
   }
 
   if (command === "build") {
+    const { buildProject } = await import("./build.js");
     const manifestPath = await buildProject(projectRoot);
     console.log(`Built evolit app: ${path.relative(projectRoot, manifestPath)}`);
     return;
   }
 
   if (command === "start") {
+    const { createStartServer } = await import("./server.js");
     const server = await createStartServer(projectRoot, options);
     await server.listen();
     console.log(`evolit start listening on http://localhost:${server.port}`);
@@ -68,6 +68,7 @@ async function run() {
   }
 
   if (command === "dev") {
+    const { createDevServer } = await import("./server.js");
     const server = await createDevServer(projectRoot, options);
     await server.listen();
     console.log(`evolit dev listening on http://localhost:${server.port}`);
