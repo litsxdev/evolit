@@ -75,6 +75,7 @@ jobs:
       - name: Publish package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DIST_TAG: ${{ inputs.dist_tag }}
         run: corepack yarn npm publish --tag "$DIST_TAG"
 
