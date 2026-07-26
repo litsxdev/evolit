@@ -769,7 +769,7 @@ test("start server omits hashed hydration preload output for non-hydrated routes
 
   assert.equal(response.status, 200);
   assert.doesNotMatch(html, /rel="modulepreload"/);
-  assert.doesNotMatch(html, /rel="stylesheet"/);
+  assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/global\.[a-f0-9]{8}\.css">/);
   assert.doesNotMatch(html, /registerHydrationModules/);
   assert.doesNotMatch(html, /__LITSX_HYDRATION__/);
 });

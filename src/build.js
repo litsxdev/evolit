@@ -15,6 +15,7 @@ import {
   emitBundledClientAssets,
   emitHashedClientAssets,
   normalizeHydrationDataForClient,
+  resolveRouteClientImports,
   resolveSharedVendorModuleUrl,
   rewriteHydrationDataScript,
   rewriteServerAssetPlaceholders,
@@ -241,8 +242,11 @@ export async function buildProject(projectRoot) {
   );
   const ssrAdapter = createSsrAdapter({
     assetResolver,
-    async resolveAdditionalHead({ result }) {
-      const clientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
+    async resolveAdditionalHead({ routeResult, result }) {
+      const clientImports = [
+        ...(Array.isArray(result.clientImports) ? result.clientImports : []),
+        ...resolveRouteClientImports(routeResult, projectRoot, clientAssets),
+      ];
       const urls = collectTransitiveAssetPreloads(clientImports, clientAssets);
       const styleUrls = collectTransitiveStyleUrls(clientImports, clientAssets);
 

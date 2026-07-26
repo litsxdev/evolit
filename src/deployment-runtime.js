@@ -12,6 +12,7 @@ import {
   getSharedOutputRoot,
   normalizeHydrationDataForClient,
   normalizeClientAssetManifest,
+  resolveRouteClientImports,
   resolveSharedVendorModuleUrl,
   resolveBrowserPackageAssetFilePath,
   rewriteHydrationDataScript,
@@ -233,8 +234,11 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
     assetResolver(moduleId) {
       return currentAssetResolver(moduleId);
     },
-    async resolveAdditionalHead({ result }) {
-      const clientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
+    async resolveAdditionalHead({ routeResult, result }) {
+      const clientImports = [
+        ...(Array.isArray(result.clientImports) ? result.clientImports : []),
+        ...resolveRouteClientImports(routeResult, projectRoot, currentAssetManifest),
+      ];
       const urls = currentAssetManifest
         ? collectTransitiveAssetPreloads(clientImports, currentAssetManifest)
         : [];

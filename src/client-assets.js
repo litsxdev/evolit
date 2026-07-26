@@ -1776,6 +1776,28 @@ export function collectTransitiveAssetPreloads(publicUrls, assetManifest) {
   return discovered;
 }
 
+export function resolveRouteClientImports(routeResult, projectRoot, assetManifest) {
+  const normalizedManifest = normalizeClientAssetManifest(assetManifest);
+  if (!normalizedManifest) {
+    return [];
+  }
+
+  const routeModules = [
+    routeResult?.route?.page,
+    ...(routeResult?.route?.layouts ?? []),
+    routeResult?.boundaryModule,
+  ].filter((modulePath) => typeof modulePath === "string");
+
+  return [...new Set(routeModules.map((modulePath) => {
+    const relativePath = path.relative(projectRoot, modulePath).split(path.sep).join("/");
+    const extension = path.extname(relativePath);
+    const clientModule = extension
+      ? `${relativePath.slice(0, -extension.length)}.mjs`
+      : `${relativePath}.mjs`;
+    return normalizedManifest.byClientModule[clientModule] ?? null;
+  }).filter((publicUrl) => typeof publicUrl === "string"))];
+}
+
 export function collectTransitiveStyleUrls(publicUrls, assetManifest) {
   const normalizedManifest = normalizeClientAssetManifest(assetManifest);
   if (!normalizedManifest) {

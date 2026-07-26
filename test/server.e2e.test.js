@@ -372,6 +372,7 @@ after(async () => {
 test("home route emits LitSX hydration bootstrap for hydratable roots", async () => {
   const response = await fetch(`${baseUrl}/`);
   const html = await response.text();
+  const globalCssUrl = await getDevAssetPublicUrl("app/global.css");
 
   assert.equal(response.status, 200);
   assert.doesNotMatch(html, /<script type="importmap">/);
@@ -381,6 +382,7 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   assert.match(html, /clientImports: \[\]/);
   assert.match(html, /\/_evolit\/static\/app\/components\/feature-card\.mjs/);
   assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/components\/card-accent\.[a-f0-9]{8}\.css">/);
+  assert.ok(html.includes(`<link rel="stylesheet" href="${globalCssUrl}">`));
   assert.match(html, /id="__LITSX_HYDRATION__"/);
   assert.match(html, /data-evolit-live-reload/);
   assert.match(html, /new WebSocket/);
@@ -464,7 +466,7 @@ test("non-hydrated route omits the generated hydration bootstrap", async () => {
   assert.equal(response.status, 200);
   assert.match(html, /<title>About \| evolit<\/title>/);
   assert.doesNotMatch(html, /<script type="importmap">/);
-  assert.doesNotMatch(html, /rel="stylesheet"/);
+  assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/global\.[a-f0-9]{8}\.css">/);
   assert.doesNotMatch(html, /registerHydrationModules/);
   assert.doesNotMatch(html, /await hydratePage\(\)/);
   assert.doesNotMatch(html, /id="__LITSX_HYDRATION__"/);
