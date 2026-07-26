@@ -138,7 +138,8 @@ dist
 !.yarn/versions
 **/.yarn/install-state.gz
 
-# Nexel generated output
+# Framework generated output
+**/.nextsx/
 **/.nexel/
 
 # Vite files
