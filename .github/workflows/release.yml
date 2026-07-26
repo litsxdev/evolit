@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish Nexel
+    name: Publish Evolit
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: npm-release
@@ -94,8 +94,8 @@ jobs:
           git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
           git config user.email "${{ steps.app-bot-user.outputs.user_id }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${RELEASE_PUSH_TOKEN}@github.com/${{ github.repository }}.git"
-          git tag "nexel@${version}"
-          git push origin "nexel@${version}"
+          git tag "evolit@${version}"
+          git push origin "evolit@${version}"
 
       - name: Create GitHub release
         env:
@@ -103,4 +103,4 @@ jobs:
           DIST_TAG: ${{ inputs.dist_tag }}
         run: |
           version="$(node --input-type=module -e 'import packageJson from "./package.json" with { type: "json" }; process.stdout.write(packageJson.version);')"
-          gh release create "nexel@${version}" --title "Nexel ${version}" --generate-notes ${{ inputs.dist_tag == 'alpha' && '--prerelease' || '' }}
+          gh release create "evolit@${version}" --title "Evolit ${version}" --generate-notes ${{ inputs.dist_tag == 'alpha' && '--prerelease' || '' }}
