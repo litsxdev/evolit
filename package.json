@@ -4,6 +4,18 @@
   "description": "A Next.js-style application framework for LitSX",
   "type": "module",
   "packageManager": "yarn@4.10.3",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/litsxdev/nextsx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/litsxdev/nextsx/issues"
+  },
+  "homepage": "https://github.com/litsxdev/nextsx#readme",
+  "files": [
+    "src",
+    "templates"
+  ],
   "bin": "./src/cli.js",
   "main": "./src/index.js",
   "exports": {
@@ -34,9 +46,9 @@
   },
   "dependencies": {
     "@jridgewell/remapping": "^2.3.5",
-    "@litsx/compiler": "0.9.5-canary-feat-ssr-20260726085910",
-    "@litsx/core": "0.17.0-canary-feat-ssr-20260726085910",
-    "@litsx/ssr": "0.2.0-canary-feat-ssr-20260726085910",
+    "@litsx/compiler": "0.9.5-canary-feat-ssr-20260726130435",
+    "@litsx/core": "0.17.0-canary-feat-ssr-20260726130435",
+    "@litsx/ssr": "0.2.0-canary-feat-ssr-20260726130435",
     "@litsx/typescript": "^0.9.0",
     "lit": "^3.3.3",
     "magic-string": "^1.1.0"
