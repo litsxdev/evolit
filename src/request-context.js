@@ -120,36 +120,75 @@ export function runWithRequestContext(context, callback) {
   return requestContextStorage.run(context, callback);
 }
 
+/**
+ * Returns the incoming request headers and marks the current route dynamic.
+ *
+ * @returns {Headers} The incoming request headers.
+ */
 export function headers() {
   const context = getActiveContext();
   context.didUseDynamicRequestData = true;
   return context.request.headers;
 }
 
+/**
+ * Returns the request cookie store and marks the current route dynamic.
+ * Mutations are merged into the outgoing response.
+ *
+ * @returns {object} A cookie store with `get`, `getAll`, `has`, `set`, and `delete`.
+ */
 export function cookies() {
   const context = getActiveContext();
   context.didUseDynamicRequestData = true;
   return context.cookieStore;
 }
 
+/**
+ * Returns the incoming request URL and marks the current route dynamic.
+ *
+ * @returns {URL} The request URL.
+ */
 export function requestUrl() {
   const context = getActiveContext();
   context.didUseDynamicRequestData = true;
   return new URL(context.request.url);
 }
 
+/**
+ * Returns mutable headers merged into the response after route rendering.
+ *
+ * @returns {Headers} Response headers.
+ */
 export function responseHeaders() {
   return getActiveContext().responseHeaders;
 }
 
+/**
+ * Stops route execution and responds with a redirect.
+ *
+ * @param {string} location Redirect destination.
+ * @param {number} [status=307] Redirect HTTP status.
+ * @returns {never}
+ */
 export function redirect(location, status = 307) {
   throw new NextsxHttpSignal("redirect", { location: String(location), status });
 }
 
+/**
+ * Stops route execution and responds with a permanent HTTP 308 redirect.
+ *
+ * @param {string} location Redirect destination.
+ * @returns {never}
+ */
 export function permanentRedirect(location) {
   redirect(location, 308);
 }
 
+/**
+ * Stops route execution with a 404 signal for the nearest `not-found.litsx` boundary.
+ *
+ * @returns {never}
+ */
 export function notFound() {
   throw new NextsxHttpSignal("not-found", { status: 404 });
 }

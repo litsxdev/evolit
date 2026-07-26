@@ -10,7 +10,7 @@
     ".": "./src/index.js",
     "./server": {
       "browser": "./src/request-context-browser.js",
-      "default": "./src/request-context.js"
+      "default": "./src/server-api.js"
     }
   },
   "scripts": {
