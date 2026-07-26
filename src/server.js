@@ -187,12 +187,21 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       });
       return server;
     },
-    close() {
+    async close() {
       if (invalidationTimer) {
         clearTimeout(invalidationTimer);
       }
       watcher?.close();
-      server.close();
+      await new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+      await deploymentRuntime.close?.();
     },
   };
 }

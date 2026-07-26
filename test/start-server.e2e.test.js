@@ -336,10 +336,7 @@ before(async () => {
 
 after(async () => {
   if (server) {
-    await new Promise((resolve) => {
-      server.close();
-      resolve();
-    });
+    await server.close();
   }
 
   if (fixtureRoot) {

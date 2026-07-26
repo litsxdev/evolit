@@ -431,18 +431,18 @@ export async function createDeploymentRuntime({
           && !revalidationTasks.has(cachedResponse.cacheKey)
         ) {
           const revalidationTask = (async () => {
-            try {
-              const { routeResult, response } = await renderer.renderRoute(request, routePolicyResult);
-              await renderer.responseCacheController.store(
-                request,
-                routeResult,
-                response,
-                cachedResponse.cacheKey,
-              );
-            } finally {
+            const { routeResult, response } = await renderer.renderRoute(request, routePolicyResult);
+            await renderer.responseCacheController.store(
+              request,
+              routeResult,
+              response,
+              cachedResponse.cacheKey,
+            );
+          })()
+            .catch(() => {})
+            .finally(() => {
               revalidationTasks.delete(cachedResponse.cacheKey);
-            }
-          })();
+            });
           revalidationTasks.set(cachedResponse.cacheKey, revalidationTask);
         }
 
@@ -452,6 +452,12 @@ export async function createDeploymentRuntime({
       const { routeResult, response } = await renderer.renderRoute(request, routePolicyResult);
       runtimeState.assetManifest = normalizeClientAssetManifest(renderer.assetManifest);
       return renderer.responseCacheController.write(request, routeResult, response);
+    },
+    async close() {
+      const revalidationTasks = this.revalidationTasks;
+      if (revalidationTasks) {
+        await Promise.all(revalidationTasks.values());
+      }
     },
   };
 }
