@@ -35,6 +35,33 @@ async function writeResponseBody(response, body) {
   response.end();
 }
 
+const LIVE_RELOAD_PATHNAME = "/_evolit/live-reload";
+const LIVE_RELOAD_SNIPPET = `<script data-evolit-live-reload>if (typeof EventSource !== "undefined") { const source = new EventSource(${JSON.stringify(LIVE_RELOAD_PATHNAME)}); source.addEventListener("reload", () => window.location.reload()); }</script>`;
+
+function getResponseHeader(headers, name) {
+  if (headers?.get) {
+    return headers.get(name);
+  }
+
+  return headers?.[name] ?? headers?.[name.toLowerCase()] ?? null;
+}
+
+function injectLiveReloadSnippet(response) {
+  if (
+    typeof response.body !== "string"
+    || !getResponseHeader(response.headers, "content-type")?.includes("text/html")
+  ) {
+    return response;
+  }
+
+  return {
+    ...response,
+    body: response.body.includes("</body>")
+      ? response.body.replace("</body>", `${LIVE_RELOAD_SNIPPET}</body>`)
+      : `${response.body}${LIVE_RELOAD_SNIPPET}`,
+  };
+}
+
 async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
   const watchers = new Map();
   let closed = false;
@@ -122,6 +149,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     responseCacheRuntime,
   });
   const port = getPort(explicitPort);
+  const liveReloadConnections = new Set();
   let invalidationTimer = null;
   let pendingInvalidation = null;
   let resolvePendingInvalidation = null;
@@ -146,7 +174,15 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       invalidationPromise = invalidationPromise
         .catch(() => {})
         .then(() => deploymentRuntime.invalidateDevelopmentState());
-      invalidationPromise.then(resolve, resolve);
+      invalidationPromise.then(
+        () => {
+          for (const connection of liveReloadConnections) {
+            connection.write("event: reload\\ndata: update\\n\\n");
+          }
+          resolve();
+        },
+        resolve,
+      );
     }, 40);
   }
 
@@ -159,9 +195,24 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
 
   const server = http.createServer(async (req, res) => {
     try {
+      const origin = `http://${req.headers.host ?? `localhost:${port}`}`;
+      const pathname = new URL(req.url ?? "/", origin).pathname;
+      if (mode === "development" && pathname === LIVE_RELOAD_PATHNAME) {
+        res.writeHead(200, {
+          "cache-control": "no-cache, no-transform",
+          connection: "keep-alive",
+          "content-type": "text/event-stream",
+        });
+        res.write("retry: 1000\\n\\n");
+        liveReloadConnections.add(res);
+        req.on("close", () => {
+          liveReloadConnections.delete(res);
+        });
+        return;
+      }
+
       await pendingInvalidation;
       await invalidationPromise;
-      const origin = `http://${req.headers.host ?? `localhost:${port}`}`;
       const method = req.method ?? "GET";
       const request = new Request(new URL(req.url ?? "/", origin), {
         method,
@@ -169,9 +220,10 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         ...(method === "GET" || method === "HEAD" ? {} : { body: req, duplex: "half" }),
       });
       const response = await deploymentRuntime.handle(request);
+      const servedResponse = mode === "development" ? injectLiveReloadSnippet(response) : response;
 
-      res.writeHead(response.status, response.headers);
-      await writeResponseBody(res, response.body);
+      res.writeHead(servedResponse.status, servedResponse.headers);
+      await writeResponseBody(res, servedResponse.body);
     } catch (error) {
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       res.end(error instanceof Error ? error.stack ?? error.message : String(error));
@@ -192,6 +244,10 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         clearTimeout(invalidationTimer);
       }
       watcher?.close();
+      for (const connection of liveReloadConnections) {
+        connection.end();
+      }
+      liveReloadConnections.clear();
       await new Promise((resolve, reject) => {
         server.close((error) => {
           if (error) {

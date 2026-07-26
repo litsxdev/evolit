@@ -341,9 +341,19 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   assert.match(html, /\/_evolit\/static\/app\/components\/feature-card\.mjs/);
   assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/components\/card-accent\.[a-f0-9]{8}\.css">/);
   assert.match(html, /id="__LITSX_HYDRATION__"/);
+  assert.match(html, /data-evolit-live-reload/);
+  assert.match(html, /new EventSource\("\/_evolit\/live-reload"\)/);
   assert.match(html, /data-litsx-root="litsx-root-0"/);
   assert.doesNotMatch(html, /__evolit\/hydration/);
   assert.doesNotMatch(html, /customElements\.define/);
+});
+
+test("dev server exposes a live reload event stream", async () => {
+  const response = await fetch(`${baseUrl}/_evolit/live-reload`);
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/);
+  response.body?.destroy?.();
 });
 
 test("dev server renders native Lit page and layout modules", async () => {
