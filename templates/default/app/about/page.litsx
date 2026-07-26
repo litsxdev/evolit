@@ -5,14 +5,14 @@ export const metadata = {
 
 export default async function AboutPage() {
   return (
-    <section style={{ maxWidth: "720px", display: "grid", gap: "20px" }}>
-      <h1 style={{ margin: "0", fontSize: "clamp(2.5rem, 6vw, 4rem)" }}>About nextsx</h1>
-      <p style={{ margin: "0", lineHeight: "1.8", color: "rgba(248, 247, 241, 0.78)" }}>
+    <section>
+      <h1>About nextsx</h1>
+      <p>
         The goal is not to clone Next.js mechanically. The goal is to offer the same level of
         application ergonomics for LitSX-authored user interfaces: routing, layouts, SSR,
-        build orchestration, and eventually data and deployment primitives.
+        build orchestration, and Web Platform server APIs.
       </p>
-      <p style={{ margin: "0", lineHeight: "1.8", color: "rgba(248, 247, 241, 0.78)" }}>
+      <p>
         This starter is the first end-to-end slice needed to evolve that runtime in the open.
       </p>
     </section>

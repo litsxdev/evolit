@@ -3,37 +3,21 @@ import FeatureCard from "./components/feature-card.litsx";
 export default async function HomePage() {
   return (
     <section>
-      <div style={{ display: "grid", gap: "20px", marginBottom: "40px" }}>
-        <p
-          style={{
-            margin: "0",
-            letterSpacing: "0.18em",
-            textTransform: "uppercase",
-            fontSize: "12px",
-            color: "rgba(248, 247, 241, 0.56)",
-          }}
-        >
-          LitSX application router
-        </p>
-        <h1 style={{ margin: "0", fontSize: "clamp(3rem, 7vw, 5.5rem)", lineHeight: "0.94" }}>
+      <div class="intro">
+        <p class="eyebrow">LitSX application framework</p>
+        <h1>
           Next.js ideas,
           <br />
           LitSX authored.
         </h1>
-        <p style={{ maxWidth: "720px", margin: "0", lineHeight: "1.8", color: "rgba(248, 247, 241, 0.76)" }}>
+        <p class="summary">
           This starter proves the first framework contract: routes from <code>app/</code>,
           nested layouts, request-aware page modules, and server rendering for LitSX-authored
           UI.
         </p>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gap: "18px",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-        }}
-      >
+      <div class="features">
         <FeatureCard
           title="File Routing"
           body="Every app/page.litsx becomes an addressable route, with dynamic segments reserved for the next iteration."
