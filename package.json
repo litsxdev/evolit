@@ -30,7 +30,8 @@
     "build": "node ./src/cli.js build",
     "start": "node ./src/cli.js start",
     "test": "node --test",
-    "typecheck": "litsx-tsc -p jsconfig.json --noEmit"
+    "typecheck": "litsx-tsc -p jsconfig.json --noEmit",
+    "release:check": "yarn test && yarn typecheck && yarn pack --dry-run"
   },
   "keywords": [
     "nextsx",

@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: npm distribution tag for this release
+        required: true
+        default: alpha
+        type: choice
+        options:
+          - alpha
+          - latest
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish nextsx
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Create release app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.LITSX_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LITSX_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Enable Yarn
+        run: |
+          corepack enable
+          corepack prepare yarn@4.10.3 --activate
+
+      - name: Install dependencies
+        run: corepack yarn install --immutable
+
+      - name: Validate release channel
+        env:
+          DIST_TAG: ${{ inputs.dist_tag }}
+        run: |
+          node --input-type=module -e '
+            import packageJson from "./package.json" with { type: "json" };
+            const isPrerelease = packageJson.version.includes("-");
+            if (process.env.DIST_TAG === "alpha" && !isPrerelease) throw new Error("The alpha tag requires a prerelease version.");
+            if (process.env.DIST_TAG === "latest" && isPrerelease) throw new Error("The latest tag requires a stable version.");
+          '
+
+      - name: Validate package
+        run: corepack yarn release:check
+
+      - name: Publish package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ inputs.dist_tag }}
+        run: corepack yarn npm publish --tag "$DIST_TAG"
+
+      - name: Resolve release app bot user
+        id: app-bot-user
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          echo "user_id=$(gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
+
+      - name: Create Git tag
+        env:
+          RELEASE_PUSH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          version="$(node --input-type=module -e 'import packageJson from "./package.json" with { type: "json" }; process.stdout.write(packageJson.version);')"
+          git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
+          git config user.email "${{ steps.app-bot-user.outputs.user_id }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${RELEASE_PUSH_TOKEN}@github.com/${{ github.repository }}.git"
+          git tag "nextsx@${version}"
+          git push origin "nextsx@${version}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DIST_TAG: ${{ inputs.dist_tag }}
+        run: |
+          version="$(node --input-type=module -e 'import packageJson from "./package.json" with { type: "json" }; process.stdout.write(packageJson.version);')"
+          gh release create "nextsx@${version}" --title "NextSX ${version}" --generate-notes ${{ inputs.dist_tag == 'alpha' && '--prerelease' || '' }}
