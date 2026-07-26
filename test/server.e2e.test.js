@@ -197,6 +197,7 @@ before(async () => {
   await fs.mkdir(path.join(fixtureRoot, "app", "blog", "[slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "docs", "[...slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "optional", "[[...slug]]"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "lit"), { recursive: true });
   await fs.writeFile(
     path.join(fixtureRoot, "app", "cached-static", "page.litsx"),
     createCounterPageSource(
@@ -242,6 +243,53 @@ before(async () => {
   await fs.writeFile(
     path.join(fixtureRoot, "app", "optional", "[[...slug]]", "page.litsx"),
     createParamsPageSource("optional", "slug"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "lit", "layout.js"),
+    [
+      'import { html } from "lit";',
+      "",
+      "export default async function LitLayout({ children }) {",
+      '  return html`<section data-route-layout="lit">${children}</section>`;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "lit", "product-card.js"),
+    [
+      'import { LitElement, html } from "lit";',
+      "",
+      "export default class ProductCard extends LitElement {",
+      "  static properties = { product: { attribute: false } };",
+      "",
+      "  render() {",
+      '    return html`<article data-product-card>${this.product.name}</article>`;',
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "lit", "page.js"),
+    [
+      'import { html } from "lit";',
+      'import ProductCard from "./product-card.js";',
+      "",
+      'export const metadata = { title: "Native Lit Route" };',
+      "",
+      "export default async function LitPage() {",
+      '  return html`<main data-route="lit"><h1>Native Lit route</h1><product-card .product=${{ name: "Field Guide" }}></product-card></main>`;',
+      "}",
+      "",
+      "LitPage.elements = {",
+      '  "product-card": ProductCard,',
+      "};",
+      "",
+    ].join("\n"),
     "utf8",
   );
   const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
@@ -298,6 +346,22 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   assert.match(html, /id="__LITSX_HYDRATION__"/);
   assert.match(html, /data-litsx-root="litsx-root-0"/);
   assert.doesNotMatch(html, /__nextsx\/hydration/);
+  assert.doesNotMatch(html, /customElements\.define/);
+});
+
+test("dev server renders native Lit page and layout modules", async () => {
+  const response = await fetch(`${baseUrl}/lit`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /<title>Native Lit Route<\/title>/);
+  assert.match(html, /data-route-layout="lit"/);
+  assert.match(html, /data-route="lit"/);
+  assert.match(html, /Native Lit route/);
+  assert.match(html, /<product-card\b[^>]*data-litsx-root="litsx-root-0"/);
+  assert.match(html, /data-product-card[\s\S]*?Field Guide/);
+  assert.match(html, /"moduleId":"\/app\/lit\/product-card\.js"/);
+  assert.match(html, /\/_nextsx\/static\/app\/lit\/product-card\.mjs/);
   assert.doesNotMatch(html, /customElements\.define/);
 });
 
@@ -428,11 +492,10 @@ test("dev server revalidates cached routes after the configured ttl", async () =
 
   const thirdResponse = await fetch(`${baseUrl}/cached-revalidate`);
   const thirdHtml = await thirdResponse.text();
-  await new Promise((resolve) => {
-    setTimeout(resolve, 100);
-  });
-  const fourthResponse = await fetch(`${baseUrl}/cached-revalidate`);
-  const fourthHtml = await fourthResponse.text();
+  const { response: fourthResponse, body: fourthHtml } = await waitForResponse(
+    () => fetch(`${baseUrl}/cached-revalidate`),
+    ({ response, body }) => response.headers.get("x-nextsx-cache") === "HIT" && body !== firstHtml,
+  );
 
   assert.equal(thirdResponse.headers.get("x-nextsx-cache"), "STALE");
   assert.equal(thirdHtml, firstHtml);
@@ -457,11 +520,10 @@ test("dev server revalidates dynamic routes in the background per pathname", asy
 
   const thirdResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
   const thirdHtml = await thirdResponse.text();
-  await new Promise((resolve) => {
-    setTimeout(resolve, 150);
-  });
-  const fourthResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
-  const fourthHtml = await fourthResponse.text();
+  const { response: fourthResponse, body: fourthHtml } = await waitForResponse(
+    () => fetch(`${baseUrl}/cached-revalidate/alpha`),
+    ({ response, body }) => response.headers.get("x-nextsx-cache") === "HIT" && body !== firstHtml,
+  );
   const otherPathResponse = await fetch(`${baseUrl}/cached-revalidate/beta`);
   const otherPathHtml = await otherPathResponse.text();
 
