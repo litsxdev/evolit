@@ -1,6 +1,6 @@
-# nextsx Showcase
+# nexel Showcase
 
-This app is the first manual validation target for `nextsx` as a standalone consumer.
+This app is the first manual validation target for `nexel` as a standalone consumer.
 
 It intentionally exercises:
 
@@ -31,6 +31,6 @@ scripts set `NODE_OPTIONS=--preserve-symlinks`.
 
 1. Open `/` and confirm the page renders the showcase cards and a hydration bootstrap.
 2. Open `/blog/hello-world` and confirm the slug is rendered from params.
-3. Open `/library/books/field-guide` and confirm it returns `x-nextsx-cache: HIT` after `start`.
+3. Open `/library/books/field-guide` and confirm it returns `x-nexel-cache: HIT` after `start`.
 4. Open `/library/books/non-listed` twice and confirm it goes `MISS` then `HIT`.
 5. Open `/news/launch-week` twice and confirm it goes `MISS` then `HIT`.

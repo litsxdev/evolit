@@ -1,6 +1,6 @@
 export function GET() {
   return Response.json({
-    framework: "nextsx",
+    framework: "nexel",
     status: "ok",
   });
 }

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "runtimeEntry": ".nextsx/build/runtime-entry.mjs",
+  "exports": {
+    "factory": "createBuiltDeploymentRuntime",
+    "handler": "handleRequest"
+  },
+  "manifestPath": ".nextsx/build/manifest.json",
+  "serverOutputRoot": ".nextsx/build/server"
+}

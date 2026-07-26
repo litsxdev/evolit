@@ -1,9 +1,9 @@
 // @ts-nocheck
 import PageFrame from "../../components/page-frame.litsx";
 
-const showcaseRuntimeState = /** @type {{ __NEXTSX_SHOWCASE_NEWS_COUNTER?: number }} */ (globalThis);
+const showcaseRuntimeState = /** @type {{ __NEXEL_SHOWCASE_NEWS_COUNTER?: number }} */ (globalThis);
 
-showcaseRuntimeState.__NEXTSX_SHOWCASE_NEWS_COUNTER ??= 0;
+showcaseRuntimeState.__NEXEL_SHOWCASE_NEWS_COUNTER ??= 0;
 
 export const routeConfig = {
   cache: { revalidate: 60 },
@@ -15,8 +15,8 @@ export const routeConfig = {
 export default async function NewsEntryPage(props) {
   const { params } = props;
 
-  showcaseRuntimeState.__NEXTSX_SHOWCASE_NEWS_COUNTER += 1;
-  const renderCount = showcaseRuntimeState.__NEXTSX_SHOWCASE_NEWS_COUNTER;
+  showcaseRuntimeState.__NEXEL_SHOWCASE_NEWS_COUNTER += 1;
+  const renderCount = showcaseRuntimeState.__NEXEL_SHOWCASE_NEWS_COUNTER;
 
   return (
     <PageFrame eyebrow="Stale-while-revalidate" title={params.slug}>

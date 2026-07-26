@@ -1460,9 +1460,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"nextsx@workspace:.":
+"nexel@workspace:.":
   version: 0.0.0-use.local
-  resolution: "nextsx@workspace:."
+  resolution: "nexel@workspace:."
   dependencies:
     "@jridgewell/remapping": "npm:^2.3.5"
     "@litsx/compiler": "npm:0.9.5-canary-feat-ssr-20260726130435"
@@ -1476,7 +1476,7 @@ __metadata:
     typescript: "npm:^6.0.0"
     vite: "npm:^8.1.5"
   bin:
-    nextsx: ./src/cli.js
+    nexel: ./src/cli.js
   languageName: unknown
   linkType: soft
 

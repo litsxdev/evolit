@@ -138,8 +138,8 @@ dist
 !.yarn/versions
 **/.yarn/install-state.gz
 
-# nextsx generated output
-**/.nextsx/
+# Nexel generated output
+**/.nexel/
 
 # Vite files
 vite.config.js.timestamp-*

@@ -19,7 +19,7 @@ const cardBadgeSpecialPngFile = "card badge@2x.png";
 async function readDevClientAssetsManifest() {
   return JSON.parse(
     await fs.readFile(
-      path.join(fixtureRoot, ".nextsx", "dev", "client-assets.json"),
+      path.join(fixtureRoot, ".nexel", "dev", "client-assets.json"),
       "utf8",
     ),
   );
@@ -35,11 +35,11 @@ async function getDevAssetPublicUrl(clientModule) {
 function createCounterPageSource(cacheExport, counterKey, label) {
   return [
     cacheExport,
-    "globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
+    "globalThis.__NEXEL_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
     "",
     `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page() {`,
-    `  globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
-    `  const value = globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey};`,
+    `  globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
+    `  const value = globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey};`,
     `  return \`<main data-cache-label="${label}" data-cache-value="\${value}">${label}:\${value}</main>\`;`,
     "}",
     "",
@@ -57,16 +57,16 @@ function createParamsPageSource(label, paramKey) {
 
 function createRevalidateParamsPageSource(label, counterKey, paramKey) {
   return [
-    "globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
+    "globalThis.__NEXEL_ROUTE_CACHE_COUNTERS ??= { static: 0, dynamic: 0, revalidate: 0, dynamicRevalidate: 0 };",
     'export const routeConfig = { cache: { revalidate: 1 } };',
     "",
     `export default async function ${label.replace(/[^A-Za-z]/g, "")}Page({ params }) {`,
     "  await new Promise((resolve) => {",
     "    setTimeout(resolve, 50);",
     "  });",
-    `  globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey} ??= 0;`,
-    `  globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
-    `  const value = globalThis.__NEXTSX_ROUTE_CACHE_COUNTERS.${counterKey};`,
+    `  globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey} ??= 0;`,
+    `  globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey} += 1;`,
+    `  const value = globalThis.__NEXEL_ROUTE_CACHE_COUNTERS.${counterKey};`,
     `  return \`<main data-route="${label}">${label}:\${JSON.stringify(params.${paramKey} ?? null)}:\${value}</main>\`;`,
     "}",
     "",
@@ -118,7 +118,7 @@ async function waitForResponse(request, predicate, timeoutMs = 2_000) {
 }
 
 before(async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-e2e-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-e2e-"));
   fixtureRoot = path.join(tempRoot, "app");
 
   await scaffoldSite(fixtureRoot);
@@ -334,15 +334,15 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
 
   assert.equal(response.status, 200);
   assert.doesNotMatch(html, /<script type="importmap">/);
-  assert.match(html, /import \{ hydratePage, registerHydrationModules \} from "\/_nextsx\/shared\/litsx__ssr__hydration(?:-[A-Za-z0-9_-]+)?\.mjs"/);
+  assert.match(html, /import \{ hydratePage, registerHydrationModules \} from "\/_nexel\/shared\/litsx__ssr__hydration(?:-[A-Za-z0-9_-]+)?\.mjs"/);
   assert.match(html, /registerHydrationModules/);
   assert.match(html, /await hydratePage\(\{/);
   assert.match(html, /clientImports: \[\]/);
-  assert.match(html, /\/_nextsx\/static\/app\/components\/feature-card\.mjs/);
-  assert.match(html, /<link rel="stylesheet" href="\/_nextsx\/static\/app\/components\/card-accent\.[a-f0-9]{8}\.css">/);
+  assert.match(html, /\/_nexel\/static\/app\/components\/feature-card\.mjs/);
+  assert.match(html, /<link rel="stylesheet" href="\/_nexel\/static\/app\/components\/card-accent\.[a-f0-9]{8}\.css">/);
   assert.match(html, /id="__LITSX_HYDRATION__"/);
   assert.match(html, /data-litsx-root="litsx-root-0"/);
-  assert.doesNotMatch(html, /__nextsx\/hydration/);
+  assert.doesNotMatch(html, /__nexel\/hydration/);
   assert.doesNotMatch(html, /customElements\.define/);
 });
 
@@ -358,7 +358,7 @@ test("dev server renders native Lit page and layout modules", async () => {
   assert.match(html, /<product-card\b[^>]*data-litsx-root="litsx-root-0"/);
   assert.match(html, /data-product-card[\s\S]*?Field Guide/);
   assert.match(html, /"moduleId":"\/app\/lit\/product-card\.js"/);
-  assert.match(html, /\/_nextsx\/static\/app\/lit\/product-card\.mjs/);
+  assert.match(html, /\/_nexel\/static\/app\/lit\/product-card\.mjs/);
   assert.doesNotMatch(html, /customElements\.define/);
 });
 
@@ -413,7 +413,7 @@ test("non-hydrated route omits the generated hydration bootstrap", async () => {
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /<title>About \| nextsx<\/title>/);
+  assert.match(html, /<title>About \| nexel<\/title>/);
   assert.doesNotMatch(html, /<script type="importmap">/);
   assert.doesNotMatch(html, /rel="stylesheet"/);
   assert.doesNotMatch(html, /registerHydrationModules/);
@@ -427,8 +427,8 @@ test("dev server caches static routes across requests", async () => {
   const secondResponse = await fetch(`${baseUrl}/cached-static`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "MISS");
-  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.equal(firstResponse.headers.get("x-nexel-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-nexel-cache"), "HIT");
   assert.match(firstHtml, /static:1/);
   assert.equal(secondHtml, firstHtml);
 });
@@ -439,8 +439,8 @@ test("dev server keeps dynamic routes uncached", async () => {
   const secondResponse = await fetch(`${baseUrl}/cached-dynamic`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "SKIP");
-  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "SKIP");
+  assert.equal(firstResponse.headers.get("x-nexel-cache"), "SKIP");
+  assert.equal(secondResponse.headers.get("x-nexel-cache"), "SKIP");
   assert.match(firstHtml, /dynamic:1/);
   assert.match(secondHtml, /dynamic:2/);
 });
@@ -479,8 +479,8 @@ test("dev server revalidates cached routes after the configured ttl", async () =
   const secondResponse = await fetch(`${baseUrl}/cached-revalidate`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "MISS");
-  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.equal(firstResponse.headers.get("x-nexel-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-nexel-cache"), "HIT");
   assert.equal(secondHtml, firstHtml);
 
   await new Promise((resolve) => {
@@ -491,12 +491,12 @@ test("dev server revalidates cached routes after the configured ttl", async () =
   const thirdHtml = await thirdResponse.text();
   const { response: fourthResponse, body: fourthHtml } = await waitForResponse(
     () => fetch(`${baseUrl}/cached-revalidate`),
-    ({ response, body }) => response.headers.get("x-nextsx-cache") === "HIT" && body !== firstHtml,
+    ({ response, body }) => response.headers.get("x-nexel-cache") === "HIT" && body !== firstHtml,
   );
 
-  assert.equal(thirdResponse.headers.get("x-nextsx-cache"), "STALE");
+  assert.equal(thirdResponse.headers.get("x-nexel-cache"), "STALE");
   assert.equal(thirdHtml, firstHtml);
-  assert.equal(fourthResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.equal(fourthResponse.headers.get("x-nexel-cache"), "HIT");
   assert.match(firstHtml, /revalidate:1/);
   assert.match(fourthHtml, /revalidate:2/);
 });
@@ -507,8 +507,8 @@ test("dev server revalidates dynamic routes in the background per pathname", asy
   const secondResponse = await fetch(`${baseUrl}/cached-revalidate/alpha`);
   const secondHtml = await secondResponse.text();
 
-  assert.equal(firstResponse.headers.get("x-nextsx-cache"), "MISS");
-  assert.equal(secondResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.equal(firstResponse.headers.get("x-nexel-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-nexel-cache"), "HIT");
   assert.equal(secondHtml, firstHtml);
 
   await new Promise((resolve) => {
@@ -519,17 +519,17 @@ test("dev server revalidates dynamic routes in the background per pathname", asy
   const thirdHtml = await thirdResponse.text();
   const { response: fourthResponse, body: fourthHtml } = await waitForResponse(
     () => fetch(`${baseUrl}/cached-revalidate/alpha`),
-    ({ response, body }) => response.headers.get("x-nextsx-cache") === "HIT" && body !== firstHtml,
+    ({ response, body }) => response.headers.get("x-nexel-cache") === "HIT" && body !== firstHtml,
   );
   const otherPathResponse = await fetch(`${baseUrl}/cached-revalidate/beta`);
   const otherPathHtml = await otherPathResponse.text();
 
-  assert.equal(thirdResponse.headers.get("x-nextsx-cache"), "STALE");
+  assert.equal(thirdResponse.headers.get("x-nexel-cache"), "STALE");
   assert.equal(thirdHtml, firstHtml);
-  assert.equal(fourthResponse.headers.get("x-nextsx-cache"), "HIT");
+  assert.equal(fourthResponse.headers.get("x-nexel-cache"), "HIT");
   assert.match(firstHtml, /dynamic-revalidate:&quot;alpha&quot;:1/);
   assert.match(fourthHtml, /dynamic-revalidate:&quot;alpha&quot;:2/);
-  assert.equal(otherPathResponse.headers.get("x-nextsx-cache"), "MISS");
+  assert.equal(otherPathResponse.headers.get("x-nexel-cache"), "MISS");
   assert.match(otherPathHtml, /dynamic-revalidate:&quot;beta&quot;:3/);
 });
 
@@ -558,7 +558,7 @@ test("dev server discovers new routes and invalidates cached route responses", a
     () => fetch(`${baseUrl}/watcher-route`),
     ({ response, body }) => response.status === 200 && body.includes("watcher version one"),
   );
-  assert.equal(createdRoute.response.headers.get("x-nextsx-cache"), "MISS");
+  assert.equal(createdRoute.response.headers.get("x-nexel-cache"), "MISS");
 
   await fs.writeFile(
     routePath,

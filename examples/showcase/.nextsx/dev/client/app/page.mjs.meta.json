@@ -1,0 +1,13 @@
+{
+  "moduleImports": [
+    "app/components/home-hero.mjs",
+    "app/components/route-card.mjs",
+    "app/components/showcase-badge.mjs"
+  ],
+  "vendorImports": [
+    "@litsx/core/elements",
+    "lit"
+  ],
+  "styleImports": [],
+  "assetImports": []
+}

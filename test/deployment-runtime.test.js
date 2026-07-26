@@ -11,7 +11,7 @@ import { scaffoldSite } from "../src/scaffold.js";
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("createDeploymentRuntime resolves assets, cache hits, and render misses through the same runtime contract", async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-runtime-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-runtime-"));
   const fixtureRoot = path.join(tempRoot, "app");
 
   try {
@@ -51,7 +51,7 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
     await buildProject(fixtureRoot);
     const buildManifest = JSON.parse(
       await fs.readFile(
-        path.join(fixtureRoot, ".nextsx", "build", "manifest.json"),
+        path.join(fixtureRoot, ".nexel", "build", "manifest.json"),
         "utf8",
       ),
     );
@@ -61,16 +61,16 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
       assetManifest: buildManifest.clientAssets,
     });
 
-    const htmlResponse = await runtime.handle(new Request("http://nextsx.local/cached-static"));
+    const htmlResponse = await runtime.handle(new Request("http://nexel.local/cached-static"));
     const html = String(htmlResponse.body);
-    assert.equal(htmlResponse.headers["x-nextsx-cache"], "HIT");
+    assert.equal(htmlResponse.headers["x-nexel-cache"], "HIT");
     assert.match(html, /static runtime/);
 
     const dynamicRequestResponse = await runtime.handle(new Request(
-      "http://nextsx.local/cached-request",
+      "http://nexel.local/cached-request",
       { headers: { "x-tenant": "acme" } },
     ));
-    assert.equal(dynamicRequestResponse.headers["x-nextsx-cache"], "SKIP");
+    assert.equal(dynamicRequestResponse.headers["x-nexel-cache"], "SKIP");
     assert.match(String(dynamicRequestResponse.body), /request runtime:acme/);
 
     const assetPublicUrl = buildManifest.clientAssets.assets.find(
@@ -78,7 +78,7 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
     )?.publicUrl;
     assert.ok(assetPublicUrl);
 
-    const assetResponse = await runtime.handle(new Request(`http://nextsx.local${assetPublicUrl}`));
+    const assetResponse = await runtime.handle(new Request(`http://nexel.local${assetPublicUrl}`));
     const assetSource = String(assetResponse.body);
     assert.equal(assetResponse.status, 200);
     assert.equal(assetResponse.headers["content-type"], "text/javascript; charset=utf-8");

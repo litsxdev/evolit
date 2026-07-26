@@ -31,7 +31,7 @@ function resolveDocumentMetadata(routeMetadata = {}, adapterOptions = {}) {
 
   return {
     lang: String(routeMetadata.lang ?? adapterOptions.lang ?? "en"),
-    title: String(routeMetadata.title ?? adapterOptions.title ?? "nextsx"),
+    title: String(routeMetadata.title ?? adapterOptions.title ?? "nexel"),
     head: extraHead,
     htmlAttributes: {
       ...(adapterOptions.htmlAttributes ?? {}),
@@ -45,7 +45,7 @@ function resolveDocumentMetadata(routeMetadata = {}, adapterOptions = {}) {
 }
 
 function createHtmlDocument({ body, metadata = {} }) {
-  const title = metadata.title ? String(metadata.title) : "nextsx";
+  const title = metadata.title ? String(metadata.title) : "nexel";
   const description =
     metadata.description ? String(metadata.description) : "A LitSX application";
 

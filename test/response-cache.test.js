@@ -7,12 +7,12 @@ import {
   resolveResponseCacheRuntime,
 } from "../src/response-cache.js";
 
-test("resolveResponseCacheRuntime returns deployable hooks from nextsx config", async () => {
+test("resolveResponseCacheRuntime returns deployable hooks from nexel config", async () => {
   const customStore = new MemoryResponseCacheStore();
-  const runtime = await resolveResponseCacheRuntime("/tmp/nextsx-app", "production", {
+  const runtime = await resolveResponseCacheRuntime("/tmp/nexel-app", "production", {
     responseCache: {
       async createStore({ projectRoot, mode }) {
-        assert.equal(projectRoot, "/tmp/nextsx-app");
+        assert.equal(projectRoot, "/tmp/nexel-app");
         assert.equal(mode, "production");
         return customStore;
       },

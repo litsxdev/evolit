@@ -26,18 +26,18 @@ function parseArguments(argv) {
 }
 
 function printUsage() {
-  console.log("Usage: nextsx <directory>");
-  console.log("       nextsx init <directory>");
-  console.log("       nextsx <dev|build|start> [--port 3000]");
+  console.log("Usage: nexel <directory>");
+  console.log("       nexel init <directory>");
+  console.log("       nexel <dev|build|start> [--port 3000]");
 }
 
 async function createSite(projectRoot, targetDirectory) {
   if (!targetDirectory) {
-    throw new Error("Usage: nextsx init <directory>");
+    throw new Error("Usage: nexel init <directory>");
   }
 
   const createdDirectory = await scaffoldSite(path.resolve(projectRoot, targetDirectory));
-  console.log(`Created nextsx site: ${createdDirectory}`);
+  console.log(`Created nexel site: ${createdDirectory}`);
 }
 
 async function run() {
@@ -56,21 +56,21 @@ async function run() {
 
   if (command === "build") {
     const manifestPath = await buildProject(projectRoot);
-    console.log(`Built nextsx app: ${path.relative(projectRoot, manifestPath)}`);
+    console.log(`Built nexel app: ${path.relative(projectRoot, manifestPath)}`);
     return;
   }
 
   if (command === "start") {
     const server = await createStartServer(projectRoot, options);
     await server.listen();
-    console.log(`nextsx start listening on http://localhost:${server.port}`);
+    console.log(`nexel start listening on http://localhost:${server.port}`);
     return;
   }
 
   if (command === "dev") {
     const server = await createDevServer(projectRoot, options);
     await server.listen();
-    console.log(`nextsx dev listening on http://localhost:${server.port}`);
+    console.log(`nexel dev listening on http://localhost:${server.port}`);
     return;
   }
 

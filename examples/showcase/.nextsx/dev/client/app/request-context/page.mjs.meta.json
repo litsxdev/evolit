@@ -1,0 +1,12 @@
+{
+  "moduleImports": [
+    "app/components/page-frame.mjs"
+  ],
+  "vendorImports": [
+    "@litsx/core/elements",
+    "lit",
+    "nextsx/server"
+  ],
+  "styleImports": [],
+  "assetImports": []
+}

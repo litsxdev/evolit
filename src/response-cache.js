@@ -186,9 +186,9 @@ function isResponseCacheStore(value) {
   );
 }
 
-export async function resolveResponseCacheRuntime(projectRoot, mode, nextsxConfig = {}) {
+export async function resolveResponseCacheRuntime(projectRoot, mode, nexelConfig = {}) {
   const defaultStore = createDefaultResponseCacheStore(projectRoot, mode);
-  const responseCacheConfig = nextsxConfig?.responseCache ?? {};
+  const responseCacheConfig = nexelConfig?.responseCache ?? {};
 
   let store = defaultStore;
   if (typeof responseCacheConfig?.createStore === "function") {

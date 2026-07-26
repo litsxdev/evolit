@@ -32,7 +32,7 @@ function getAvailablePort() {
 }
 
 test("route handlers expose Web Request and Response semantics", async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-route-handlers-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-route-handlers-"));
   const fixtureRoot = path.join(tempRoot, "app");
   let server;
 
@@ -97,7 +97,7 @@ test("route handlers expose Web Request and Response semantics", async () => {
 });
 
 test("route handlers cannot coexist with pages in the same segment", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-handler-conflict-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-handler-conflict-"));
 
   try {
     await fs.mkdir(path.join(root, "app", "api"), { recursive: true });

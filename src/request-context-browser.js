@@ -1,5 +1,5 @@
 function throwServerOnlyApi(name) {
-  throw new Error(`${name}() is only available while rendering a nextsx server route.`);
+  throw new Error(`${name}() is only available while rendering a nexel server route.`);
 }
 
 export function cookies() { return throwServerOnlyApi("cookies"); }

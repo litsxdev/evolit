@@ -9,7 +9,7 @@ import {
   createRequestContext,
   applyRequestContextToResponse,
   getRequestContextResponse,
-  isNextsxHttpSignal,
+  isNexelHttpSignal,
   runWithRequestContext,
 } from "./request-context.js";
 import {
@@ -89,7 +89,7 @@ function createBoundaryError(error, { mode, route, reportRouteError }) {
   if (typeof reportRouteError === "function") {
     reportRouteError(report);
   } else {
-    console.error(`[nextsx] Route rendering failed (${digest}) at ${route.pathname}`, originalError);
+    console.error(`[nexel] Route rendering failed (${digest}) at ${route.pathname}`, originalError);
   }
 
   const boundaryError = new Error("An unexpected server error occurred.");
@@ -444,7 +444,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         responseHeaders: contextResponse.headers,
       };
     } catch (error) {
-      if (isNextsxHttpSignal(error)) {
+      if (isNexelHttpSignal(error)) {
         if (error.type === "not-found") {
           return renderNotFound(request, {
             route: match.route,

@@ -2,7 +2,7 @@
 import PageFrame from "./components/page-frame.litsx";
 
 export const metadata = {
-  title: "Page not found | nextsx Showcase",
+  title: "Page not found | nexel Showcase",
 };
 
 export default async function NotFoundPage() {

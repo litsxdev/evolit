@@ -1,0 +1,61 @@
+{
+  "version": 2,
+  "routes": [
+    {
+      "pathname": "/",
+      "cache": "dynamic",
+      "cacheKey": "/",
+      "prerendered": false,
+      "prerenderedPaths": [],
+      "responsePath": null
+    },
+    {
+      "pathname": "/blog/:slug",
+      "cache": "dynamic",
+      "cacheKey": "/blog/:slug",
+      "prerendered": false,
+      "prerenderedPaths": [],
+      "responsePath": null
+    },
+    {
+      "pathname": "/library/:category/:slug",
+      "cache": "static",
+      "cacheKey": "/library/:category/:slug",
+      "prerendered": true,
+      "prerenderedPaths": [
+        "/library/books/atlas-of-signals",
+        "/library/books/field-guide",
+        "/library/maps/north-ridge"
+      ],
+      "responsePath": null
+    },
+    {
+      "pathname": "/news/:slug",
+      "cache": {
+        "revalidate": 60
+      },
+      "cacheKey": "/news/:slug",
+      "prerendered": false,
+      "prerenderedPaths": [],
+      "responsePath": null
+    },
+    {
+      "pathname": "/request-context",
+      "cache": "dynamic",
+      "cacheKey": "/request-context",
+      "prerendered": false,
+      "prerenderedPaths": [],
+      "responsePath": null
+    }
+  ],
+  "handlers": [
+    {
+      "pathname": "/api/status",
+      "methods": [
+        "GET"
+      ],
+      "runtime": "server",
+      "cache": "dynamic"
+    }
+  ]
+}

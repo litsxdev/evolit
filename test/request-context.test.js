@@ -20,7 +20,7 @@ async function writePage(root, routePath, source) {
 }
 
 test("server route APIs read request data and write response headers and cookies", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-request-context-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-request-context-"));
 
   try {
     await writePage(root, "", [
@@ -36,7 +36,7 @@ test("server route APIs read request data and write response headers and cookies
     ].join("\n"));
 
     const resolver = await createRouteResolver(root);
-    const routeResult = await resolver.resolveRequest(new Request("http://nextsx.local/?q=1", {
+    const routeResult = await resolver.resolveRequest(new Request("http://nexel.local/?q=1", {
       headers: { cookie: "visit=2", "x-example": "request" },
     }));
     const response = await createSsrAdapter().renderRouteTree(routeResult);
@@ -52,7 +52,7 @@ test("server route APIs read request data and write response headers and cookies
 });
 
 test("server route APIs translate redirect and notFound signals into HTTP responses", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-request-signals-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-request-signals-"));
 
   try {
     await writePage(root, "go", [
@@ -69,10 +69,10 @@ test("server route APIs translate redirect and notFound signals into HTTP respon
     const resolver = await createRouteResolver(root);
     const adapter = createSsrAdapter();
     const redirectResponse = await adapter.renderRouteTree(
-      await resolver.resolveRequest(new Request("http://nextsx.local/go")),
+      await resolver.resolveRequest(new Request("http://nexel.local/go")),
     );
     const notFoundResponse = await adapter.renderRouteTree(
-      await resolver.resolveRequest(new Request("http://nextsx.local/missing")),
+      await resolver.resolveRequest(new Request("http://nexel.local/missing")),
     );
 
     assert.equal(redirectResponse.status, 307);
@@ -84,7 +84,7 @@ test("server route APIs translate redirect and notFound signals into HTTP respon
 });
 
 test("reading the request prop marks an otherwise static route as dynamic", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-request-prop-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-request-prop-"));
 
   try {
     await writePage(root, "", [
@@ -97,7 +97,7 @@ test("reading the request prop marks an otherwise static route as dynamic", asyn
     ].join("\n"));
 
     const resolver = await createRouteResolver(root);
-    const routeResult = await resolver.resolveRequest(new Request("http://nextsx.local/", {
+    const routeResult = await resolver.resolveRequest(new Request("http://nexel.local/", {
       headers: { "x-example": "request-prop" },
     }));
 
@@ -111,7 +111,7 @@ test("reading the request prop marks an otherwise static route as dynamic", asyn
 test("server route APIs share request context across duplicate module identities", async () => {
   const alternateContextModule = await import(`${requestContextUrl}?duplicate-context`);
   const context = createRequestContext({
-    request: new Request("http://nextsx.local/duplicate"),
+    request: new Request("http://nexel.local/duplicate"),
   });
 
   await runWithRequestContext(context, async () => {

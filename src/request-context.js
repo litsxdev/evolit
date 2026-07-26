@@ -1,10 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-const REQUEST_CONTEXT_STORAGE = Symbol.for("nextsx.request-context.storage");
-const HTTP_SIGNAL_CLASS = Symbol.for("nextsx.request-context.http-signal");
+const REQUEST_CONTEXT_STORAGE = Symbol.for("nexel.request-context.storage");
+const HTTP_SIGNAL_CLASS = Symbol.for("nexel.request-context.http-signal");
 
 const requestContextStorage = globalThis[REQUEST_CONTEXT_STORAGE] ??= new AsyncLocalStorage();
-const NextsxHttpSignal = globalThis[HTTP_SIGNAL_CLASS] ??= class NextsxHttpSignal extends Error {
+const NexelHttpSignal = globalThis[HTTP_SIGNAL_CLASS] ??= class NexelHttpSignal extends Error {
   constructor(type, options = {}) {
     super(type);
     this.type = type;
@@ -16,7 +16,7 @@ const NextsxHttpSignal = globalThis[HTTP_SIGNAL_CLASS] ??= class NextsxHttpSigna
 function getActiveContext() {
   const context = requestContextStorage.getStore();
   if (!context) {
-    throw new Error("Request APIs can only be called while rendering a nextsx route.");
+    throw new Error("Request APIs can only be called while rendering a nexel route.");
   }
 
   return context;
@@ -171,7 +171,7 @@ export function responseHeaders() {
  * @returns {never}
  */
 export function redirect(location, status = 307) {
-  throw new NextsxHttpSignal("redirect", { location: String(location), status });
+  throw new NexelHttpSignal("redirect", { location: String(location), status });
 }
 
 /**
@@ -190,11 +190,11 @@ export function permanentRedirect(location) {
  * @returns {never}
  */
 export function notFound() {
-  throw new NextsxHttpSignal("not-found", { status: 404 });
+  throw new NexelHttpSignal("not-found", { status: 404 });
 }
 
-export function isNextsxHttpSignal(error) {
-  return error instanceof NextsxHttpSignal;
+export function isNexelHttpSignal(error) {
+  return error instanceof NexelHttpSignal;
 }
 
 export function getRequestContextResponse(context) {

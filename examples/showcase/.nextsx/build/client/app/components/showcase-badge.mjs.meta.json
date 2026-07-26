@@ -1,0 +1,13 @@
+{
+  "moduleImports": [],
+  "vendorImports": [
+    "@litsx/core",
+    "lit"
+  ],
+  "styleImports": [
+    "app/components/showcase-badge.css"
+  ],
+  "assetImports": [
+    "app/components/pulse-dot.svg"
+  ]
+}

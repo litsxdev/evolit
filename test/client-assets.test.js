@@ -28,7 +28,7 @@ test("createHydrationBootstrap returns an empty string when no hydratable roots 
       roots: [],
     },
     assetResolver(moduleId) {
-      return `/_nextsx/static/${moduleId}`;
+      return `/_nexel/static/${moduleId}`;
     },
   });
 
@@ -47,7 +47,7 @@ test("createHydrationBootstrap deduplicates module imports by moduleId", () => {
       ],
     },
     assetResolver(moduleId) {
-      return `/_nextsx/static${moduleId.replace(/\.litsx$/, ".mjs")}`;
+      return `/_nexel/static${moduleId.replace(/\.litsx$/, ".mjs")}`;
     },
   });
 
@@ -56,11 +56,11 @@ test("createHydrationBootstrap deduplicates module imports by moduleId", () => {
   assert.match(bootstrap, /clientImports: \[\]/);
   assert.match(bootstrap, /register: \(\) => registerHydrationModules\(\[/);
   assert.equal(
-    bootstrap.includes("/_nextsx/static/app/components/feature-card.mjs"),
+    bootstrap.includes("/_nexel/static/app/components/feature-card.mjs"),
     true,
   );
   assert.equal(
-    bootstrap.includes("/_nextsx/static/app/components/hero-banner.mjs"),
+    bootstrap.includes("/_nexel/static/app/components/hero-banner.mjs"),
     true,
   );
   assert.equal(
@@ -68,7 +68,7 @@ test("createHydrationBootstrap deduplicates module imports by moduleId", () => {
     1,
   );
   assert.equal(
-    bootstrap.includes("__nextsx/hydration"),
+    bootstrap.includes("__nexel/hydration"),
     false,
   );
   assert.equal(
@@ -125,7 +125,7 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
     },
     clientImports: {
       enumerable: false,
-      value: ["/_nextsx/static/app/components/feature-card.hash.mjs"],
+      value: ["/_nexel/static/app/components/feature-card.hash.mjs"],
     },
     toJSON: {
       enumerable: false,
@@ -175,7 +175,7 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
       roots: { "root-0": { props: { title: "Feature" } } },
       instances: {},
     },
-    clientImports: ["/_nextsx/static/app/components/feature-card.hash.mjs"],
+    clientImports: ["/_nexel/static/app/components/feature-card.hash.mjs"],
   });
 });
 
@@ -186,25 +186,25 @@ test("client asset manifest helpers normalize and query structured asset entries
       {
         clientModule: "app/page.mjs",
         kind: "entry",
-        publicUrl: "/_nextsx/static/app/page.hash.mjs",
+        publicUrl: "/_nexel/static/app/page.hash.mjs",
       },
       {
         clientModule: "app/components/card-accent.css",
         kind: "style",
-        publicUrl: "/_nextsx/static/app/components/card-accent.hash.css",
+        publicUrl: "/_nexel/static/app/components/card-accent.hash.css",
       },
     ],
   });
 
   assert.equal(manifest.version, 1);
-  assert.equal(manifest.publicPathPrefix, "/_nextsx/static/");
+  assert.equal(manifest.publicPathPrefix, "/_nexel/static/");
   assert.deepEqual(manifest.resources, ["app/components/card-accent.svg"]);
   assert.equal(
     getAssetByClientModule(manifest, "app/page.mjs")?.publicUrl,
-    "/_nextsx/static/app/page.hash.mjs",
+    "/_nexel/static/app/page.hash.mjs",
   );
   assert.equal(
-    getAssetByPublicUrl(manifest, "/_nextsx/static/app/components/card-accent.hash.css")?.clientModule,
+    getAssetByPublicUrl(manifest, "/_nexel/static/app/components/card-accent.hash.css")?.clientModule,
     "app/components/card-accent.css",
   );
   assert.deepEqual(
@@ -216,9 +216,9 @@ test("client asset manifest helpers normalize and query structured asset entries
 test("shared vendor runtime resolves browser ESM entry files", async () => {
   const sharedRuntime = await buildSharedVendorRuntime(process.cwd(), "development");
 
-  assert.match(sharedRuntime.imports["@litsx/core"], /^\/_nextsx\/shared\/.+\.mjs$/);
-  assert.match(sharedRuntime.imports["@litsx/ssr/hydration"], /^\/_nextsx\/shared\/.+\.mjs$/);
-  assert.match(sharedRuntime.imports["lit"], /^\/_nextsx\/shared\/.+\.mjs$/);
+  assert.match(sharedRuntime.imports["@litsx/core"], /^\/_nexel\/shared\/.+\.mjs$/);
+  assert.match(sharedRuntime.imports["@litsx/ssr/hydration"], /^\/_nexel\/shared\/.+\.mjs$/);
+  assert.match(sharedRuntime.imports["lit"], /^\/_nexel\/shared\/.+\.mjs$/);
   assert.equal(sharedRuntime.imports["lit-html"], undefined);
 
   const coreFilePath = await resolveBrowserSpecifierFilePath("@litsx/core");
@@ -234,7 +234,7 @@ test("shared hydration entry eagerly loads lit hydrate support", async () => {
   const hydrationEntryUrl = sharedRuntime.imports["@litsx/ssr/hydration"];
   const hydrationEntryPath = path.join(
     getSharedOutputRoot(projectRoot, "development"),
-    hydrationEntryUrl.replace("/_nextsx/shared/", ""),
+    hydrationEntryUrl.replace("/_nexel/shared/", ""),
   );
   const hydrationEntrySource = await fs.readFile(hydrationEntryPath, "utf8");
 
@@ -243,22 +243,22 @@ test("shared hydration entry eagerly loads lit hydrate support", async () => {
 
 test("browser package asset urls preserve package-relative paths", async () => {
   const corePublicUrl = await createBrowserSpecifierPublicUrl("@litsx/core");
-  assert.equal(corePublicUrl, "/_nextsx/pkg/%40litsx/core/src/index.js");
-  assert.equal(createBrowserPackageBaseUrl("lit"), "/_nextsx/pkg/lit/");
+  assert.equal(corePublicUrl, "/_nexel/pkg/%40litsx/core/src/index.js");
+  assert.equal(createBrowserPackageBaseUrl("lit"), "/_nexel/pkg/lit/");
 
   const relativeFilePath = await resolveBrowserPackageAssetFilePath(
-    "/_nextsx/pkg/%40litsx/core/src/error-boundary.js",
+    "/_nexel/pkg/%40litsx/core/src/error-boundary.js",
   );
   assert.match(relativeFilePath, /@litsx\/core\/src\/error-boundary\.js$/);
 
   const exportedSubpathFilePath = await resolveBrowserPackageAssetFilePath(
-    "/_nextsx/pkg/%40litsx/core/elements",
+    "/_nexel/pkg/%40litsx/core/elements",
   );
   assert.match(exportedSubpathFilePath, /@litsx\/core\/src\/elements\/index\.js$/);
 });
 
 test("bundled static sourcemaps preserve original litsx sourcesContent", async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-client-assets-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-client-assets-"));
   const fixtureRoot = path.join(tempRoot, "app");
 
   try {
@@ -291,10 +291,10 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
 
     const sourceMapPath = path.join(
       fixtureRoot,
-      ".nextsx",
+      ".nexel",
       "dev",
       "static",
-      pageAsset.publicUrl.replace("/_nextsx/static/", ""),
+      pageAsset.publicUrl.replace("/_nexel/static/", ""),
     ) + ".map";
     const sourceMap = JSON.parse(await fs.readFile(sourceMapPath, "utf8"));
 
@@ -308,10 +308,10 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
     assert.ok(layoutAsset);
     const layoutSourceMapPath = path.join(
       fixtureRoot,
-      ".nextsx",
+      ".nexel",
       "dev",
       "static",
-      layoutAsset.publicUrl.replace("/_nextsx/static/", ""),
+      layoutAsset.publicUrl.replace("/_nexel/static/", ""),
     ) + ".map";
     const layoutSourceMap = JSON.parse(await fs.readFile(layoutSourceMapPath, "utf8"));
     assert.deepEqual(layoutSourceMap.sources, ["/app/layout.litsx"]);
@@ -334,7 +334,7 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
 });
 
 test("rewriting client-relative imports preserves LitSX sourcemap sources", async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-compiler-map-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-compiler-map-"));
   const appRoot = path.join(tempRoot, "app");
 
   try {
@@ -371,14 +371,14 @@ test("rewriting client-relative imports preserves LitSX sourcemap sources", asyn
     assert.match(sourceMap.sourcesContent[0], /import Shell from "\.\/components\/shell\.litsx"/);
     assert.equal(importPosition.source, path.join(appRoot, "page.litsx"));
     assert.equal(importPosition.line, 1);
-    assert.doesNotMatch(sourceMap.sources[0], /#nextsx-transform$/);
+    assert.doesNotMatch(sourceMap.sources[0], /#nexel-transform$/);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
 test("rewriting client-relative imports also works without sourcemaps", async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nextsx-compiler-build-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nexel-compiler-build-"));
   const appRoot = path.join(tempRoot, "app");
 
   try {

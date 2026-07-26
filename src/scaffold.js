@@ -17,14 +17,14 @@ async function writeSitePackageJson(targetDirectory, siteName) {
     private: true,
     type: "module",
     scripts: {
-      dev: "nextsx dev",
-      build: "nextsx build",
-      start: "nextsx start",
+      dev: "nexel dev",
+      build: "nexel build",
+      start: "nexel start",
       typecheck: "litsx-tsc -p jsconfig.json --noEmit",
     },
     dependencies: {
       "@litsx/core": "0.17.0-canary-feat-ssr-20260726130435",
-      nextsx: frameworkVersion,
+      nexel: frameworkVersion,
     },
     devDependencies: {
       "@litsx/typescript": "^0.9.0",
@@ -51,13 +51,13 @@ export async function scaffoldSite(targetDirectory, options = {}) {
   await copyDirectory(TEMPLATE_ROOT, absoluteTargetDirectory);
   await writeSitePackageJson(absoluteTargetDirectory, siteName);
   await fs.writeFile(
-    path.join(absoluteTargetDirectory, "nextsx.config.js"),
+    path.join(absoluteTargetDirectory, "nexel.config.js"),
     [
       "export default {",
       "  // Reserved for framework configuration.",
       "  // Response cache adapters and deployment-specific runtime hooks can live here.",
       "  // Example for object storage adapters such as S3:",
-      "  // import { ObjectStorageResponseCacheStore } from \"nextsx\";",
+      "  // import { ObjectStorageResponseCacheStore } from \"nexel\";",
       "  // import {",
       "  //   DeleteObjectCommand,",
       "  //   GetObjectCommand,",
@@ -66,7 +66,7 @@ export async function scaffoldSite(targetDirectory, options = {}) {
       "  // } from \"@aws-sdk/client-s3\";",
       "  //",
       "  // const s3 = new S3Client({ region: process.env.AWS_REGION });",
-      "  // const bucket = process.env.NEXTSX_CACHE_BUCKET;",
+      "  // const bucket = process.env.NEXEL_CACHE_BUCKET;",
       "  // responseCache: {",
       "  //   async createStore() {",
       "  //     return new ObjectStorageResponseCacheStore({",

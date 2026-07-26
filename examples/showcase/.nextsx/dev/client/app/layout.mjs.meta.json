@@ -1,0 +1,12 @@
+{
+  "moduleImports": [
+    "app/components/app-shell.mjs"
+  ],
+  "vendorImports": [
+    "@litsx/core",
+    "@litsx/core/elements",
+    "lit"
+  ],
+  "styleImports": [],
+  "assetImports": []
+}

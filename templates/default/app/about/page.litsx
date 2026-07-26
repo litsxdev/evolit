@@ -1,12 +1,12 @@
 export const metadata = {
-  title: "About | nextsx",
-  description: "What nextsx is trying to become",
+  title: "About | nexel",
+  description: "What nexel is trying to become",
 };
 
 export default async function AboutPage() {
   return (
     <section>
-      <h1>About nextsx</h1>
+      <h1>About nexel</h1>
       <p>
         The goal is not to clone Next.js mechanically. The goal is to offer the same level of
         application ergonomics for LitSX-authored user interfaces: routing, layouts, SSR,

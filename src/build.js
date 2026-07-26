@@ -20,7 +20,7 @@ import {
   rewriteServerAssetPlaceholders,
 } from "./client-assets.js";
 import { compileModuleGraph, importCompiledModule } from "./compiler.js";
-import { loadNextsxConfig } from "./config.js";
+import { loadNexelConfig } from "./config.js";
 import {
   BUILD_DIRECTORY,
   DEPLOY_ASSETS_MANIFEST_FILENAME,
@@ -78,7 +78,7 @@ async function writeDeploymentRuntimeEntry(buildRoot) {
       "",
       "let createDeploymentRuntime;",
       "try {",
-      '  ({ createDeploymentRuntime } = await import("nextsx"));',
+      '  ({ createDeploymentRuntime } = await import("nexel"));',
       "} catch {",
       `  ({ createDeploymentRuntime } = await import(${JSON.stringify(frameworkEntryUrl)}));`,
       "}",
@@ -117,7 +117,7 @@ async function writeDeploymentRuntimeEntry(buildRoot) {
 }
 
 export async function buildProject(projectRoot) {
-  const nextsxConfig = await loadNextsxConfig(projectRoot);
+  const nexelConfig = await loadNexelConfig(projectRoot);
   const routes = await discoverAppRoutes(projectRoot);
   const routeHandlers = await discoverAppRouteHandlers(projectRoot);
   const buildRoot = path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY);
@@ -265,13 +265,13 @@ export async function buildProject(projectRoot) {
       );
     },
   });
-  const responseCacheRuntime = await resolveResponseCacheRuntime(projectRoot, "production", nextsxConfig);
+  const responseCacheRuntime = await resolveResponseCacheRuntime(projectRoot, "production", nexelConfig);
   const prerenderedRoutes = [];
   const routeCache = [];
   const prerenderedRouteArtifacts = [];
 
   for (const route of routes) {
-    const request = new Request(`http://nextsx.local${route.pathname}`);
+    const request = new Request(`http://nexel.local${route.pathname}`);
     const routePolicyResult = await routeResolver.resolveRoutePolicy(request);
     if (routePolicyResult.type !== "route") {
       continue;
@@ -308,7 +308,7 @@ export async function buildProject(projectRoot) {
       }
       seenPrerenderTargets.add(targetPathname);
 
-      const targetRequest = new Request(`http://nextsx.local${targetPathname}`);
+      const targetRequest = new Request(`http://nexel.local${targetPathname}`);
       const routeResult = await routeResolver.resolveRequest(targetRequest);
       if (routeResult.type !== "route" || routeResult.cachePolicy.mode === "dynamic") {
         continue;

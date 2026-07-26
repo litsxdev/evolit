@@ -1,0 +1,10 @@
+{
+  "moduleImports": [],
+  "vendorImports": [
+    "@litsx/core",
+    "@litsx/core/elements",
+    "lit"
+  ],
+  "styleImports": [],
+  "assetImports": []
+}

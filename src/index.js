@@ -1,5 +1,5 @@
 /**
- * Builds an application into `.nextsx/build`, including server output, browser assets, and
+ * Builds an application into `.nexel/build`, including server output, browser assets, and
  * platform-neutral deployment manifests.
  *
  * @param {string} projectRoot Absolute path to the application root.
@@ -26,7 +26,7 @@ export { createDeploymentRuntime } from "./deployment-runtime.js";
 export { createDevServer } from "./server.js";
 
 /**
- * Creates a production HTTP server from existing `.nextsx/build` output.
+ * Creates a production HTTP server from existing `.nexel/build` output.
  *
  * @param {string} projectRoot Absolute path to the application root.
  * @param {object} [options] Server options, including `port`.
@@ -51,7 +51,7 @@ export { discoverAppRoutes } from "./app-discovery.js";
 export { discoverAppRouteHandlers } from "./app-discovery.js";
 
 /**
- * Creates a starter NextSX application in an empty directory.
+ * Creates a starter Nexel application in an empty directory.
  *
  * @param {string} targetDirectory Directory to scaffold.
  * @param {object} [options] Scaffold options, including `name`.
@@ -157,11 +157,11 @@ export { ObjectStorageResponseCacheStore } from "./response-cache.js";
 export { createDefaultRouteCacheKey } from "./response-cache.js";
 
 /**
- * Resolves the response cache store and cache-key factory from `nextsx.config.js`.
+ * Resolves the response cache store and cache-key factory from `nexel.config.js`.
  *
  * @param {string} projectRoot Absolute path to the application root.
  * @param {"development"|"production"} mode Runtime mode.
- * @param {object} [nextsxConfig] Loaded framework configuration.
+ * @param {object} [nexelConfig] Loaded framework configuration.
  * @returns {Promise<{ store: object, createKey: Function }>} Cache runtime hooks.
  */
 export { resolveResponseCacheRuntime } from "./response-cache.js";

@@ -1,7 +1,7 @@
 {
-  "name": "nextsx",
+  "name": "nexel",
   "version": "0.1.0-alpha.0",
-  "description": "A convention-driven application framework for LitSX, inspired by the Next.js App Router.",
+  "description": "A convention-driven application framework for LitSX and web components.",
   "type": "module",
   "packageManager": "yarn@4.10.3",
   "repository": {
@@ -34,7 +34,7 @@
     "release:check": "yarn test && yarn typecheck && yarn pack --dry-run"
   },
   "keywords": [
-    "nextsx",
+    "nexel",
     "litsx",
     "lit",
     "ssr",
