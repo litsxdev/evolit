@@ -2,6 +2,7 @@ import http from "node:http";
 import { watch } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { WebSocketServer, WebSocket } from "ws";
 import { loadEvolitConfig } from "./config.js";
 import { createDeploymentRuntime } from "./deployment-runtime.js";
 import { APP_DIRECTORY, BUILD_DIRECTORY, INTERNAL_DIRECTORY, MANIFEST_FILENAME } from "./constants.js";
@@ -36,7 +37,6 @@ async function writeResponseBody(response, body) {
 }
 
 const LIVE_RELOAD_PATHNAME = "/_evolit/live-reload";
-const LIVE_RELOAD_SNIPPET = `<script data-evolit-live-reload>if (typeof EventSource !== "undefined") { const source = new EventSource(${JSON.stringify(LIVE_RELOAD_PATHNAME)}); source.addEventListener("reload", () => window.location.reload()); }</script>`;
 
 function getResponseHeader(headers, name) {
   if (headers?.get) {
@@ -57,9 +57,13 @@ function injectLiveReloadSnippet(response) {
   return {
     ...response,
     body: response.body.includes("</body>")
-      ? response.body.replace("</body>", `${LIVE_RELOAD_SNIPPET}</body>`)
-      : `${response.body}${LIVE_RELOAD_SNIPPET}`,
+      ? response.body.replace("</body>", `${createLiveReloadSnippet()}</body>`)
+      : `${response.body}${createLiveReloadSnippet()}`,
   };
+}
+
+function createLiveReloadSnippet() {
+  return `<script data-evolit-live-reload>const evolitProtocol=window.location.protocol==="https:"?"wss:":"ws:";const evolitSocket=new WebSocket(evolitProtocol+"//"+window.location.host+${JSON.stringify(LIVE_RELOAD_PATHNAME)});evolitSocket.addEventListener("message",({data})=>{if(data==="reload")window.location.reload()});</script>`;
 }
 
 async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
@@ -149,7 +153,14 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     responseCacheRuntime,
   });
   const port = getPort(explicitPort);
-  const liveReloadConnections = new Set();
+  const liveReloadServer = mode === "development" ? new WebSocketServer({ noServer: true }) : null;
+  const liveReloadSockets = new Set();
+  liveReloadServer?.on("connection", (socket) => {
+    liveReloadSockets.add(socket);
+    socket.on("close", () => {
+      liveReloadSockets.delete(socket);
+    });
+  });
   let invalidationTimer = null;
   let pendingInvalidation = null;
   let resolvePendingInvalidation = null;
@@ -176,8 +187,10 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         .then(() => deploymentRuntime.invalidateDevelopmentState());
       invalidationPromise.then(
         () => {
-          for (const connection of liveReloadConnections) {
-            connection.write("event: reload\\ndata: update\\n\\n");
+          for (const socket of liveReloadSockets) {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send("reload");
+            }
           }
           resolve();
         },
@@ -197,20 +210,6 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     try {
       const origin = `http://${req.headers.host ?? `localhost:${port}`}`;
       const pathname = new URL(req.url ?? "/", origin).pathname;
-      if (mode === "development" && pathname === LIVE_RELOAD_PATHNAME) {
-        res.writeHead(200, {
-          "cache-control": "no-cache, no-transform",
-          connection: "keep-alive",
-          "content-type": "text/event-stream",
-        });
-        res.write("retry: 1000\\n\\n");
-        liveReloadConnections.add(res);
-        res.on("close", () => {
-          liveReloadConnections.delete(res);
-        });
-        return;
-      }
-
       await pendingInvalidation;
       await invalidationPromise;
       const method = req.method ?? "GET";
@@ -220,7 +219,9 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         ...(method === "GET" || method === "HEAD" ? {} : { body: req, duplex: "half" }),
       });
       const response = await deploymentRuntime.handle(request);
-      const servedResponse = mode === "development" ? injectLiveReloadSnippet(response) : response;
+      const servedResponse = mode === "development"
+        ? injectLiveReloadSnippet(response)
+        : response;
 
       res.writeHead(servedResponse.status, servedResponse.headers);
       await writeResponseBody(res, servedResponse.body);
@@ -228,6 +229,19 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       res.end(error instanceof Error ? error.stack ?? error.message : String(error));
     }
+  });
+
+  server.on("upgrade", (request, socket, head) => {
+    const origin = `http://${request.headers.host ?? `localhost:${port}`}`;
+    const pathname = new URL(request.url ?? "/", origin).pathname;
+    if (!liveReloadServer || pathname !== LIVE_RELOAD_PATHNAME) {
+      socket.destroy();
+      return;
+    }
+
+    liveReloadServer.handleUpgrade(request, socket, head, (webSocket) => {
+      liveReloadServer.emit("connection", webSocket, request);
+    });
   });
 
   return {
@@ -244,10 +258,14 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         clearTimeout(invalidationTimer);
       }
       watcher?.close();
-      for (const connection of liveReloadConnections) {
-        connection.end();
+      for (const socket of liveReloadSockets) {
+        socket.close();
       }
-      liveReloadConnections.clear();
+      if (liveReloadServer) {
+        await new Promise((resolve) => {
+          liveReloadServer.close(resolve);
+        });
+      }
       await new Promise((resolve, reject) => {
         server.close((error) => {
           if (error) {

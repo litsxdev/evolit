@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
+import WebSocket from "ws";
 import { createDevServer } from "../src/server.js";
 import { scaffoldSite } from "../src/scaffold.js";
 
@@ -117,21 +118,29 @@ async function waitForResponse(request, predicate, timeoutMs = 2_000) {
   throw new Error(`Timed out waiting for development watcher update: ${lastResponse?.response.status ?? "no response"}`);
 }
 
-async function waitForLiveReload(body, timeoutMs = 2_000) {
+async function openLiveReloadSocket() {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`${baseUrl.replace(/^http/, "ws")}/_evolit/live-reload`);
+    socket.once("open", () => resolve(socket));
+    socket.once("error", reject);
+  });
+}
+
+async function waitForLiveReload(socket, timeoutMs = 2_000) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       cleanup();
-      reject(new Error("Timed out waiting for a development live reload event."));
+      reject(new Error("Timed out waiting for a development live reload message."));
     }, timeoutMs);
 
     function cleanup() {
       clearTimeout(timeout);
-      body.off("data", onData);
-      body.off("error", onError);
+      socket.off("message", onMessage);
+      socket.off("error", onError);
     }
 
-    function onData(chunk) {
-      if (!String(chunk).includes("event: reload")) {
+    function onMessage(message) {
+      if (String(message) !== "reload") {
         return;
       }
 
@@ -144,8 +153,8 @@ async function waitForLiveReload(body, timeoutMs = 2_000) {
       reject(error);
     }
 
-    body.on("data", onData);
-    body.on("error", onError);
+    socket.on("message", onMessage);
+    socket.on("error", onError);
   });
 }
 
@@ -374,18 +383,16 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/components\/card-accent\.[a-f0-9]{8}\.css">/);
   assert.match(html, /id="__LITSX_HYDRATION__"/);
   assert.match(html, /data-evolit-live-reload/);
-  assert.match(html, /new EventSource\("\/_evolit\/live-reload"\)/);
+  assert.match(html, /new WebSocket/);
   assert.match(html, /data-litsx-root="litsx-root-0"/);
   assert.doesNotMatch(html, /__evolit\/hydration/);
   assert.doesNotMatch(html, /customElements\.define/);
 });
 
-test("dev server exposes a live reload event stream", async () => {
-  const response = await fetch(`${baseUrl}/_evolit/live-reload`);
-
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/);
-  response.body?.destroy?.();
+test("dev server accepts live reload WebSocket connections", async () => {
+  const socket = await openLiveReloadSocket();
+  assert.equal(socket.readyState, WebSocket.OPEN);
+  socket.close();
 });
 
 test("dev server renders native Lit page and layout modules", async () => {
@@ -578,8 +585,8 @@ test("dev server revalidates dynamic routes in the background per pathname", asy
 test("dev server discovers new routes and invalidates cached route responses", async () => {
   const routeDirectory = path.join(fixtureRoot, "app", "watcher-route");
   const routePath = path.join(routeDirectory, "page.litsx");
-  const liveReloadResponse = await fetch(`${baseUrl}/_evolit/live-reload`);
-  const liveReloadEvent = waitForLiveReload(liveReloadResponse.body);
+  const liveReloadSocket = await openLiveReloadSocket();
+  const liveReloadEvent = waitForLiveReload(liveReloadSocket);
 
   const initialResponse = await fetch(`${baseUrl}/watcher-route`);
   assert.equal(initialResponse.status, 404);
@@ -604,7 +611,7 @@ test("dev server discovers new routes and invalidates cached route responses", a
   );
   assert.equal(createdRoute.response.headers.get("x-evolit-cache"), "MISS");
   await liveReloadEvent;
-  liveReloadResponse.body.destroy();
+  liveReloadSocket.close();
 
   await fs.writeFile(
     routePath,

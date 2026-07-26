@@ -1,6 +1,6 @@
 {
   "name": "evolit",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "description": "A convention-driven application framework for LitSX and web components.",
   "type": "module",
   "packageManager": "yarn@4.10.3",
@@ -55,7 +55,8 @@
     "lit": "^3.3.3",
     "magic-string": "^1.1.0",
     "rollup": "^4.46.1",
-    "typescript": "^6.0.0"
+    "typescript": "^6.0.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "vite": "^8.1.5"
