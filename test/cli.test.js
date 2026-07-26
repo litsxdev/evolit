@@ -25,6 +25,10 @@ test("CLI scaffolds a site from a directory argument", async () => {
   assert.equal(packageJson.name, "my-site");
   assert.equal(packageJson.dependencies.evolit, frameworkPackageJson.version);
   await fs.access(path.join(targetDirectory, "app", "page.litsx"));
+  assert.equal(
+    await fs.readFile(path.join(targetDirectory, ".yarnrc.yml"), "utf8"),
+    "nodeLinker: node-modules\n",
+  );
 });
 
 test("CLI keeps init as an explicit scaffolding alias", async () => {

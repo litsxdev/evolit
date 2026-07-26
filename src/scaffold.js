@@ -49,6 +49,10 @@ export async function scaffoldSite(targetDirectory, options = {}) {
   }
 
   await copyDirectory(TEMPLATE_ROOT, absoluteTargetDirectory);
+  await fs.rename(
+    path.join(absoluteTargetDirectory, "yarnrc.yml.template"),
+    path.join(absoluteTargetDirectory, ".yarnrc.yml"),
+  );
   await writeSitePackageJson(absoluteTargetDirectory, siteName);
   await fs.writeFile(
     path.join(absoluteTargetDirectory, "evolit.config.js"),
