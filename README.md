@@ -38,7 +38,7 @@ Supported authored module extensions:
 
 ```sh
 yarn install
-npx evolit@alpha my-site
+npx -p evolit@alpha evolit my-site
 ```
 
 Additional commands:
@@ -61,7 +61,8 @@ yarn start
 The framework ships a starter at `templates/default`.
 
 `evolit <directory>` copies that template, writes a site `package.json`, and leaves the app ready
-to run. `evolit init <directory>` is supported as an explicit equivalent.
+to run. `evolit init <directory>` is supported as an explicit equivalent. The `npx -p … evolit`
+form keeps the CLI arguments unambiguous across npm versions.
 
 ## Architecture
 
