@@ -17,6 +17,10 @@ import { ensureDirectory } from "./fs-utils.js";
 
 const MODULE_SPECIFIER_PATTERN =
   /\b(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+const RESOLVABLE_IMPORT_EXTENSIONS = [
+  ...MODULE_EXTENSIONS,
+  ...STATIC_ASSET_EXTENSIONS,
+];
 
 function isRelativeSpecifier(specifier) {
   return specifier.startsWith("./") || specifier.startsWith("../");
@@ -44,6 +48,10 @@ function isStaticAssetPath(filePath) {
   return STATIC_ASSET_EXTENSIONS.some((extension) => filePath.endsWith(extension));
 }
 
+function hasResolvableImportExtension(filePath) {
+  return RESOLVABLE_IMPORT_EXTENSIONS.some((extension) => filePath.endsWith(extension));
+}
+
 function isStyleAssetPath(filePath) {
   return filePath.endsWith(".css");
 }
@@ -65,8 +73,8 @@ async function resolveImportPath(importerPath, specifier) {
   const basePath = path.resolve(path.dirname(importerPath), specifier);
   const candidates = [basePath];
 
-  if (!path.extname(basePath)) {
-    for (const extension of [...MODULE_EXTENSIONS, ...STATIC_ASSET_EXTENSIONS]) {
+  if (!hasResolvableImportExtension(basePath)) {
+    for (const extension of RESOLVABLE_IMPORT_EXTENSIONS) {
       candidates.push(`${basePath}${extension}`);
       candidates.push(path.join(basePath, `index${extension}`));
     }
