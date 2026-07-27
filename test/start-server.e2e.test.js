@@ -151,6 +151,31 @@ before(async () => {
     path.join(fixtureRoot, "node_modules"),
     "dir",
   );
+  await fs.mkdir(path.join(fixtureRoot, "src", "styles"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "src", "themes"), { recursive: true });
+  await Promise.all([
+    fs.writeFile(
+      path.join(fixtureRoot, "src", "styles", "tokens.css"),
+      ":root { --evolit-token-color: #357edd; }\n",
+      "utf8",
+    ),
+    fs.writeFile(
+      path.join(fixtureRoot, "src", "themes", "composable.css"),
+      "main { outline-color: var(--evolit-token-color); }\n",
+      "utf8",
+    ),
+  ]);
+  const rootLayoutPath = path.join(fixtureRoot, "app", "layout.litsx");
+  const rootLayoutSource = await fs.readFile(rootLayoutPath, "utf8");
+  await fs.writeFile(
+    rootLayoutPath,
+    [
+      'import "../src/styles/tokens.css";',
+      'import "../src/themes/composable.css";',
+      rootLayoutSource,
+    ].join("\n"),
+    "utf8",
+  );
   await fs.writeFile(
     path.join(fixtureRoot, "app", "components", "card-accent.svg"),
     [
@@ -761,6 +786,44 @@ test("start server emits hashed modulepreload links that match the asset manifes
     new RegExp(path.basename(decodeURIComponent(cardBadgeSpecialPngAsset.publicUrl)).replaceAll(".", "\\.")),
   );
   assert.doesNotMatch(css, /card badge@2x\.png/);
+});
+
+test("start server emits every stylesheet imported by the root layout", async () => {
+  const response = await fetch(`${baseUrl}/`);
+  const html = await response.text();
+  const layoutAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/layout.mjs",
+  );
+  const tokensStyleAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "src/styles/tokens.css",
+  );
+  const composableStyleAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "src/themes/composable.css",
+  );
+  const globalStyleAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "app/global.css",
+  );
+
+  assert.ok(layoutAsset);
+  assert.ok(tokensStyleAsset);
+  assert.ok(composableStyleAsset);
+  assert.ok(globalStyleAsset);
+  assert.deepEqual(layoutAsset.styleImports, [
+    "app/global.css",
+    "src/styles/tokens.css",
+    "src/themes/composable.css",
+  ]);
+  assert.deepEqual(layoutAsset.styleUrls, [
+    globalStyleAsset.publicUrl,
+    tokensStyleAsset.publicUrl,
+    composableStyleAsset.publicUrl,
+  ]);
+  for (const styleAsset of [tokensStyleAsset, composableStyleAsset, globalStyleAsset]) {
+    assert.match(
+      html,
+      new RegExp(`<link rel="stylesheet" href="${styleAsset.publicUrl.replaceAll(".", "\\.")}">`),
+    );
+  }
 });
 
 test("start server omits hashed hydration preload output for non-hydrated routes", async () => {

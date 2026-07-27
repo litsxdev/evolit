@@ -138,6 +138,62 @@ test("emitBundledClientAssets rewrites relative CSS imports to hashed assets", a
   }
 });
 
+test("emitBundledClientAssets resolves layout stylesheet metadata relative to its module", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-dev-layout-styles-"));
+  const clientRoot = path.join(projectRoot, ".evolit", "dev", "client");
+  const layoutPath = path.join(clientRoot, "app", "layout.mjs");
+
+  try {
+    await fs.mkdir(path.dirname(layoutPath), { recursive: true });
+    await fs.mkdir(path.join(clientRoot, "src", "styles"), { recursive: true });
+    await fs.mkdir(path.join(clientRoot, "src", "themes"), { recursive: true });
+    await Promise.all([
+      fs.writeFile(path.join(clientRoot, "src", "styles", "tokens.css"), ":root {}\n", "utf8"),
+      fs.writeFile(path.join(clientRoot, "src", "themes", "composable.css"), "main {}\n", "utf8"),
+      fs.writeFile(path.join(clientRoot, "app", "global.css"), "body {}\n", "utf8"),
+    ]);
+    await Promise.all([
+      fs.writeFile(layoutPath, "export default null;\n", "utf8"),
+      fs.writeFile(
+        `${layoutPath}.meta.json`,
+        JSON.stringify({
+          moduleImports: [],
+          vendorImports: [],
+          styleImports: ["../src/styles/tokens.css", "../src/themes/composable.css", "app/global.css"],
+          assetImports: [],
+        }),
+        "utf8",
+      ),
+    ]);
+
+    const manifest = await emitBundledClientAssets(projectRoot, {
+      mode: "development",
+      entryClientModules: ["app/layout.mjs"],
+    });
+    const layoutAsset = getAssetByClientModule(manifest, "app/layout.mjs");
+    const tokensStyle = getAssetByClientModule(manifest, "src/styles/tokens.css");
+    const composableStyle = getAssetByClientModule(manifest, "src/themes/composable.css");
+    const globalStyle = getAssetByClientModule(manifest, "app/global.css");
+
+    assert.ok(layoutAsset);
+    assert.ok(tokensStyle);
+    assert.ok(composableStyle);
+    assert.ok(globalStyle);
+    assert.deepEqual(layoutAsset.styleImports, [
+      "app/global.css",
+      "src/styles/tokens.css",
+      "src/themes/composable.css",
+    ]);
+    assert.deepEqual(layoutAsset.styleUrls, [
+      globalStyle.publicUrl,
+      tokensStyle.publicUrl,
+      composableStyle.publicUrl,
+    ]);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("createHydrationBootstrap returns an empty string when no hydratable roots exist", () => {
   const bootstrap = createHydrationBootstrap({
     hydrationData: {

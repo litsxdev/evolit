@@ -69,6 +69,19 @@ function resolveRelativeClientImportPath(fromClientModule, specifier) {
     .join("/");
 }
 
+function normalizeClientMetadataAssetPath(fromClientModule, importedAsset) {
+  if (typeof importedAsset !== "string") {
+    return null;
+  }
+
+  const normalizedAsset = stripImportSearchAndHash(importedAsset);
+  if (isRelativeSpecifier(normalizedAsset)) {
+    return resolveRelativeClientImportPath(fromClientModule, normalizedAsset);
+  }
+
+  return path.normalize(normalizedAsset).split(path.sep).join("/");
+}
+
 function parsePackageSpecifier(specifier) {
   if (!isBareSpecifier(specifier)) {
     return null;
@@ -738,10 +751,16 @@ async function collectTransitiveClientModuleMetadata(projectRoot, mode, clientMo
     }
 
     for (const styleImport of metadata.styleImports) {
-      styleImports.add(styleImport);
+      const normalizedStyleImport = normalizeClientMetadataAssetPath(currentModule, styleImport);
+      if (normalizedStyleImport) {
+        styleImports.add(normalizedStyleImport);
+      }
     }
     for (const assetImport of metadata.assetImports) {
-      assetImports.add(assetImport);
+      const normalizedAssetImport = normalizeClientMetadataAssetPath(currentModule, assetImport);
+      if (normalizedAssetImport) {
+        assetImports.add(normalizedAssetImport);
+      }
     }
     for (const importedModule of metadata.moduleImports) {
       pendingModules.push(importedModule);
@@ -1395,8 +1414,12 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
     if (entry.type === "script") {
       try {
         const metadata = JSON.parse(await fs.readFile(`${entry.filePath}.meta.json`, "utf8"));
-        styleImports = Array.isArray(metadata?.styleImports) ? metadata.styleImports : [];
-        assetImports = Array.isArray(metadata?.assetImports) ? metadata.assetImports : [];
+        styleImports = (Array.isArray(metadata?.styleImports) ? metadata.styleImports : [])
+          .map((importedStyle) => normalizeClientMetadataAssetPath(entry.relativePath, importedStyle))
+          .filter((importedStyle) => typeof importedStyle === "string");
+        assetImports = (Array.isArray(metadata?.assetImports) ? metadata.assetImports : [])
+          .map((importedAsset) => normalizeClientMetadataAssetPath(entry.relativePath, importedAsset))
+          .filter((importedAsset) => typeof importedAsset === "string");
       } catch {
         styleImports = [];
         assetImports = [];
