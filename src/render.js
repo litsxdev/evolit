@@ -12,6 +12,7 @@ import {
   isEvolitHttpSignal,
   runWithRequestContext,
 } from "./request-context.js";
+import { terminal } from "./terminal.js";
 import {
   LITSX_COMPONENT,
   LITSX_SERVER_COMPONENT,
@@ -89,7 +90,10 @@ function createBoundaryError(error, { mode, route, reportRouteError }) {
   if (typeof reportRouteError === "function") {
     reportRouteError(report);
   } else {
-    console.error(`[evolit] Route rendering failed (${digest}) at ${route.pathname}`, originalError);
+    console.error(
+      `${terminal.red("[evolit]")} ${terminal.red("✖")} Route rendering failed ${terminal.dim(`(${digest})`)} at ${terminal.cyan(route.pathname)}`,
+      originalError,
+    );
   }
 
   const boundaryError = new Error("An unexpected server error occurred.");
@@ -133,6 +137,7 @@ function createRouteModuleOptions(projectRoot, mode, options = {}) {
     mode,
     ssr: true,
     staticAssetPublicUrls: resolvedStaticAssetPublicUrls,
+    onDevelopmentEvent: options.onDevelopmentEvent,
   };
 }
 

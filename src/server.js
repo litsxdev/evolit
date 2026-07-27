@@ -9,6 +9,7 @@ import { APP_DIRECTORY, BUILD_DIRECTORY, INTERNAL_DIRECTORY, MANIFEST_FILENAME }
 import { normalizeClientAssetManifest } from "./client-assets.js";
 import { pathExists, readJson } from "./fs-utils.js";
 import { createDefaultRouteCacheKey, resolveResponseCacheRuntime } from "./response-cache.js";
+import { terminal } from "./terminal.js";
 
 function getPort(explicitPort) {
   const port = explicitPort ?? process.env.PORT ?? "3000";
@@ -139,6 +140,58 @@ async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
 }
 
 async function createServer(projectRoot, mode, explicitPort, options = {}) {
+  const reportDevelopmentEvent = mode === "development"
+    ? options.onDevelopmentEvent ?? ((event) => {
+      switch (event.type) {
+        case "initializing":
+          console.log(`${terminal.cyan("[evolit]")} ${terminal.yellow("○")} Preparing development runtime…`);
+          break;
+        case "vendor-runtime-ready":
+          console.log(`${terminal.cyan("[evolit]")} ${terminal.green("✓")} Vendor runtime ready.`);
+          break;
+        case "client-assets-building":
+          console.log(`${terminal.cyan("[evolit]")} ${terminal.magenta("○")} Compiling client assets (${event.entryCount} entries)…`);
+          break;
+        case "client-assets-ready":
+          console.log(`${terminal.cyan("[evolit]")} ${terminal.green("✓")} Client assets compiled in ${terminal.dim(`${event.durationMs}ms`)} (${event.entryCount} entries).`);
+          break;
+        case "client-assets-cache-hit":
+          console.log(`${terminal.cyan("[evolit]")} ${terminal.blue("●")} Client assets served from cache.`);
+          break;
+        case "invalidated":
+          console.log(
+            `${terminal.cyan("[evolit]")} ${terminal.yellow("△")} Source change detected${event.changedPathCount == null ? "" : ` (${event.changedPathCount} files)`}; invalidated ${event.affectedClientEntryCount} client entries.`,
+          );
+          break;
+        case "external-import":
+          console.warn(
+            `${terminal.yellow("[evolit]")} ${terminal.yellow("⚠")} Development import ${terminal.cyan(JSON.stringify(event.resolvedImportPath))} from ${terminal.cyan(JSON.stringify(event.sourcePath))} is outside the project root. It will be emitted under ${terminal.cyan("/_evolit/static/__external__/")}.`,
+          );
+          break;
+        case "request": {
+          const statusColor = event.status >= 500
+            ? terminal.red
+            : event.status >= 400
+              ? terminal.yellow
+              : event.status >= 300
+                ? terminal.blue
+                : terminal.green;
+          console.log(
+            `${terminal.cyan("[evolit]")} ${terminal.dim(event.method)} ${event.pathname} ${statusColor(event.status)} in ${terminal.dim(`${event.durationMs}ms`)}${event.cacheState ? ` ${terminal.blue(`(${event.cacheState})`)}` : ""}`,
+          );
+          break;
+        }
+        case "request-error":
+          console.error(
+            `${terminal.red("[evolit]")} ${terminal.red("✖")} ${event.method} ${event.pathname} failed`,
+            event.error,
+          );
+          break;
+        default:
+          break;
+      }
+    })
+    : null;
   const evolitConfig = options.evolitConfig ?? await loadEvolitConfig(projectRoot);
   const responseCacheRuntime = options.responseCacheStore
     ? {
@@ -151,6 +204,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     mode,
     assetManifest: normalizeClientAssetManifest(options.assetManifest),
     responseCacheRuntime,
+    onDevelopmentEvent: reportDevelopmentEvent,
   });
   const port = getPort(explicitPort);
   const liveReloadServer = mode === "development" ? new WebSocketServer({ noServer: true }) : null;
@@ -226,6 +280,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         headers: req.headers,
         ...(method === "GET" || method === "HEAD" ? {} : { body: req, duplex: "half" }),
       });
+      const requestStartedAt = performance.now();
       const response = await deploymentRuntime.handle(request);
       const servedResponse = mode === "development"
         ? injectLiveReloadSnippet(response)
@@ -233,7 +288,24 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
 
       res.writeHead(servedResponse.status, servedResponse.headers);
       await writeResponseBody(res, servedResponse.body);
+      if (mode === "development" && !pathname.startsWith("/_evolit/")) {
+        const durationMs = Math.round(performance.now() - requestStartedAt);
+        reportDevelopmentEvent({
+          type: "request",
+          method,
+          pathname,
+          status: servedResponse.status,
+          durationMs,
+          cacheState: servedResponse.headers?.["x-evolit-cache"] ?? null,
+        });
+      }
     } catch (error) {
+      reportDevelopmentEvent?.({
+        type: "request-error",
+        method: req.method ?? "GET",
+        pathname: req.url ?? "/",
+        error,
+      });
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       res.end(error instanceof Error ? error.stack ?? error.message : String(error));
     }

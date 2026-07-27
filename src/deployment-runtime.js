@@ -215,7 +215,14 @@ export function createResponseCacheController({ responseCacheRuntime }) {
   };
 }
 
-export async function createRequestRenderer({ projectRoot, mode, assetManifest, routeResolver, responseCacheRuntime }) {
+export async function createRequestRenderer({
+  projectRoot,
+  mode,
+  assetManifest,
+  routeResolver,
+  responseCacheRuntime,
+  onDevelopmentEvent,
+}) {
   let currentAssetManifest = normalizeClientAssetManifest(assetManifest);
   let currentAssetResolver = createAssetResolver(projectRoot, {
     assetManifest: currentAssetManifest,
@@ -244,11 +251,18 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
     return nextWork;
   }
 
+  function reportDevelopmentEvent(event) {
+    if (mode === "development" && typeof onDevelopmentEvent === "function") {
+      onDevelopmentEvent(event);
+    }
+  }
+
   function getDevClientModuleKey(clientModule) {
     return path.resolve(projectRoot, clientModule);
   }
   async function createFrameworkRouteResolver() {
     return createRouteResolver(projectRoot, mode, {
+      onDevelopmentEvent,
       getStaticAssetPublicUrls() {
         return createStaticAssetPublicUrlMap(currentAssetManifest);
       },
@@ -341,6 +355,12 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
           }
         }
 
+        reportDevelopmentEvent({
+          type: "invalidated",
+          changedPathCount: normalizedChangedPaths?.size ?? null,
+          affectedClientEntryCount: affectedClientModules.size,
+        });
+
         if (usesFrameworkRouteResolver) {
           effectiveRouteResolver = await createFrameworkRouteResolver();
         }
@@ -363,6 +383,7 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
             mode,
             sourceMaps: false,
             target: "client",
+            onDevelopmentEvent,
           });
         }
         return;
@@ -381,6 +402,7 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
             mode,
             sourceMaps: true,
             target: "client",
+            onDevelopmentEvent,
           });
           devPreparedClientModules.add(clientModuleKey);
           devClientModuleDependencies.set(
@@ -395,10 +417,16 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
 
         if (!discoveredClientEntry && currentAssetManifest) {
           developmentMetrics.clientArtifactCacheHits += 1;
+          reportDevelopmentEvent({ type: "client-assets-cache-hit" });
           return;
         }
 
         developmentMetrics.clientArtifactBuilds += 1;
+        const buildStartedAt = performance.now();
+        reportDevelopmentEvent({
+          type: "client-assets-building",
+          entryCount: devBundledEntries.size,
+        });
         const bundledClientAssets = await emitBundledClientAssetsWithState(projectRoot, {
           mode: "development",
           entryClientModules: devBundledEntries,
@@ -418,6 +446,11 @@ export async function createRequestRenderer({ projectRoot, mode, assetManifest, 
           },
         ) ?? currentHydrationModuleUrl;
         devRollupCache = bundledClientAssets.rollupCache;
+        reportDevelopmentEvent({
+          type: "client-assets-ready",
+          durationMs: Math.round(performance.now() - buildStartedAt),
+          entryCount: devBundledEntries.size,
+        });
       });
     },
     async resolveRoutePolicy(request) {
@@ -456,8 +489,16 @@ export async function createDeploymentRuntime({
   assetManifest,
   responseCacheRuntime,
   routeResolver,
+  onDevelopmentEvent,
 } = {}) {
+  function reportDevelopmentEvent(event) {
+    if (mode === "development" && typeof onDevelopmentEvent === "function") {
+      onDevelopmentEvent(event);
+    }
+  }
+
   if (mode === "development") {
+    reportDevelopmentEvent({ type: "initializing" });
     const developmentRoot = path.join(projectRoot, INTERNAL_DIRECTORY, DEV_DIRECTORY);
     await fs.rm(developmentRoot, { recursive: true, force: true });
     invalidateDevelopmentCompilationCache(projectRoot);
@@ -465,6 +506,7 @@ export async function createDeploymentRuntime({
     await buildSharedVendorRuntime(projectRoot, "development", {
       additionalEntrySpecifiers: [],
     });
+    reportDevelopmentEvent({ type: "vendor-runtime-ready" });
   }
 
   const effectiveResponseCacheRuntime = responseCacheRuntime
@@ -489,6 +531,7 @@ export async function createDeploymentRuntime({
     assetManifest: runtimeState.assetManifest,
     responseCacheRuntime: effectiveResponseCacheRuntime,
     routeResolver,
+    onDevelopmentEvent,
   });
 
   return {

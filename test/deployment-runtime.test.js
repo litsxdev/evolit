@@ -92,13 +92,9 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
 test("development requests reuse hot client assets until development state is invalidated", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-runtime-dev-assets-"));
   const fixtureRoot = path.join(tempRoot, "app");
-  const originalConsoleWarn = console.warn;
-  const warnings = [];
+  const developmentEvents = [];
 
   try {
-    console.warn = (...args) => {
-      warnings.push(args.join(" "));
-    };
     await scaffoldSite(fixtureRoot);
     await fs.symlink(
       path.join(frameworkRoot, "node_modules"),
@@ -136,6 +132,9 @@ test("development requests reuse hot client assets until development state is in
     const runtime = await createDeploymentRuntime({
       projectRoot: fixtureRoot,
       mode: "development",
+      onDevelopmentEvent(event) {
+        developmentEvents.push(event);
+      },
     });
     await assert.rejects(fs.readFile(staleAssetPath, "utf8"), { code: "ENOENT" });
     await fs.access(
@@ -145,9 +144,15 @@ test("development requests reuse hot client assets until development state is in
         "litsx__ssr__hydration.mjs",
       ),
     );
+    assert.deepEqual(
+      developmentEvents.map((event) => event.type),
+      ["initializing", "vendor-runtime-ready"],
+    );
     const response = await runtime.handle(new Request("http://evolit.local/"));
     const html = String(response.body);
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactBuilds, 1);
+    assert.equal(developmentEvents.some((event) => event.type === "client-assets-building"), true);
+    assert.equal(developmentEvents.some((event) => event.type === "client-assets-ready"), true);
     const layoutAsset = runtime.renderer.assetManifest.assets.find(
       (asset) => asset.clientModule === "app/layout.mjs",
     );
@@ -157,7 +162,7 @@ test("development requests reuse hot client assets until development state is in
     assert.ok(layoutAsset);
     assert.equal(externalStyleAssets.length, 2);
     assert.equal(layoutAsset.styleUrls.length, 3);
-    assert.equal(warnings.filter((warning) => warning.startsWith("[evolit] Development import")).length, 2);
+    assert.equal(developmentEvents.filter((event) => event.type === "external-import").length, 2);
     for (const styleAsset of externalStyleAssets) {
       await fs.access(styleAsset.outputPath);
       assert.match(
@@ -178,14 +183,15 @@ test("development requests reuse hot client assets until development state is in
     await runtime.handle(new Request("http://evolit.local/"));
     assert.equal(await fs.readFile(sentinelPath, "utf8"), "preserved");
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactCacheHits, 1);
+    assert.equal(developmentEvents.some((event) => event.type === "client-assets-cache-hit"), true);
 
     await runtime.invalidateDevelopmentState();
     await runtime.handle(new Request("http://evolit.local/"));
     await assert.rejects(fs.readFile(sentinelPath, "utf8"), { code: "ENOENT" });
     assert.equal(runtime.renderer.developmentMetrics.invalidations, 1);
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactBuilds, 2);
+    assert.equal(developmentEvents.some((event) => event.type === "invalidated"), true);
   } finally {
-    console.warn = originalConsoleWarn;
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });

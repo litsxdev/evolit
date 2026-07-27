@@ -70,16 +70,18 @@ function isPathOutsideProject(projectRoot, filePath) {
   );
 }
 
-function warnForDevelopmentExternalImport(projectRoot, sourcePath, resolvedImportPath) {
+function reportDevelopmentExternalImport(projectRoot, sourcePath, resolvedImportPath, onDevelopmentEvent) {
   const warningKey = `${path.resolve(projectRoot)}::${sourcePath}::${resolvedImportPath}`;
   if (developmentExternalImportWarnings.has(warningKey)) {
     return;
   }
 
   developmentExternalImportWarnings.add(warningKey);
-  console.warn(
-    `[evolit] Development import ${JSON.stringify(resolvedImportPath)} from ${JSON.stringify(sourcePath)} is outside the project root. It will be emitted under /_evolit/static/__external__/.`,
-  );
+  onDevelopmentEvent?.({
+    type: "external-import",
+    sourcePath,
+    resolvedImportPath,
+  });
 }
 
 function createStaticAssetStubSource(relativeAssetPath, mode, target = "server", staticAssetPublicUrls = null) {
@@ -176,6 +178,7 @@ async function rewriteRelativeSpecifiers({
   sourceMaps,
   outputPath,
   inputSourceMap,
+  onDevelopmentEvent,
 }) {
   const magicSource = new MagicString(code);
   let didRewrite = false;
@@ -208,7 +211,7 @@ async function rewriteRelativeSpecifiers({
     }
 
     if (mode === "development" && isPathOutsideProject(projectRoot, resolvedImportPath)) {
-      warnForDevelopmentExternalImport(projectRoot, sourcePath, resolvedImportPath);
+      reportDevelopmentExternalImport(projectRoot, sourcePath, resolvedImportPath, onDevelopmentEvent);
     }
 
     const importerOutputPath = toOutputPath(projectRoot, outputRoot, sourcePath);
@@ -373,6 +376,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
     ssr = false,
     target = "server",
     staticAssetPublicUrls = null,
+    onDevelopmentEvent,
   } = options;
 
   const outputRoot = getTypedOutputRoot(projectRoot, mode, target);
@@ -411,6 +415,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
       sourceMaps,
       outputPath,
       inputSourceMap: transformed.map ?? null,
+      onDevelopmentEvent,
     });
 
     await fs.writeFile(outputPath, rewritten.code, "utf8");
