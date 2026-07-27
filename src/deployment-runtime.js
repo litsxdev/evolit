@@ -10,17 +10,20 @@ import {
   createAssetResolver,
   createHydrationBootstrap,
   createStaticAssetPublicUrlMap,
+  buildSharedVendorRuntime,
   emitBundledClientAssetsWithState,
   getAssetByPublicUrl,
   getSharedOutputRoot,
   normalizeHydrationDataForClient,
   normalizeClientAssetManifest,
+  resetDevelopmentAssetCaches,
   resolveRouteClientImports,
   resolveSharedVendorModuleUrl,
   resolveBrowserPackageAssetFilePath,
   rewriteHydrationDataScript,
 } from "./client-assets.js";
 import { loadEvolitConfig } from "./config.js";
+import { DEV_DIRECTORY, INTERNAL_DIRECTORY } from "./constants.js";
 import { createRouteResolver } from "./render.js";
 import {
   createCachedRouteResponse,
@@ -454,6 +457,16 @@ export async function createDeploymentRuntime({
   responseCacheRuntime,
   routeResolver,
 } = {}) {
+  if (mode === "development") {
+    const developmentRoot = path.join(projectRoot, INTERNAL_DIRECTORY, DEV_DIRECTORY);
+    await fs.rm(developmentRoot, { recursive: true, force: true });
+    invalidateDevelopmentCompilationCache(projectRoot);
+    resetDevelopmentAssetCaches(projectRoot);
+    await buildSharedVendorRuntime(projectRoot, "development", {
+      additionalEntrySpecifiers: [],
+    });
+  }
+
   const effectiveResponseCacheRuntime = responseCacheRuntime
     ?? await resolveResponseCacheRuntime(
       projectRoot,
@@ -461,7 +474,7 @@ export async function createDeploymentRuntime({
       await loadEvolitConfig(projectRoot),
     );
   const runtimeState = {
-    assetManifest: normalizeClientAssetManifest(assetManifest),
+    assetManifest: mode === "development" ? null : normalizeClientAssetManifest(assetManifest),
   };
   const assets = createPublicAssetOrigin({
     projectRoot,

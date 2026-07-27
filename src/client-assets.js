@@ -36,6 +36,23 @@ const sharedRuntimeBuildCache = new Map();
 const clientVendorSpecifierCache = new Map();
 const clientModuleMetadataCache = new Map();
 
+export function resetDevelopmentAssetCaches(projectRoot) {
+  const normalizedProjectRoot = path.resolve(projectRoot);
+  const developmentPrefix = `${normalizedProjectRoot}::development::`;
+
+  for (const cache of [
+    sharedRuntimeBuildCache,
+    clientVendorSpecifierCache,
+    clientModuleMetadataCache,
+  ]) {
+    for (const key of cache.keys()) {
+      if (key.startsWith(developmentPrefix)) {
+        cache.delete(key);
+      }
+    }
+  }
+}
+
 function isBareSpecifier(specifier) {
   return (
     typeof specifier === "string" &&

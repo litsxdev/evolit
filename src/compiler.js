@@ -25,6 +25,7 @@ const developmentGraphCache = new Map();
 const developmentGraphDependencies = new Map();
 const developmentModuleNamespaceCache = new Map();
 const developmentGraphVersions = new Map();
+const developmentExternalImportWarnings = new Set();
 
 function isRelativeSpecifier(specifier) {
   return specifier.startsWith("./") || specifier.startsWith("../");
@@ -58,6 +59,27 @@ function hasResolvableImportExtension(filePath) {
 
 function isStyleAssetPath(filePath) {
   return filePath.endsWith(".css");
+}
+
+function isPathOutsideProject(projectRoot, filePath) {
+  const relativePath = path.relative(projectRoot, filePath);
+  return (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  );
+}
+
+function warnForDevelopmentExternalImport(projectRoot, sourcePath, resolvedImportPath) {
+  const warningKey = `${path.resolve(projectRoot)}::${sourcePath}::${resolvedImportPath}`;
+  if (developmentExternalImportWarnings.has(warningKey)) {
+    return;
+  }
+
+  developmentExternalImportWarnings.add(warningKey);
+  console.warn(
+    `[evolit] Development import ${JSON.stringify(resolvedImportPath)} from ${JSON.stringify(sourcePath)} is outside the project root. It will be emitted under /_evolit/static/__external__/.`,
+  );
 }
 
 function createStaticAssetStubSource(relativeAssetPath, mode, target = "server", staticAssetPublicUrls = null) {
@@ -112,7 +134,7 @@ function getTypedOutputRoot(projectRoot, mode, target = "server") {
 }
 
 function toOutputPath(projectRoot, outputRoot, sourcePath) {
-  const relativePath = path.relative(projectRoot, sourcePath);
+  const relativePath = toOutputRelativePath(projectRoot, sourcePath);
   const extension = path.extname(relativePath);
   if (!extension) {
     return path.join(outputRoot, `${relativePath}.mjs`);
@@ -121,6 +143,22 @@ function toOutputPath(projectRoot, outputRoot, sourcePath) {
   return path.join(
     outputRoot,
     `${relativePath.slice(0, -extension.length)}.mjs`,
+  );
+}
+
+function toOutputRelativePath(projectRoot, sourcePath) {
+  const relativePath = path.relative(projectRoot, sourcePath);
+  const isOutsideProject =
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath);
+  if (!isOutsideProject) {
+    return relativePath;
+  }
+
+  return path.join(
+    "__external__",
+    ...relativePath.split(path.sep).map((segment) => segment === ".." ? "__up__" : segment),
   );
 }
 
@@ -169,13 +207,17 @@ async function rewriteRelativeSpecifiers({
       continue;
     }
 
+    if (mode === "development" && isPathOutsideProject(projectRoot, resolvedImportPath)) {
+      warnForDevelopmentExternalImport(projectRoot, sourcePath, resolvedImportPath);
+    }
+
     const importerOutputPath = toOutputPath(projectRoot, outputRoot, sourcePath);
     let compiledImportPath = null;
 
     if (shouldCompileModule(resolvedImportPath)) {
       compiledImportPath = await compileModule(resolvedImportPath);
     } else if (isStaticAssetPath(resolvedImportPath)) {
-      const relativeAssetPath = path.relative(projectRoot, resolvedImportPath);
+      const relativeAssetPath = toOutputRelativePath(projectRoot, resolvedImportPath);
       const assetOutputPath = path.join(outputRoot, relativeAssetPath);
       const stubOutputPath = `${assetOutputPath}.mjs`;
 
@@ -292,6 +334,14 @@ export function invalidateDevelopmentCompilationCache(projectRoot, changedPaths 
     ? new Set(changedPaths.map((changedPath) => path.resolve(changedPath)))
     : null;
   let invalidated = false;
+
+  if (normalizedChangedPaths == null) {
+    for (const warningKey of developmentExternalImportWarnings) {
+      if (warningKey.startsWith(prefix)) {
+        developmentExternalImportWarnings.delete(warningKey);
+      }
+    }
+  }
 
   for (const key of developmentGraphCache.keys()) {
     if (!key.startsWith(prefix)) {

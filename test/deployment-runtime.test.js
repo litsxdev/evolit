@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildProject } from "../src/build.js";
+import { getSharedOutputRoot } from "../src/client-assets.js";
 import { createDeploymentRuntime } from "../src/deployment-runtime.js";
 import { scaffoldSite } from "../src/scaffold.js";
 
@@ -91,21 +92,79 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
 test("development requests reuse hot client assets until development state is invalidated", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-runtime-dev-assets-"));
   const fixtureRoot = path.join(tempRoot, "app");
+  const originalConsoleWarn = console.warn;
+  const warnings = [];
 
   try {
+    console.warn = (...args) => {
+      warnings.push(args.join(" "));
+    };
     await scaffoldSite(fixtureRoot);
     await fs.symlink(
       path.join(frameworkRoot, "node_modules"),
       path.join(fixtureRoot, "node_modules"),
       "dir",
     );
+    const externalStylesRoot = path.join(tempRoot, "src");
+    await fs.mkdir(path.join(externalStylesRoot, "styles"), { recursive: true });
+    await fs.mkdir(path.join(externalStylesRoot, "themes"), { recursive: true });
+    await Promise.all([
+      fs.writeFile(path.join(externalStylesRoot, "styles", "tokens.css"), ":root { --theme: blue; }\n", "utf8"),
+      fs.writeFile(path.join(externalStylesRoot, "themes", "composable.css"), "main { color: var(--theme); }\n", "utf8"),
+    ]);
+    const layoutPath = path.join(fixtureRoot, "app", "layout.litsx");
+    const layoutSource = await fs.readFile(layoutPath, "utf8");
+    await fs.writeFile(
+      layoutPath,
+      [
+        'import "../../src/styles/tokens.css";',
+        'import "../../src/themes/composable.css";',
+        layoutSource,
+      ].join("\n"),
+      "utf8",
+    );
+    const staleAssetPath = path.join(
+      fixtureRoot,
+      ".evolit",
+      "dev",
+      "static",
+      "stale-asset.mjs",
+    );
+    await fs.mkdir(path.dirname(staleAssetPath), { recursive: true });
+    await fs.writeFile(staleAssetPath, "stale", "utf8");
 
     const runtime = await createDeploymentRuntime({
       projectRoot: fixtureRoot,
       mode: "development",
     });
-    await runtime.handle(new Request("http://evolit.local/"));
+    await assert.rejects(fs.readFile(staleAssetPath, "utf8"), { code: "ENOENT" });
+    await fs.access(
+      path.join(
+        getSharedOutputRoot(fixtureRoot, "development"),
+        "base",
+        "litsx__ssr__hydration.mjs",
+      ),
+    );
+    const response = await runtime.handle(new Request("http://evolit.local/"));
+    const html = String(response.body);
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactBuilds, 1);
+    const layoutAsset = runtime.renderer.assetManifest.assets.find(
+      (asset) => asset.clientModule === "app/layout.mjs",
+    );
+    const externalStyleAssets = runtime.renderer.assetManifest.assets.filter(
+      (asset) => asset.clientModule.startsWith("__external__/__up__/src/") && asset.type === "style",
+    );
+    assert.ok(layoutAsset);
+    assert.equal(externalStyleAssets.length, 2);
+    assert.equal(layoutAsset.styleUrls.length, 3);
+    assert.equal(warnings.filter((warning) => warning.startsWith("[evolit] Development import")).length, 2);
+    for (const styleAsset of externalStyleAssets) {
+      await fs.access(styleAsset.outputPath);
+      assert.match(
+        html,
+        new RegExp(`<link rel="stylesheet" href="${styleAsset.publicUrl.replaceAll(".", "\\.")}">`),
+      );
+    }
 
     const sentinelPath = path.join(
       fixtureRoot,
@@ -126,6 +185,7 @@ test("development requests reuse hot client assets until development state is in
     assert.equal(runtime.renderer.developmentMetrics.invalidations, 1);
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactBuilds, 2);
   } finally {
+    console.warn = originalConsoleWarn;
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
