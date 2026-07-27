@@ -57,12 +57,12 @@ function isRelativeSpecifier(specifier) {
   );
 }
 
-function stripImportSuffix(specifier) {
-  return specifier.split("?")[0].split("#")[0];
+function stripImportSearchAndHash(specifier) {
+  return String(specifier).split("?")[0].split("#")[0];
 }
 
 function resolveRelativeClientImportPath(fromClientModule, specifier) {
-  const normalizedSpecifier = stripImportSuffix(specifier);
+  const normalizedSpecifier = stripImportSearchAndHash(specifier);
   return path
     .normalize(path.join(path.dirname(fromClientModule), normalizedSpecifier))
     .split(path.sep)
@@ -573,7 +573,10 @@ async function resolveRelativeImportFilePath(fromFilePath, specifier) {
     return null;
   }
 
-  const candidatePath = path.resolve(path.dirname(fromFilePath), specifier);
+  const candidatePath = path.resolve(
+    path.dirname(stripImportSearchAndHash(fromFilePath)),
+    stripImportSearchAndHash(specifier),
+  );
   const candidatePaths = [
     candidatePath,
     `${candidatePath}.js`,
@@ -1537,16 +1540,35 @@ async function bundleClientAssets(projectRoot, options = {}) {
       },
       plugins: [
         {
+          name: "evolit-client-relative-imports",
+          resolveId(source, importer) {
+            if (!importer || !isRelativeSpecifier(source)) {
+              return null;
+            }
+
+            const cleanSource = stripImportSearchAndHash(source);
+            if (cleanSource === source) {
+              return null;
+            }
+
+            return path.resolve(
+              path.dirname(stripImportSearchAndHash(importer)),
+              cleanSource,
+            );
+          },
+        },
+        {
           name: "evolit-client-input-sourcemaps",
           async load(id) {
-            if (!id.startsWith(clientRoot) || !id.endsWith(".mjs")) {
+            const filePath = stripImportSearchAndHash(id);
+            if (!filePath.startsWith(clientRoot) || !filePath.endsWith(".mjs")) {
               return null;
             }
 
             try {
               const [code, map] = await Promise.all([
-                fs.readFile(id, "utf8"),
-                fs.readFile(`${id}.map`, "utf8"),
+                fs.readFile(filePath, "utf8"),
+                fs.readFile(`${filePath}.map`, "utf8"),
               ]);
               return { code, map: JSON.parse(map) };
             } catch {

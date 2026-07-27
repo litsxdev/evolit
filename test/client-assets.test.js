@@ -70,6 +70,45 @@ test("collectClientVendorSpecifiers follows compiled relative imports without me
   }
 });
 
+test("emitBundledClientAssets resolves dev imports with search params and hashes", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-dev-client-imports-"));
+  const clientRoot = path.join(projectRoot, ".evolit", "dev", "client");
+  const sourceRoot = path.join(clientRoot, "src", "features", "explore");
+  const modelsRoot = path.join(clientRoot, "src", "models");
+
+  try {
+    await fs.mkdir(sourceRoot, { recursive: true });
+    await fs.mkdir(modelsRoot, { recursive: true });
+    await Promise.all([
+      fs.writeFile(
+        path.join(sourceRoot, "storefront-data.mjs"),
+        [
+          'import "../../models/plain.mjs";',
+          'import "../../models/query.mjs?t=123";',
+          'import "../../models/hash.mjs#x";',
+          'import "../../models/query-and-hash.mjs?t=123#x";',
+          "export default null;",
+          "",
+        ].join("\n"),
+        "utf8",
+      ),
+      fs.writeFile(path.join(modelsRoot, "plain.mjs"), "export {};\n", "utf8"),
+      fs.writeFile(path.join(modelsRoot, "query.mjs"), "export {};\n", "utf8"),
+      fs.writeFile(path.join(modelsRoot, "hash.mjs"), "export {};\n", "utf8"),
+      fs.writeFile(path.join(modelsRoot, "query-and-hash.mjs"), "export {};\n", "utf8"),
+    ]);
+
+    const manifest = await emitBundledClientAssets(projectRoot, {
+      mode: "development",
+      entryClientModules: ["src/features/explore/storefront-data.mjs"],
+    });
+
+    assert.ok(getAssetByClientModule(manifest, "src/features/explore/storefront-data.mjs"));
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("createHydrationBootstrap returns an empty string when no hydratable roots exist", () => {
   const bootstrap = createHydrationBootstrap({
     hydrationData: {
