@@ -57,6 +57,18 @@ function isRelativeSpecifier(specifier) {
   );
 }
 
+function stripImportSuffix(specifier) {
+  return specifier.split("?")[0].split("#")[0];
+}
+
+function resolveRelativeClientImportPath(fromClientModule, specifier) {
+  const normalizedSpecifier = stripImportSuffix(specifier);
+  return path
+    .normalize(path.join(path.dirname(fromClientModule), normalizedSpecifier))
+    .split(path.sep)
+    .join("/");
+}
+
 function parsePackageSpecifier(specifier) {
   if (!isBareSpecifier(specifier)) {
     return null;
@@ -1191,9 +1203,7 @@ function collectRelativeClientImportPaths(source, fileRelativePath, publicPathBy
       continue;
     }
 
-    const resolvedRelativePath = path.normalize(
-      path.join(path.dirname(fileRelativePath), specifier),
-    );
+    const resolvedRelativePath = resolveRelativeClientImportPath(fileRelativePath, specifier);
     if (!publicPathByRelativePath.has(resolvedRelativePath)) {
       continue;
     }
@@ -1217,9 +1227,7 @@ function rewriteRelativeClientImports(source, fileRelativePath, publicPathByRela
       continue;
     }
 
-    const resolvedRelativePath = path.normalize(
-      path.join(path.dirname(fileRelativePath), specifier),
-    );
+    const resolvedRelativePath = resolveRelativeClientImportPath(fileRelativePath, specifier);
     const rewrittenTarget = publicPathByRelativePath.get(resolvedRelativePath);
     if (!rewrittenTarget) {
       continue;

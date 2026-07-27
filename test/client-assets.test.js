@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import {
   buildSharedVendorRuntime,
+  collectClientVendorSpecifiers,
   createBrowserSpecifierPublicUrl,
   createBrowserPackageBaseUrl,
   createHydrationBootstrap,
@@ -21,6 +22,53 @@ import path from "node:path";
 import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
 import { compileModuleGraph } from "../src/compiler.js";
 import { scaffoldSite } from "../src/scaffold.js";
+
+test("collectClientVendorSpecifiers follows compiled relative imports without metadata", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-client-vendors-"));
+  const clientRoot = path.join(projectRoot, ".evolit", "dev", "client");
+
+  try {
+    await fs.mkdir(path.join(clientRoot, "app", "explore"), { recursive: true });
+    await fs.mkdir(path.join(clientRoot, "app", "shared"), { recursive: true });
+    await fs.mkdir(path.join(clientRoot, "src", "features", "explore"), { recursive: true });
+    await fs.mkdir(path.join(clientRoot, "src", "graphql", "client"), { recursive: true });
+    await Promise.all([
+      fs.writeFile(
+        path.join(clientRoot, "app", "explore", "page.mjs"),
+        'import "../shared/util.mjs";\n',
+        "utf8",
+      ),
+      fs.writeFile(
+        path.join(clientRoot, "app", "shared", "util.mjs"),
+        'import "./chunk.mjs#x";\n',
+        "utf8",
+      ),
+      fs.writeFile(path.join(clientRoot, "app", "shared", "chunk.mjs"), 'import "lit";\n', "utf8"),
+      fs.writeFile(
+        path.join(clientRoot, "src", "features", "explore", "storefront-data.mjs"),
+        'import "../../graphql/client/index.mjs?t=123";\n',
+        "utf8",
+      ),
+      fs.writeFile(
+        path.join(clientRoot, "src", "graphql", "client", "index.mjs"),
+        'import "@litsx/core";\n',
+        "utf8",
+      ),
+    ]);
+
+    const specifiers = await collectClientVendorSpecifiers(projectRoot, [], {
+      mode: "development",
+      entryClientModules: [
+        "app/explore/page.mjs",
+        "src/features/explore/storefront-data.mjs",
+      ],
+    });
+
+    assert.deepEqual(specifiers, ["@litsx/core", "lit"]);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
 
 test("createHydrationBootstrap returns an empty string when no hydratable roots exist", () => {
   const bootstrap = createHydrationBootstrap({
