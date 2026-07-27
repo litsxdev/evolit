@@ -1,3 +1,5 @@
+export const DEFAULT_REVALIDATE_SECONDS = 60;
+
 function normalizeRevalidatePolicy(cacheConfig) {
   if (!cacheConfig || typeof cacheConfig !== "object" || Array.isArray(cacheConfig)) {
     throw new Error("Expected routeConfig.cache to be an object when using revalidate mode.");
@@ -15,7 +17,7 @@ function normalizeRevalidatePolicy(cacheConfig) {
 }
 
 export function normalizeRouteCachePolicy(routeConfig = {}) {
-  const cacheConfig = routeConfig?.cache ?? "dynamic";
+  const cacheConfig = routeConfig?.cache ?? { revalidate: DEFAULT_REVALIDATE_SECONDS };
 
   if (cacheConfig === "dynamic") {
     return { mode: "dynamic" };

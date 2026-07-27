@@ -467,16 +467,16 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.deepEqual(
     buildManifest.routeCache,
     [
-      { pathname: "/", cache: "dynamic" },
-      { pathname: "/about", cache: "dynamic" },
-      { pathname: "/blog/:slug", cache: "dynamic" },
+      { pathname: "/", cache: { revalidate: 60 } },
+      { pathname: "/about", cache: { revalidate: 60 } },
+      { pathname: "/blog/:slug", cache: { revalidate: 60 } },
       { pathname: "/cached-dynamic", cache: "dynamic" },
       { pathname: "/cached-revalidate", cache: { revalidate: 1 } },
       { pathname: "/cached-revalidate/:slug", cache: { revalidate: 1 } },
       { pathname: "/cached-static", cache: "static" },
       { pathname: "/catalog/:category/:slug", cache: "static" },
-      { pathname: "/docs/*slug", cache: "dynamic" },
-      { pathname: "/optional/**slug", cache: "dynamic" },
+      { pathname: "/docs/*slug", cache: { revalidate: 60 } },
+      { pathname: "/optional/**slug", cache: { revalidate: 60 } },
     ],
   );
   assert.deepEqual(buildManifest.prerenderedRoutes, [
@@ -518,7 +518,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
     [
       {
         pathname: "/",
-        cache: "dynamic",
+        cache: { revalidate: 60 },
         cacheKey: "/",
         prerendered: false,
         prerenderedPaths: [],
@@ -526,7 +526,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
       },
       {
         pathname: "/about",
-        cache: "dynamic",
+        cache: { revalidate: 60 },
         cacheKey: "/about",
         prerendered: false,
         prerenderedPaths: [],
@@ -534,7 +534,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
       },
       {
         pathname: "/blog/:slug",
-        cache: "dynamic",
+        cache: { revalidate: 60 },
         cacheKey: "/blog/:slug",
         prerendered: false,
         prerenderedPaths: [],
@@ -585,7 +585,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
       },
       {
         pathname: "/docs/*slug",
-        cache: "dynamic",
+        cache: { revalidate: 60 },
         cacheKey: "/docs/*slug",
         prerendered: false,
         prerenderedPaths: [],
@@ -593,7 +593,7 @@ test("build emits deploy route and asset manifests for external deployment pipel
       },
       {
         pathname: "/optional/**slug",
-        cache: "dynamic",
+        cache: { revalidate: 60 },
         cacheKey: "/optional/**slug",
         prerendered: false,
         prerenderedPaths: [],
@@ -859,6 +859,20 @@ test("start server serves prerendered dynamic static routes from the build cache
   assert.equal(secondResponse.headers.get("x-evolit-cache"), "HIT");
   assert.match(firstHtml, /books:guide/);
   assert.equal(secondHtml, firstHtml);
+});
+
+test("start server revalidates default SSR pages by pathname and query", async () => {
+  const firstResponse = await fetch(`${baseUrl}/about?view=grid`);
+  const secondResponse = await fetch(`${baseUrl}/about?view=grid`);
+  const differentQueryResponse = await fetch(`${baseUrl}/about?view=list`);
+  const firstParamsResponse = await fetch(`${baseUrl}/blog/cacheable`);
+  const secondParamsResponse = await fetch(`${baseUrl}/blog/cacheable`);
+
+  assert.equal(firstResponse.headers.get("x-evolit-cache"), "MISS");
+  assert.equal(secondResponse.headers.get("x-evolit-cache"), "HIT");
+  assert.equal(differentQueryResponse.headers.get("x-evolit-cache"), "MISS");
+  assert.equal(firstParamsResponse.headers.get("x-evolit-cache"), "MISS");
+  assert.equal(secondParamsResponse.headers.get("x-evolit-cache"), "HIT");
 });
 
 test("start server falls back to on-demand caching for non-prerendered dynamic static routes", async () => {

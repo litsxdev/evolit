@@ -180,7 +180,7 @@ test("development requests reuse hot client assets until development state is in
     );
     await fs.writeFile(sentinelPath, "preserved", "utf8");
 
-    await runtime.handle(new Request("http://evolit.local/"));
+    await runtime.handle(new Request("http://evolit.local/?asset-cache=1"));
     assert.equal(await fs.readFile(sentinelPath, "utf8"), "preserved");
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactCacheHits, 1);
     assert.equal(developmentEvents.some((event) => event.type === "client-assets-cache-hit"), true);

@@ -104,12 +104,18 @@ export const routeConfig = {
 - `static`: prerender in `build` and serve from the response cache in `start`
 - `revalidate`: cache the HTML response for `N` seconds and regenerate on expiry
 
+Pages without `routeConfig.cache` default to `{ revalidate: 60 }`. This caches a normal SSR
+render by pathname and query string while keeping content fresh without requiring a cache
+declaration on every catalog or CMS page. Declare `cache: "static"` for fully static pages or
+`cache: "dynamic"` when a page must always render per request.
+
 The same semantics work in local development and in production runtimes. Only the backing cache
 store changes.
 
-The default cache key includes the pathname and query string. Reading the `request` prop, request
-headers, cookies, or `requestUrl()` makes the completed render dynamic; it is never stored in the
-HTML response cache. `routeConfig.cache` is the sole authority for HTML caching; setting a
+The default cache key includes the pathname and query string, so `params` and `searchParams` are
+cacheable by URL. Reading the `request` prop, request headers, cookies, or `requestUrl()` makes
+the completed render dynamic; it is never stored in the HTML response cache. `routeConfig.cache`
+is the sole authority for HTML caching; setting a
 `Cache-Control` response header does not alter that policy.
 
 ## Request APIs
