@@ -78,7 +78,7 @@ async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
     let watcher;
     try {
       watcher = watch(directory, (eventType, fileName) => {
-        onChange();
+        onChange(fileName ? path.join(directory, String(fileName)) : null);
 
         if (eventType === "rename" && fileName) {
           void watchNewDirectory(path.join(directory, fileName));
@@ -165,8 +165,12 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
   let pendingInvalidation = null;
   let resolvePendingInvalidation = null;
   let invalidationPromise = Promise.resolve();
+  const pendingChangedPaths = new Set();
 
-  function scheduleDevelopmentInvalidation() {
+  function scheduleDevelopmentInvalidation(changedPath = null) {
+    if (changedPath) {
+      pendingChangedPaths.add(path.resolve(changedPath));
+    }
     if (invalidationTimer) {
       clearTimeout(invalidationTimer);
     }
@@ -180,11 +184,15 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     invalidationTimer = setTimeout(() => {
       invalidationTimer = null;
       const resolve = resolvePendingInvalidation;
+      const changedPaths = pendingChangedPaths.size > 0
+        ? [...pendingChangedPaths]
+        : null;
+      pendingChangedPaths.clear();
       pendingInvalidation = null;
       resolvePendingInvalidation = null;
       invalidationPromise = invalidationPromise
         .catch(() => {})
-        .then(() => deploymentRuntime.invalidateDevelopmentState());
+        .then(() => deploymentRuntime.invalidateDevelopmentState(changedPaths));
       invalidationPromise.then(
         () => {
           for (const socket of liveReloadSockets) {

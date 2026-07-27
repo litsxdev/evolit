@@ -87,3 +87,45 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test("development requests reuse hot client assets until development state is invalidated", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-runtime-dev-assets-"));
+  const fixtureRoot = path.join(tempRoot, "app");
+
+  try {
+    await scaffoldSite(fixtureRoot);
+    await fs.symlink(
+      path.join(frameworkRoot, "node_modules"),
+      path.join(fixtureRoot, "node_modules"),
+      "dir",
+    );
+
+    const runtime = await createDeploymentRuntime({
+      projectRoot: fixtureRoot,
+      mode: "development",
+    });
+    await runtime.handle(new Request("http://evolit.local/"));
+    assert.equal(runtime.renderer.developmentMetrics.clientArtifactBuilds, 1);
+
+    const sentinelPath = path.join(
+      fixtureRoot,
+      ".evolit",
+      "dev",
+      "static",
+      "request-cache-sentinel",
+    );
+    await fs.writeFile(sentinelPath, "preserved", "utf8");
+
+    await runtime.handle(new Request("http://evolit.local/"));
+    assert.equal(await fs.readFile(sentinelPath, "utf8"), "preserved");
+    assert.equal(runtime.renderer.developmentMetrics.clientArtifactCacheHits, 1);
+
+    await runtime.invalidateDevelopmentState();
+    await runtime.handle(new Request("http://evolit.local/"));
+    await assert.rejects(fs.readFile(sentinelPath, "utf8"), { code: "ENOENT" });
+    assert.equal(runtime.renderer.developmentMetrics.invalidations, 1);
+    assert.equal(runtime.renderer.developmentMetrics.clientArtifactBuilds, 2);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

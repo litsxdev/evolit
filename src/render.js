@@ -384,7 +384,10 @@ export async function createRouteResolver(projectRoot, mode = "development", res
       return renderNotFound(request);
     }
 
-    const { pageModule, layoutModules } = await loadRouteModules(
+    const preloadedModules = options.routePolicyResult?.route === match.route
+      ? options.routePolicyResult.__evolitLoadedModules
+      : null;
+    const { pageModule, layoutModules } = preloadedModules ?? await loadRouteModules(
       match.route,
       projectRoot,
       mode,
@@ -394,7 +397,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
     const cachePolicy = normalizeRouteCachePolicy(routeConfig);
 
     if (options.renderTree === false) {
-      return {
+      const routePolicyResult = {
         type: "route",
         status: 200,
         route: match.route,
@@ -404,6 +407,10 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         cachePolicy,
         cacheKey: createRequestCacheKey(url),
       };
+      Object.defineProperty(routePolicyResult, "__evolitLoadedModules", {
+        value: { pageModule, layoutModules },
+      });
+      return routePolicyResult;
     }
 
     const pageComponent = assertServerComponent(
@@ -509,8 +516,8 @@ export async function createRouteResolver(projectRoot, mode = "development", res
     async resolveRoutePolicy(request) {
       return resolveMatchedRequest(request, { renderTree: false });
     },
-    async resolveRequest(request) {
-      return resolveMatchedRequest(request, { renderTree: true });
+    async resolveRequest(request, routePolicyResult = null) {
+      return resolveMatchedRequest(request, { renderTree: true, routePolicyResult });
     },
   };
 }

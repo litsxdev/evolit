@@ -109,6 +109,35 @@ test("emitBundledClientAssets resolves dev imports with search params and hashes
   }
 });
 
+test("emitBundledClientAssets rewrites relative CSS imports to hashed assets", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-dev-css-imports-"));
+  const stylesRoot = path.join(projectRoot, ".evolit", "dev", "client", "app", "styles");
+
+  try {
+    await fs.mkdir(path.join(stylesRoot, "shared"), { recursive: true });
+    await Promise.all([
+      fs.writeFile(
+        path.join(stylesRoot, "main.css"),
+        '@import url("./shared/base.css?t=123#theme");\n.page { color: red; }\n',
+        "utf8",
+      ),
+      fs.writeFile(path.join(stylesRoot, "shared", "base.css"), ".base { color: blue; }\n", "utf8"),
+    ]);
+
+    const manifest = await emitBundledClientAssets(projectRoot, { mode: "development" });
+    const mainStyle = getAssetByClientModule(manifest, "app/styles/main.css");
+    const baseStyle = getAssetByClientModule(manifest, "app/styles/shared/base.css");
+    assert.ok(mainStyle);
+    assert.ok(baseStyle);
+
+    const css = await fs.readFile(mainStyle.outputPath, "utf8");
+    const baseFileName = baseStyle.publicUrl.split("/").at(-1);
+    assert.match(css, new RegExp(`@import url\\("\\./shared/${baseFileName}\\?t=123#theme"\\)`));
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("createHydrationBootstrap returns an empty string when no hydratable roots exist", () => {
   const bootstrap = createHydrationBootstrap({
     hydrationData: {
@@ -326,6 +355,31 @@ test("shared hydration entry eagerly loads lit hydrate support", async () => {
   const hydrationEntrySource = await fs.readFile(hydrationEntryPath, "utf8");
 
   assert.match(hydrationEntrySource, /vendor-hydration-support/);
+});
+
+test("development vendors add bare imports without rebuilding the base runtime", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-dev-vendor-groups-"));
+
+  try {
+    const baseRuntime = await buildSharedVendorRuntime(projectRoot, "development");
+    const baseHydrationUrl = baseRuntime.imports["@litsx/ssr/hydration"];
+    const baseHydrationPath = path.join(
+      getSharedOutputRoot(projectRoot, "development"),
+      baseHydrationUrl.replace("/_evolit/shared/", ""),
+    );
+    const before = await fs.stat(baseHydrationPath);
+
+    const expandedRuntime = await buildSharedVendorRuntime(projectRoot, "development", {
+      additionalEntrySpecifiers: ["magic-string"],
+    });
+    const after = await fs.stat(baseHydrationPath);
+
+    assert.equal(expandedRuntime.imports["@litsx/ssr/hydration"], baseHydrationUrl);
+    assert.match(expandedRuntime.imports["magic-string"], /^\/_evolit\/shared\/vendor-[a-f0-9]+\/.+\.mjs$/);
+    assert.equal(after.mtimeMs, before.mtimeMs);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
 });
 
 test("browser package asset urls preserve package-relative paths", async () => {

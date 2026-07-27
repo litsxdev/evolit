@@ -229,9 +229,12 @@ function createSharedEntrySource(specifier) {
   ].join("\n");
 }
 
-export async function collectSharedVendorSpecifiers(additionalEntrySpecifiers = []) {
+export async function collectSharedVendorSpecifiers(
+  additionalEntrySpecifiers = [],
+  options = {},
+) {
   return [...new Set([
-    ...SHARED_VENDOR_SPECIFIERS,
+    ...(options.includeBase === false ? [] : SHARED_VENDOR_SPECIFIERS),
     ...additionalEntrySpecifiers.filter((specifier) => isBareSpecifier(specifier)),
   ])].sort();
 }
@@ -426,20 +429,52 @@ export async function buildSharedVendorRuntime(
       ? options.additionalEntrySpecifiers.filter((specifier) => isBareSpecifier(specifier))
       : [],
   )].sort();
-  const cacheKey = `${projectRoot}::${mode}::${additionalEntrySpecifiers.join("|")}`;
+  if (mode === "development" && !options.vendorGroup) {
+    const baseRuntime = await buildSharedVendorRuntime(projectRoot, mode, {
+      ...options,
+      additionalEntrySpecifiers: [],
+      vendorGroup: "base",
+      includeBase: true,
+    });
+    const additionalRuntimes = await Promise.all(
+      additionalEntrySpecifiers
+        .filter((specifier) => !SHARED_VENDOR_SPECIFIERS.includes(specifier))
+        .map((specifier) => buildSharedVendorRuntime(projectRoot, mode, {
+          ...options,
+          additionalEntrySpecifiers: [specifier],
+          vendorGroup: `vendor-${crypto.createHash("sha1").update(specifier).digest("hex").slice(0, 10)}`,
+          includeBase: false,
+        })),
+    );
+    return {
+      imports: Object.assign(
+        {},
+        baseRuntime.imports,
+        ...additionalRuntimes.map((runtime) => runtime.imports),
+      ),
+      outputRoot: getSharedOutputRoot(projectRoot, mode),
+    };
+  }
+
+  const vendorGroup = options.vendorGroup ?? null;
+  const cacheKey = `${projectRoot}::${mode}::${vendorGroup ?? "all"}::${additionalEntrySpecifiers.join("|")}`;
   if (sharedRuntimeBuildCache.has(cacheKey)) {
     return sharedRuntimeBuildCache.get(cacheKey);
   }
 
   const pendingBuild = (async () => {
-    const sharedRoot = getSharedOutputRoot(projectRoot, mode);
+    const sharedRootBase = getSharedOutputRoot(projectRoot, mode);
+    const sharedRoot = vendorGroup ? path.join(sharedRootBase, vendorGroup) : sharedRootBase;
     const entriesRoot = path.join(
       projectRoot,
       INTERNAL_DIRECTORY,
       mode === "development" ? DEV_DIRECTORY : BUILD_DIRECTORY,
       "__shared_entries__",
+      ...(vendorGroup ? [vendorGroup] : []),
     );
-    const specifiers = await collectSharedVendorSpecifiers(additionalEntrySpecifiers);
+    const specifiers = await collectSharedVendorSpecifiers(additionalEntrySpecifiers, {
+      includeBase: options.includeBase !== false,
+    });
     const inputEntries = await writeSharedRuntimeEntrySources(entriesRoot, specifiers);
 
     await fs.rm(sharedRoot, { recursive: true, force: true });
@@ -494,7 +529,7 @@ export async function buildSharedVendorRuntime(
           continue;
         }
 
-        imports[specifier] = `/_evolit/shared/${chunk.fileName}`;
+        imports[specifier] = `/_evolit/shared/${vendorGroup ? `${vendorGroup}/` : ""}${chunk.fileName}`;
       }
 
       return {
@@ -1134,7 +1169,32 @@ function rewriteStaticAssetPlaceholdersWithMap(source, publicPathByRelativePath)
 }
 
 function rewriteRelativeCssAssetUrls(source, fileRelativePath, publicPathByRelativePath) {
-  return source.replaceAll(
+  const rewrittenImports = source.replaceAll(
+    /@import(\s+)(url\(\s*)?(?:(["'])([^"']+)\3|([^\s;)]+))(\s*\))?/g,
+    (match, whitespace, urlPrefix = "", quote = "", quotedSpecifier, unquotedSpecifier, closing = "") => {
+      const specifier = quotedSpecifier ?? unquotedSpecifier;
+      if (!isRelativeSpecifier(specifier)) {
+        return match;
+      }
+
+      const resolvedRelativePath = resolveRelativeClientImportPath(fileRelativePath, specifier);
+      const rewrittenTarget = publicPathByRelativePath.get(resolvedRelativePath);
+      if (!rewrittenTarget) {
+        return match;
+      }
+
+      const cleanSpecifier = stripImportSearchAndHash(specifier);
+      const rewrittenSpecifier = `${normalizeRelativeImportPath(
+        path.relative(
+          path.dirname(publicPathByRelativePath.get(fileRelativePath)),
+          rewrittenTarget,
+        ),
+      )}${specifier.slice(cleanSpecifier.length)}`;
+      return `@import${whitespace}${urlPrefix}${quote}${rewrittenSpecifier}${quote}${closing}`;
+    },
+  );
+
+  return rewrittenImports.replaceAll(
     /url\(\s*(['"]?)([^"'()]+)\1\s*\)/g,
     (match, quote = "", rawSpecifier) => {
       const specifier = String(rawSpecifier).trim();
@@ -1460,7 +1520,9 @@ async function bundleClientAssets(projectRoot, options = {}) {
     publicPathByRelativePath.set(entry.relativePath, hashedRelativePath);
   }
 
-  await fs.rm(staticRoot, { recursive: true, force: true });
+  if (mode !== "development") {
+    await fs.rm(staticRoot, { recursive: true, force: true });
+  }
   await ensureDirectory(staticRoot);
 
   const nonScriptAssets = [];
@@ -1670,30 +1732,43 @@ async function bundleClientAssets(projectRoot, options = {}) {
   }
 
   const mapAssets = [];
-  const staticFiles = await walkFiles(staticRoot);
-  for (const filePath of staticFiles) {
-    if (!filePath.endsWith(".map")) {
-      continue;
+  for (const asset of scriptAssetRecords) {
+    const mapPath = `${asset.outputPath}.map`;
+    try {
+      const stat = await fs.stat(mapPath);
+      const relativePath = path.relative(staticRoot, mapPath).split(path.sep).join("/");
+      const publicUrl = toStaticPublicUrl(relativePath);
+      byPublicPath[publicUrl] = mapPath;
+      mapAssets.push({
+        clientModule: relativePath,
+        type: "asset",
+        kind: "asset",
+        publicUrl,
+        outputPath: mapPath,
+        hash: null,
+        size: stat.size,
+        imports: [],
+        importUrls: [],
+        styleImports: [],
+        styleUrls: [],
+        assetImports: [],
+        assetUrls: [],
+      });
+    } catch {
+      // Source maps are optional in non-development builds.
     }
+  }
 
-    const relativePath = path.relative(staticRoot, filePath).split(path.sep).join("/");
-    const publicUrl = toStaticPublicUrl(relativePath);
-    byPublicPath[publicUrl] = filePath;
-    mapAssets.push({
-      clientModule: relativePath,
-      type: "asset",
-      kind: "asset",
-      publicUrl,
-      outputPath: filePath,
-      hash: null,
-      size: (await fs.stat(filePath)).size,
-      imports: [],
-      importUrls: [],
-      styleImports: [],
-      styleUrls: [],
-      assetImports: [],
-      assetUrls: [],
-    });
+  if (mode === "development") {
+    const retainedOutputPaths = new Set(
+      [...scriptAssetRecords, ...nonScriptAssets, ...mapAssets]
+        .map((asset) => asset.outputPath),
+    );
+    for (const filePath of await walkFiles(staticRoot)) {
+      if (!retainedOutputPaths.has(filePath)) {
+        await fs.rm(filePath, { force: true });
+      }
+    }
   }
 
   const assets = [...scriptAssetRecords, ...nonScriptAssets, ...mapAssets]

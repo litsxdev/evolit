@@ -376,7 +376,7 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
 
   assert.equal(response.status, 200);
   assert.doesNotMatch(html, /<script type="importmap">/);
-  assert.match(html, /import \{ hydratePage, registerHydrationModules \} from "\/_evolit\/shared\/litsx__ssr__hydration(?:-[A-Za-z0-9_-]+)?\.mjs"/);
+  assert.match(html, /import \{ hydratePage, registerHydrationModules \} from "\/_evolit\/shared\/(?:base\/)?litsx__ssr__hydration(?:-[A-Za-z0-9_-]+)?\.mjs"/);
   assert.match(html, /registerHydrationModules/);
   assert.match(html, /await hydratePage\(\{/);
   assert.match(html, /clientImports: \[\]/);

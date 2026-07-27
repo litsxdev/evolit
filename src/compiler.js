@@ -21,6 +21,10 @@ const RESOLVABLE_IMPORT_EXTENSIONS = [
   ...MODULE_EXTENSIONS,
   ...STATIC_ASSET_EXTENSIONS,
 ];
+const developmentGraphCache = new Map();
+const developmentGraphDependencies = new Map();
+const developmentModuleNamespaceCache = new Map();
+const developmentGraphVersions = new Map();
 
 function isRelativeSpecifier(specifier) {
   return specifier.startsWith("./") || specifier.startsWith("../");
@@ -272,7 +276,46 @@ async function rewriteRelativeSpecifiers({
   };
 }
 
-export async function compileModuleGraph(entryPath, options = {}) {
+function getDevelopmentGraphCacheKey(entryPath, options) {
+  return [
+    options.projectRoot,
+    entryPath,
+    options.target ?? "server",
+    options.ssr === true ? "ssr" : "client",
+    options.sourceMaps === false ? "without-maps" : "with-maps",
+  ].join("::");
+}
+
+export function invalidateDevelopmentCompilationCache(projectRoot, changedPaths = null) {
+  const prefix = `${path.resolve(projectRoot)}::`;
+  const normalizedChangedPaths = Array.isArray(changedPaths) && changedPaths.length > 0
+    ? new Set(changedPaths.map((changedPath) => path.resolve(changedPath)))
+    : null;
+  let invalidated = false;
+
+  for (const key of developmentGraphCache.keys()) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+
+    const dependencies = developmentGraphDependencies.get(key);
+    const shouldInvalidate =
+      normalizedChangedPaths == null ||
+      !dependencies ||
+      [...dependencies].some((dependency) => normalizedChangedPaths.has(dependency));
+    if (shouldInvalidate) {
+      developmentGraphCache.delete(key);
+      developmentGraphDependencies.delete(key);
+      developmentModuleNamespaceCache.delete(key);
+      developmentGraphVersions.set(key, (developmentGraphVersions.get(key) ?? 0) + 1);
+      invalidated = true;
+    }
+  }
+
+  return invalidated;
+}
+
+async function compileModuleGraphUncached(entryPath, options = {}) {
   const {
     projectRoot,
     mode = "development",
@@ -346,16 +389,77 @@ export async function compileModuleGraph(entryPath, options = {}) {
   return {
     entrypoint: await compileModule(entryPath),
     outputRoot,
+    sourceFiles: [...visited.keys()],
   };
 }
 
-export async function importCompiledModule(entryPath, options = {}) {
-  const { entrypoint } = await compileModuleGraph(entryPath, options);
-  const moduleUrl = new URL(pathToFileURL(entrypoint).href);
-
-  if (options.mode === "development") {
-    moduleUrl.searchParams.set("t", String(Date.now()));
+export async function compileModuleGraph(entryPath, options = {}) {
+  const mode = options.mode ?? "development";
+  if (mode !== "development") {
+    return compileModuleGraphUncached(entryPath, options);
   }
 
-  return import(moduleUrl.href);
+  const normalizedOptions = {
+    ...options,
+    projectRoot: path.resolve(options.projectRoot ?? process.cwd()),
+  };
+  const cacheKey = getDevelopmentGraphCacheKey(
+    path.resolve(entryPath),
+    normalizedOptions,
+  );
+  let pendingCompile = developmentGraphCache.get(cacheKey);
+  if (!pendingCompile) {
+    pendingCompile = compileModuleGraphUncached(entryPath, normalizedOptions);
+    developmentGraphCache.set(cacheKey, pendingCompile);
+    pendingCompile.then((result) => {
+      if (developmentGraphCache.get(cacheKey) === pendingCompile) {
+        developmentGraphDependencies.set(cacheKey, new Set(result.sourceFiles));
+      }
+    }, () => {});
+  }
+
+  try {
+    return await pendingCompile;
+  } catch (error) {
+    if (developmentGraphCache.get(cacheKey) === pendingCompile) {
+      developmentGraphCache.delete(cacheKey);
+      developmentGraphDependencies.delete(cacheKey);
+    }
+    throw error;
+  }
+}
+
+export async function importCompiledModule(entryPath, options = {}) {
+  const mode = options.mode ?? "development";
+  const normalizedOptions = mode === "development"
+    ? { ...options, projectRoot: path.resolve(options.projectRoot ?? process.cwd()) }
+    : options;
+  const cacheKey = mode === "development"
+    ? getDevelopmentGraphCacheKey(path.resolve(entryPath), normalizedOptions)
+    : null;
+  const cachedModule = cacheKey ? developmentModuleNamespaceCache.get(cacheKey) : null;
+  if (cachedModule) {
+    return cachedModule;
+  }
+
+  const { entrypoint } = await compileModuleGraph(entryPath, normalizedOptions);
+  const moduleUrl = new URL(pathToFileURL(entrypoint).href);
+
+  if (mode === "development") {
+    moduleUrl.searchParams.set("t", String(developmentGraphVersions.get(cacheKey) ?? 0));
+  }
+
+  const pendingModule = import(moduleUrl.href);
+  if (cacheKey) {
+    developmentModuleNamespaceCache.set(cacheKey, pendingModule);
+  }
+
+  try {
+    return await pendingModule;
+  } catch (error) {
+    if (developmentModuleNamespaceCache.get(cacheKey) === pendingModule) {
+      developmentModuleNamespaceCache.delete(cacheKey);
+    }
+    throw error;
+  }
 }

@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { compileModuleGraph } from "../src/compiler.js";
+import {
+  compileModuleGraph,
+  importCompiledModule,
+  invalidateDevelopmentCompilationCache,
+} from "../src/compiler.js";
 
 for (const mode of ["development", "production"]) {
   test(`compiler resolves extensionless imports with intermediate suffixes in ${mode}`, async () => {
@@ -65,3 +69,104 @@ for (const mode of ["development", "production"]) {
     }
   });
 }
+
+test("compiler reuses development graphs until they are invalidated", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-cache-"));
+  const sourcePath = path.join(projectRoot, "entry.js");
+
+  try {
+    await fs.writeFile(sourcePath, "export default 'first';\n", "utf8");
+    const first = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "development",
+      sourceMaps: false,
+    });
+    await fs.writeFile(sourcePath, "export default 'second';\n", "utf8");
+
+    const cached = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "development",
+      sourceMaps: false,
+    });
+    assert.equal(cached.entrypoint, first.entrypoint);
+    assert.match(await fs.readFile(cached.entrypoint, "utf8"), /first/);
+
+    invalidateDevelopmentCompilationCache(projectRoot);
+    const invalidated = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "development",
+      sourceMaps: false,
+    });
+    assert.match(await fs.readFile(invalidated.entrypoint, "utf8"), /second/);
+  } finally {
+    invalidateDevelopmentCompilationCache(projectRoot);
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("compiler invalidates only development graphs affected by changed files", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-selective-cache-"));
+  const firstSourcePath = path.join(projectRoot, "first.js");
+  const secondSourcePath = path.join(projectRoot, "second.js");
+
+  try {
+    await Promise.all([
+      fs.writeFile(firstSourcePath, "export default 'first-v1';\n", "utf8"),
+      fs.writeFile(secondSourcePath, "export default 'second-v1';\n", "utf8"),
+    ]);
+    const options = { projectRoot, mode: "development", sourceMaps: false };
+    const [firstBuild, secondBuild] = await Promise.all([
+      compileModuleGraph(firstSourcePath, options),
+      compileModuleGraph(secondSourcePath, options),
+    ]);
+    await Promise.all([
+      fs.writeFile(firstSourcePath, "export default 'first-v2';\n", "utf8"),
+      fs.writeFile(secondSourcePath, "export default 'second-v2';\n", "utf8"),
+    ]);
+
+    invalidateDevelopmentCompilationCache(projectRoot, [firstSourcePath]);
+    const [firstAfterInvalidation, secondAfterInvalidation] = await Promise.all([
+      compileModuleGraph(firstSourcePath, options),
+      compileModuleGraph(secondSourcePath, options),
+    ]);
+
+    assert.match(await fs.readFile(firstAfterInvalidation.entrypoint, "utf8"), /first-v2/);
+    assert.equal(secondAfterInvalidation.entrypoint, secondBuild.entrypoint);
+    assert.match(await fs.readFile(secondAfterInvalidation.entrypoint, "utf8"), /second-v1/);
+    assert.equal(firstAfterInvalidation.entrypoint, firstBuild.entrypoint);
+  } finally {
+    invalidateDevelopmentCompilationCache(projectRoot);
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("compiler reuses evaluated development modules until they are invalidated", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-module-cache-"));
+  const sourcePath = path.join(projectRoot, "entry.js");
+
+  try {
+    await fs.writeFile(
+      sourcePath,
+      [
+        "globalThis.__evolitModuleEvaluations = (globalThis.__evolitModuleEvaluations ?? 0) + 1;",
+        "export const evaluations = globalThis.__evolitModuleEvaluations;",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const options = { projectRoot, mode: "development", sourceMaps: false };
+    const first = await importCompiledModule(sourcePath, options);
+    const cached = await importCompiledModule(sourcePath, options);
+    assert.equal(first, cached);
+    assert.equal(first.evaluations, 1);
+
+    invalidateDevelopmentCompilationCache(projectRoot, [sourcePath]);
+    const reloaded = await importCompiledModule(sourcePath, options);
+    assert.equal(reloaded.evaluations, 2);
+  } finally {
+    delete globalThis.__evolitModuleEvaluations;
+    invalidateDevelopmentCompilationCache(projectRoot);
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
