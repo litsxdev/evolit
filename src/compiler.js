@@ -25,7 +25,7 @@ const developmentGraphCache = new Map();
 const developmentGraphDependencies = new Map();
 const developmentModuleNamespaceCache = new Map();
 const developmentGraphVersions = new Map();
-const developmentExternalImportWarnings = new Set();
+const developmentUnmanagedImportWarnings = new Set();
 
 function isRelativeSpecifier(specifier) {
   return specifier.startsWith("./") || specifier.startsWith("../");
@@ -70,15 +70,15 @@ function isPathOutsideProject(projectRoot, filePath) {
   );
 }
 
-function reportDevelopmentExternalImport(projectRoot, sourcePath, resolvedImportPath, onDevelopmentEvent) {
+function reportDevelopmentUnmanagedImport(projectRoot, sourcePath, resolvedImportPath, onDevelopmentEvent) {
   const warningKey = `${path.resolve(projectRoot)}::${sourcePath}::${resolvedImportPath}`;
-  if (developmentExternalImportWarnings.has(warningKey)) {
+  if (developmentUnmanagedImportWarnings.has(warningKey)) {
     return;
   }
 
-  developmentExternalImportWarnings.add(warningKey);
+  developmentUnmanagedImportWarnings.add(warningKey);
   onDevelopmentEvent?.({
-    type: "external-import",
+    type: "unmanaged-import",
     sourcePath,
     resolvedImportPath,
   });
@@ -159,7 +159,7 @@ function toOutputRelativePath(projectRoot, sourcePath) {
   }
 
   return path.join(
-    "__external__",
+    "__unmanaged__",
     ...relativePath.split(path.sep).map((segment) => segment === ".." ? "__up__" : segment),
   );
 }
@@ -211,7 +211,7 @@ async function rewriteRelativeSpecifiers({
     }
 
     if (mode === "development" && isPathOutsideProject(projectRoot, resolvedImportPath)) {
-      reportDevelopmentExternalImport(projectRoot, sourcePath, resolvedImportPath, onDevelopmentEvent);
+      reportDevelopmentUnmanagedImport(projectRoot, sourcePath, resolvedImportPath, onDevelopmentEvent);
     }
 
     const importerOutputPath = toOutputPath(projectRoot, outputRoot, sourcePath);
@@ -339,9 +339,9 @@ export function invalidateDevelopmentCompilationCache(projectRoot, changedPaths 
   let invalidated = false;
 
   if (normalizedChangedPaths == null) {
-    for (const warningKey of developmentExternalImportWarnings) {
+    for (const warningKey of developmentUnmanagedImportWarnings) {
       if (warningKey.startsWith(prefix)) {
-        developmentExternalImportWarnings.delete(warningKey);
+        developmentUnmanagedImportWarnings.delete(warningKey);
       }
     }
   }

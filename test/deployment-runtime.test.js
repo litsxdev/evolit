@@ -157,12 +157,12 @@ test("development requests reuse hot client assets until development state is in
       (asset) => asset.clientModule === "app/layout.mjs",
     );
     const externalStyleAssets = runtime.renderer.assetManifest.assets.filter(
-      (asset) => asset.clientModule.startsWith("__external__/__up__/src/") && asset.type === "style",
+      (asset) => asset.clientModule.startsWith("__unmanaged__/__up__/src/") && asset.type === "style",
     );
     assert.ok(layoutAsset);
     assert.equal(externalStyleAssets.length, 2);
     assert.equal(layoutAsset.styleUrls.length, 3);
-    assert.equal(developmentEvents.filter((event) => event.type === "external-import").length, 2);
+    assert.equal(developmentEvents.filter((event) => event.type === "unmanaged-import").length, 2);
     for (const styleAsset of externalStyleAssets) {
       await fs.access(styleAsset.outputPath);
       assert.match(

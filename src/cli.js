@@ -3,7 +3,9 @@
 import path from "node:path";
 import process from "node:process";
 import { scaffoldSite } from "./scaffold.js";
-import { terminal } from "./terminal.js";
+import { createDevelopmentEventReporter } from "./development-events.js";
+
+const reportEvent = createDevelopmentEventReporter();
 
 function parseArguments(argv) {
   const [command, ...rest] = argv;
@@ -25,9 +27,7 @@ function parseArguments(argv) {
 }
 
 function printUsage() {
-  console.log(`${terminal.bold("Usage:")} evolit <directory>`);
-  console.log(`       evolit ${terminal.cyan("init")} <directory>`);
-  console.log(`       evolit ${terminal.cyan("<dev|build|start>")} [--port 3000]`);
+  reportEvent({ type: "usage" });
 }
 
 async function createSite(projectRoot, targetDirectory) {
@@ -36,7 +36,7 @@ async function createSite(projectRoot, targetDirectory) {
   }
 
   const createdDirectory = await scaffoldSite(path.resolve(projectRoot, targetDirectory));
-  console.log(`${terminal.green("✓")} Created evolit site: ${terminal.cyan(createdDirectory)}`);
+  reportEvent({ type: "site-created", directory: createdDirectory });
 }
 
 async function run() {
@@ -56,25 +56,29 @@ async function run() {
   if (command === "build") {
     const { buildProject } = await import("./build.js");
     const manifestPath = await buildProject(projectRoot);
-    console.log(`${terminal.green("✓")} Built Evolit app: ${terminal.cyan(path.relative(projectRoot, manifestPath))}`);
+    reportEvent({
+      type: "build-ready",
+      manifestPath: path.relative(projectRoot, manifestPath),
+    });
     return;
   }
 
   if (command === "start") {
     const { createStartServer } = await import("./server.js");
-    console.log(`${terminal.cyan("▲")} ${terminal.bold("Evolit")} ${terminal.cyan("start")}`);
+    reportEvent({ type: "server-starting", mode: "start" });
     const server = await createStartServer(projectRoot, options);
     await server.listen();
-    console.log(`${terminal.green("✓")} Ready on ${terminal.cyan(`http://localhost:${server.port}`)}`);
+    reportEvent({ type: "server-ready", port: server.port });
     return;
   }
 
   if (command === "dev") {
     const { createDevServer } = await import("./server.js");
-    console.log(`${terminal.cyan("▲")} ${terminal.bold("Evolit")} ${terminal.cyan("dev")}`);
-    const server = await createDevServer(projectRoot, options);
+    const server = await createDevServer(projectRoot, {
+      ...options,
+      onDevelopmentEvent: reportEvent,
+    });
     await server.listen();
-    console.log(`${terminal.green("✓")} Ready on ${terminal.cyan(`http://localhost:${server.port}`)}`);
     return;
   }
 
@@ -82,8 +86,6 @@ async function run() {
 }
 
 run().catch((error) => {
-  console.error(
-    `${terminal.red("[evolit]")} ${terminal.red("✖")} ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
-  );
+  reportEvent({ type: "fatal-error", error });
   process.exitCode = 1;
 });

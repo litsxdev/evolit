@@ -14,6 +14,7 @@ import {
   getSharedOutputRoot,
   normalizeHydrationDataForClient,
   normalizeClientAssetManifest,
+  resolveRouteClientImports,
   resolveBrowserPackageAssetFilePath,
   resolveBrowserSpecifierFilePath,
 } from "../src/client-assets.js";
@@ -252,6 +253,48 @@ test("createHydrationBootstrap deduplicates module imports by moduleId", () => {
     bootstrap.includes("\\u003E"),
     false,
   );
+});
+
+test("createHydrationBootstrap registers route client imports alongside hydration roots", () => {
+  const bootstrap = createHydrationBootstrap({
+    hydrationData: {
+      roots: [],
+      clientImports: ["/_evolit/static/app/explore/*...slug*/page.mjs"],
+    },
+  });
+
+  assert.match(bootstrap, /registerHydrationModules/);
+  assert.match(bootstrap, /app\/explore\/\*\.\.\.slug\*\/page\.mjs/);
+});
+
+test("resolveRouteClientImports resolves sanitized dynamic route entry names", () => {
+  const projectRoot = "/workspace/site";
+  const scenarios = [
+    ["app/product/[slug]/page.litsx", "app/product/_slug_/page.mjs"],
+    ["app/explore/[...slug]/page.litsx", "app/explore/_...slug_/page.mjs"],
+    ["app/docs/[[...slug]]/page.litsx", "app/docs/__...slug__/page.mjs"],
+    ["app/catalog/[category]/[slug]/page.litsx", "app/catalog/_category_/_slug_/page.mjs"],
+  ];
+  const byClientModule = Object.fromEntries(
+    scenarios.map(([, emittedClientModule]) => [
+      emittedClientModule,
+      `/_evolit/static/${emittedClientModule}`,
+    ]),
+  );
+
+  for (const [routeModule, emittedClientModule] of scenarios) {
+    const imports = resolveRouteClientImports({
+      route: {
+        page: path.join(projectRoot, routeModule),
+        layouts: [],
+      },
+    }, projectRoot, {
+      byClientModule,
+      assets: [],
+    });
+
+    assert.deepEqual(imports, [`/_evolit/static/${emittedClientModule}`]);
+  }
 });
 
 test("createHydrationBootstrap ignores unresolved module ids", () => {

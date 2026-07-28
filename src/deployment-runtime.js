@@ -293,19 +293,37 @@ export async function createRequestRenderer({
         ...styleUrls.map((href) => `<link rel="stylesheet" href="${href}">`),
       ].join("\n");
     },
-    resolveBootstrap({ result }) {
+    resolveBootstrap({ routeResult, result }) {
+      const routeClientImports = resolveRouteClientImports(
+        routeResult,
+        projectRoot,
+        currentAssetManifest,
+      );
       return createHydrationBootstrap({
-        hydrationData: normalizeHydrationDataForClient(result.hydrationData, projectRoot),
+        hydrationData: normalizeHydrationDataForClient(
+          result.hydrationData,
+          projectRoot,
+          routeClientImports,
+        ),
         assetResolver(moduleId) {
           return currentAssetResolver(moduleId);
         },
         hydrationModuleUrl: currentHydrationModuleUrl,
       });
     },
-    transformDocument({ result, document }) {
+    transformDocument({ routeResult, result, document }) {
+      const routeClientImports = resolveRouteClientImports(
+        routeResult,
+        projectRoot,
+        currentAssetManifest,
+      );
       return rewriteHydrationDataScript(
         document,
-        normalizeHydrationDataForClient(result.hydrationData, projectRoot),
+        normalizeHydrationDataForClient(
+          result.hydrationData,
+          projectRoot,
+          routeClientImports,
+        ),
       );
     },
   });

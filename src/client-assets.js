@@ -934,6 +934,55 @@ function toCompiledClientModuleRelativePath(relativePath) {
     : `${relativePath}.mjs`;
 }
 
+function toCatchAllClientModuleRelativePath(clientModule) {
+  return clientModule
+    .split(/[\\/]/)
+    .map((segment) => {
+      if (segment.startsWith("[[...") && segment.endsWith("]]")) {
+        return `**...${segment.slice(5, -2)}**`;
+      }
+
+      if (segment.startsWith("[...") && segment.endsWith("]")) {
+        return `*...${segment.slice(4, -1)}*`;
+      }
+
+      return segment;
+    })
+    .join("/");
+}
+
+function toRollupSafeClientModuleRelativePath(clientModule) {
+  return clientModule.replaceAll(/[\[\]]/g, "_");
+}
+
+function getClientModuleCandidates(clientModule) {
+  const normalizedClientModule = clientModule.split(path.sep).join("/");
+  return [...new Set([
+    normalizedClientModule,
+    toCatchAllClientModuleRelativePath(normalizedClientModule),
+    toRollupSafeClientModuleRelativePath(normalizedClientModule),
+  ])];
+}
+
+function getClientModulePublicUrl(assetManifest, clientModule) {
+  for (const candidate of getClientModuleCandidates(clientModule)) {
+    const publicUrl = assetManifest.byClientModule[candidate];
+    if (typeof publicUrl === "string" && publicUrl.length > 0) {
+      return publicUrl;
+    }
+  }
+
+  const candidates = new Set(getClientModuleCandidates(clientModule));
+  const asset = assetManifest.assets.find((entry) =>
+    candidates.has(entry?.clientModule) && typeof entry?.publicUrl === "string",
+  );
+  if (asset) {
+    return asset.publicUrl;
+  }
+
+  return null;
+}
+
 function toPublicHydrationModuleId(projectRoot, moduleId) {
   if (typeof moduleId !== "string" || moduleId.length === 0) {
     return null;
@@ -1001,10 +1050,7 @@ export function createAssetResolver(projectRoot, options = {}) {
     }
 
     if (assetManifest) {
-      return getAssetByClientModule(
-        assetManifest,
-        relativeClientModule,
-      )?.publicUrl ?? null;
+      return getClientModulePublicUrl(assetManifest, relativeClientModule);
     }
 
     return null;
@@ -1029,8 +1075,8 @@ export function createHydrationBootstrap({
   hydrationModuleUrl = "@litsx/ssr/hydration",
 }) {
   const normalizedHydrationData = normalizeHydrationDataForClient(hydrationData);
-  const moduleUrls = [...new Set(
-    (normalizedHydrationData?.roots ?? [])
+  const moduleUrls = [...new Set([
+    ...(normalizedHydrationData?.roots ?? [])
       .map((root) => {
         if (typeof root?.moduleId !== "string" || root.moduleId.length === 0) {
           return null;
@@ -1039,7 +1085,10 @@ export function createHydrationBootstrap({
         return assetResolver?.(root.moduleId) ?? null;
       })
       .filter((moduleUrl) => typeof moduleUrl === "string" && moduleUrl.length > 0),
-  )];
+    ...(Array.isArray(normalizedHydrationData?.clientImports)
+      ? normalizedHydrationData.clientImports
+      : []),
+  ].filter((moduleUrl) => typeof moduleUrl === "string" && moduleUrl.length > 0))];
 
   if (moduleUrls.length === 0) {
     return "";
@@ -1063,7 +1112,11 @@ ${moduleLoaders}
   return escapeInlineScriptText(source);
 }
 
-export function normalizeHydrationDataForClient(hydrationData, projectRoot = null) {
+export function normalizeHydrationDataForClient(
+  hydrationData,
+  projectRoot = null,
+  additionalClientImports = [],
+) {
   if (!hydrationData || typeof hydrationData !== "object") {
     return hydrationData ?? null;
   }
@@ -1096,7 +1149,10 @@ export function normalizeHydrationDataForClient(hydrationData, projectRoot = nul
     roots,
   };
   const payload = hydrationData.payload;
-  const clientImports = hydrationData.clientImports;
+  const clientImports = [...new Set([
+    ...(Array.isArray(hydrationData.clientImports) ? hydrationData.clientImports : []),
+    ...(Array.isArray(additionalClientImports) ? additionalClientImports : []),
+  ].filter((value) => typeof value === "string" && value.length > 0))];
 
   Object.defineProperties(normalizedHydrationData, {
     payload: {
@@ -1728,9 +1784,14 @@ async function bundleClientAssets(projectRoot, options = {}) {
 
         const outputPath = path.join(staticRoot, chunk.fileName);
         const publicUrl = toStaticPublicUrl(chunk.fileName);
-        const isNamedEntry = chunk.isEntry && clientModuleByEntryName.has(chunk.name);
+        const entryClientModule = clientModuleByEntryName.get(chunk.name)
+          ?? [...clientModuleByEntryName.entries()].find(([entryName]) =>
+            toRollupSafeClientModuleRelativePath(entryName) === chunk.name,
+          )?.[1]
+          ?? null;
+        const isNamedEntry = chunk.isEntry && entryClientModule != null;
         const clientModule = isNamedEntry
-          ? clientModuleByEntryName.get(chunk.name)
+          ? entryClientModule
           : chunk.fileName;
         const transitiveMetadata = isNamedEntry
           ? await collectTransitiveClientModuleMetadata(projectRoot, mode, clientModule)
@@ -1939,7 +2000,7 @@ export function resolveRouteClientImports(routeResult, projectRoot, assetManifes
     const clientModule = extension
       ? `${relativePath.slice(0, -extension.length)}.mjs`
       : `${relativePath}.mjs`;
-    return normalizedManifest.byClientModule[clientModule] ?? null;
+    return getClientModulePublicUrl(normalizedManifest, clientModule);
   }).filter((publicUrl) => typeof publicUrl === "string"))];
 }
 

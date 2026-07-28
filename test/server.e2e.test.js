@@ -7,6 +7,7 @@ import net from "node:net";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import { createDevServer } from "../src/server.js";
+import { resolveRouteClientImports } from "../src/client-assets.js";
 import { scaffoldSite } from "../src/scaffold.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -14,6 +15,7 @@ const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 let fixtureRoot;
 let server;
 let baseUrl;
+const developmentEvents = [];
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 const cardBadgeSpecialPngFile = "card badge@2x.png";
 
@@ -237,6 +239,7 @@ before(async () => {
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-revalidate", "[slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "blog", "[slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "docs", "[...slug]"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "explore", "[...slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "optional", "[[...slug]]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "lit"), { recursive: true });
   await fs.writeFile(
@@ -279,6 +282,18 @@ before(async () => {
   await fs.writeFile(
     path.join(fixtureRoot, "app", "docs", "[...slug]", "page.litsx"),
     createParamsPageSource("docs", "slug"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "explore", "[...slug]", "page.litsx"),
+    [
+      'import FeatureCard from "../../components/feature-card.litsx";',
+      "",
+      "export default async function ExplorePage({ params }) {",
+      "  return <FeatureCard title=\"Explore\" body={JSON.stringify(params.slug ?? [])} />;",
+      "}",
+      "",
+    ].join("\n"),
     "utf8",
   );
   await fs.writeFile(
@@ -354,8 +369,18 @@ before(async () => {
   );
 
   const port = await getAvailablePort();
-  server = await createDevServer(fixtureRoot, { port });
+  server = await createDevServer(fixtureRoot, {
+    port,
+    onDevelopmentEvent(event) {
+      developmentEvents.push(event);
+    },
+  });
   await server.listen();
+  assert.deepEqual(
+    developmentEvents.slice(0, 3).map((event) => event.type),
+    ["server-starting", "initializing", "vendor-runtime-ready"],
+  );
+  assert.equal(developmentEvents.at(-1)?.type, "server-ready");
   baseUrl = `http://127.0.0.1:${port}`;
 });
 
@@ -510,6 +535,50 @@ test("dev server resolves catch-all dynamic segments", async () => {
 
   assert.equal(response.status, 200);
   assert.match(html, /docs:\[&quot;guides&quot;,&quot;routing&quot;,&quot;dynamic&quot;\]/);
+});
+
+test("dev server injects the catch-all route entry into LitSX hydration metadata", async () => {
+  const renderedRoutes = [];
+  for (const pathname of ["/explore", "/explore/home-garden/furniture"]) {
+    const response = await fetch(`${baseUrl}${pathname}`);
+    renderedRoutes.push({
+      pathname,
+      response,
+      html: await response.text(),
+    });
+  }
+  const manifest = await readDevClientAssetsManifest();
+  const routeEntry = manifest.assets.find((asset) =>
+    asset.clientModule.includes("app/explore/")
+    && asset.clientModule.includes("...slug")
+    && asset.clientModule.endsWith("/page.mjs"),
+  );
+  const resolvedRouteImports = resolveRouteClientImports({
+    route: {
+      page: path.join(fixtureRoot, "app", "explore", "[...slug]", "page.litsx"),
+      layouts: [],
+    },
+  }, fixtureRoot, manifest);
+
+  assert.ok(routeEntry, "Expected a compiled catch-all client entry");
+  assert.ok(resolvedRouteImports.includes(routeEntry.publicUrl), JSON.stringify({
+    routeEntry,
+    resolvedRouteImports,
+    manifestLookup: manifest.byClientModule[routeEntry.clientModule],
+    manifestModules: manifest.assets
+      .filter((asset) => asset.clientModule.includes("app/explore/"))
+      .map((asset) => asset.clientModule),
+  }));
+
+  for (const { pathname, response, html } of renderedRoutes) {
+    const hydrationMatch = html.match(/<script type="application\/json" id="__LITSX_HYDRATION__">([\s\S]*?)<\/script>/);
+    const hydrationData = hydrationMatch ? JSON.parse(hydrationMatch[1]) : null;
+
+    assert.equal(response.status, 200);
+    assert.ok(hydrationData);
+    assert.ok(hydrationData.clientImports.includes(routeEntry.publicUrl));
+    assert.match(html, new RegExp(routeEntry.publicUrl.replaceAll(".", "\\.")));
+  }
 });
 
 test("dev server resolves optional catch-all routes with and without trailing segments", async () => {

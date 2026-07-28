@@ -255,17 +255,35 @@ export async function buildProject(projectRoot) {
         ...styleUrls.map((href) => `<link rel="stylesheet" href="${href}">`),
       ].join("\n");
     },
-    resolveBootstrap({ result }) {
+    resolveBootstrap({ routeResult, result }) {
+      const routeClientImports = resolveRouteClientImports(
+        routeResult,
+        projectRoot,
+        clientAssets,
+      );
       return createHydrationBootstrap({
-        hydrationData: normalizeHydrationDataForClient(result.hydrationData, projectRoot),
+        hydrationData: normalizeHydrationDataForClient(
+          result.hydrationData,
+          projectRoot,
+          routeClientImports,
+        ),
         assetResolver,
         hydrationModuleUrl,
       });
     },
-    transformDocument({ result, document }) {
+    transformDocument({ routeResult, result, document }) {
+      const routeClientImports = resolveRouteClientImports(
+        routeResult,
+        projectRoot,
+        clientAssets,
+      );
       return rewriteHydrationDataScript(
         document,
-        normalizeHydrationDataForClient(result.hydrationData, projectRoot),
+        normalizeHydrationDataForClient(
+          result.hydrationData,
+          projectRoot,
+          routeClientImports,
+        ),
       );
     },
   });
