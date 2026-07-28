@@ -923,8 +923,23 @@ export function getClientOutputRoot(projectRoot, mode) {
 }
 
 export function toClientModuleRelativePath(projectRoot, sourcePath) {
-  const relativePath = path.relative(projectRoot, sourcePath);
+  const relativePath = toClientSourceRelativePath(projectRoot, sourcePath);
   return toCompiledClientModuleRelativePath(relativePath);
+}
+
+function toClientSourceRelativePath(projectRoot, sourcePath) {
+  const relativePath = path.relative(projectRoot, sourcePath);
+  const isOutsideProject = relativePath === ".."
+    || relativePath.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativePath);
+  if (!isOutsideProject) {
+    return relativePath;
+  }
+
+  return path.join(
+    "__unmanaged__",
+    ...relativePath.split(path.sep).map((segment) => segment === ".." ? "__up__" : segment),
+  );
 }
 
 function toCompiledClientModuleRelativePath(relativePath) {
@@ -983,17 +998,17 @@ function getClientModulePublicUrl(assetManifest, clientModule) {
   return null;
 }
 
+function isVirtualClientModuleId(moduleId) {
+  return moduleId.startsWith("/app/") || moduleId.startsWith("/__unmanaged__/");
+}
+
 function toPublicHydrationModuleId(projectRoot, moduleId) {
   if (typeof moduleId !== "string" || moduleId.length === 0) {
     return null;
   }
 
   if (path.isAbsolute(moduleId)) {
-    if (!moduleId.startsWith(projectRoot)) {
-      return null;
-    }
-
-    const relativePath = path.relative(projectRoot, moduleId).split(path.sep).join("/");
+    const relativePath = toClientSourceRelativePath(projectRoot, moduleId).split(path.sep).join("/");
     return `/${relativePath}`;
   }
 
@@ -1035,14 +1050,10 @@ export function createAssetResolver(projectRoot, options = {}) {
     }
 
     let relativeClientModule = null;
-    if (moduleId.startsWith("/") && !moduleId.startsWith(projectRoot)) {
-      relativeClientModule = toCompiledClientModuleRelativePath(moduleId.slice(1));
-    } else if (path.isAbsolute(moduleId)) {
-      if (!moduleId.startsWith(projectRoot)) {
-        return null;
-      }
-
+    if (path.isAbsolute(moduleId) && !isVirtualClientModuleId(moduleId)) {
       relativeClientModule = toClientModuleRelativePath(projectRoot, moduleId);
+    } else if (moduleId.startsWith("/")) {
+      relativeClientModule = toCompiledClientModuleRelativePath(moduleId.slice(1));
     }
 
     if (!relativeClientModule) {
@@ -1075,7 +1086,7 @@ export function createHydrationBootstrap({
   hydrationModuleUrl = "@litsx/ssr/hydration",
 }) {
   const normalizedHydrationData = normalizeHydrationDataForClient(hydrationData);
-  const moduleUrls = [...new Set([
+  const rootModuleUrls = [...new Set([
     ...(normalizedHydrationData?.roots ?? [])
       .map((root) => {
         if (typeof root?.moduleId !== "string" || root.moduleId.length === 0) {
@@ -1085,16 +1096,18 @@ export function createHydrationBootstrap({
         return assetResolver?.(root.moduleId) ?? null;
       })
       .filter((moduleUrl) => typeof moduleUrl === "string" && moduleUrl.length > 0),
-    ...(Array.isArray(normalizedHydrationData?.clientImports)
+  ])];
+  const clientImports = [...new Set(
+    (Array.isArray(normalizedHydrationData?.clientImports)
       ? normalizedHydrationData.clientImports
-      : []),
-  ].filter((moduleUrl) => typeof moduleUrl === "string" && moduleUrl.length > 0))];
+      : []).filter((moduleUrl) => typeof moduleUrl === "string" && moduleUrl.length > 0),
+  )];
 
-  if (moduleUrls.length === 0) {
+  if (rootModuleUrls.length === 0 && clientImports.length === 0) {
     return "";
   }
 
-  const moduleLoaders = moduleUrls
+  const moduleLoaders = rootModuleUrls
     .map((moduleUrl) => `  () => import(${JSON.stringify(moduleUrl)})`)
     .join(",\n");
 
@@ -1102,7 +1115,7 @@ export function createHydrationBootstrap({
 import { hydratePage, registerHydrationModules } from ${JSON.stringify(hydrationModuleUrl)};
 
 await hydratePage({
-  clientImports: [],
+  clientImports: ${JSON.stringify(clientImports)},
   register: () => registerHydrationModules([
 ${moduleLoaders}
   ])

@@ -404,7 +404,7 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   assert.match(html, /import \{ hydratePage, registerHydrationModules \} from "\/_evolit\/shared\/(?:base\/)?litsx__ssr__hydration(?:-[A-Za-z0-9_-]+)?\.mjs"/);
   assert.match(html, /registerHydrationModules/);
   assert.match(html, /await hydratePage\(\{/);
-  assert.match(html, /clientImports: \[\]/);
+  assert.match(html, /clientImports: \["\/_evolit\/static\/app\/components\/feature-card\.mjs"/);
   assert.match(html, /\/_evolit\/static\/app\/components\/feature-card\.mjs/);
   assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/components\/card-accent\.[a-f0-9]{8}\.css">/);
   assert.ok(html.includes(`<link rel="stylesheet" href="${globalCssUrl}">`));

@@ -6,6 +6,7 @@ import {
   collectClientVendorSpecifiers,
   createBrowserSpecifierPublicUrl,
   createBrowserPackageBaseUrl,
+  createAssetResolver,
   createHydrationBootstrap,
   emitBundledClientAssets,
   getAssetByClientModule,
@@ -265,6 +266,23 @@ test("createHydrationBootstrap registers route client imports alongside hydratio
 
   assert.match(bootstrap, /registerHydrationModules/);
   assert.match(bootstrap, /app\/explore\/\*\.\.\.slug\*\/page\.mjs/);
+  assert.match(bootstrap, /clientImports: \["\/_evolit\/static\/app\/explore\/\*\.\.\.slug\*\/page\.mjs"\]/);
+});
+
+test("createAssetResolver resolves hydratable modules outside the project root", () => {
+  const resolver = createAssetResolver("/workspace/vend.io/site", {
+    assetManifest: {
+      assets: [],
+      byClientModule: {
+        "__unmanaged__/__up__/src/components/navigation/vds-breadcrumbs.mjs": "/_evolit/static/__unmanaged__/__up__/src/components/navigation/vds-breadcrumbs.mjs",
+      },
+    },
+  });
+
+  assert.equal(
+    resolver("/workspace/vend.io/src/components/navigation/vds-breadcrumbs.litsx"),
+    "/_evolit/static/__unmanaged__/__up__/src/components/navigation/vds-breadcrumbs.mjs",
+  );
 });
 
 test("resolveRouteClientImports resolves sanitized dynamic route entry names", () => {
@@ -367,9 +385,11 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
     },
     {
       id: "root-1",
+      moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/hero-banner.litsx",
     },
     {
       id: "root-2",
+      moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/ignored.litsx",
     },
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(normalizedHydrationData)), {
@@ -381,9 +401,11 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
       },
       {
         id: "root-1",
+        moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/hero-banner.litsx",
       },
       {
         id: "root-2",
+        moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/ignored.litsx",
       },
     ],
     payload: {
