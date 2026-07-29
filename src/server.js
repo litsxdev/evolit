@@ -10,6 +10,7 @@ import { normalizeClientAssetManifest } from "./client-assets.js";
 import { pathExists, readJson } from "./fs-utils.js";
 import { createDefaultRouteCacheKey, resolveResponseCacheRuntime } from "./response-cache.js";
 import { createDevelopmentEventReporter } from "./development-events.js";
+import { createNavigationResponseFromDocument } from "./route-segments.js";
 
 function getPort(explicitPort) {
   const port = explicitPort ?? process.env.PORT ?? "3000";
@@ -266,9 +267,12 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       });
       const requestStartedAt = performance.now();
       const response = await deploymentRuntime.handle(request);
-      const servedResponse = mode === "development"
-        ? injectLiveReloadSnippet(response)
+      const navigationResponse = String(req.headers.accept ?? "").includes("application/vnd.evolit.navigation+json")
+        ? createNavigationResponseFromDocument(response)
         : response;
+      const servedResponse = mode === "development"
+        ? injectLiveReloadSnippet(navigationResponse)
+        : navigationResponse;
 
       res.writeHead(servedResponse.status, servedResponse.headers);
       await writeResponseBody(res, servedResponse.body);

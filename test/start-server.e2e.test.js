@@ -753,14 +753,14 @@ test("start server emits hashed modulepreload links that match the asset manifes
   assert.match(
     html,
     new RegExp(
-      `<link rel="modulepreload" href="${featureCardAsset.publicUrl.replaceAll(".", "\\.")}">`,
+      `<link rel="modulepreload" href="${featureCardAsset.publicUrl.replaceAll(".", "\\.")}" data-evolit-route-asset="preload">`,
     ),
   );
   assert.doesNotMatch(html, /\/_evolit\/static\/chunks\/vendor-/);
   assert.match(
     html,
     new RegExp(
-      `<link rel="stylesheet" href="${cardAccentStyleAsset.publicUrl.replaceAll(".", "\\.")}">`,
+      `<link rel="stylesheet" href="${cardAccentStyleAsset.publicUrl.replaceAll(".", "\\.")}" data-evolit-route-asset="style">`,
     ),
   );
   if (featureCardAsset.importUrls.length > 0) {
@@ -821,7 +821,7 @@ test("start server emits every stylesheet imported by the root layout", async ()
   for (const styleAsset of [tokensStyleAsset, composableStyleAsset, globalStyleAsset]) {
     assert.match(
       html,
-      new RegExp(`<link rel="stylesheet" href="${styleAsset.publicUrl.replaceAll(".", "\\.")}">`),
+      new RegExp(`<link rel="stylesheet" href="${styleAsset.publicUrl.replaceAll(".", "\\.")}" data-evolit-route-asset="style">`),
     );
   }
 });
@@ -832,7 +832,7 @@ test("start server omits hashed hydration preload output for non-hydrated routes
 
   assert.equal(response.status, 200);
   assert.doesNotMatch(html, /rel="modulepreload"/);
-  assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/global\.[a-f0-9]{8}\.css">/);
+  assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/global\.[a-f0-9]{8}\.css" data-evolit-route-asset="style">/);
   assert.doesNotMatch(html, /registerHydrationModules/);
   assert.doesNotMatch(html, /__LITSX_HYDRATION__/);
 });

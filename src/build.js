@@ -247,12 +247,18 @@ export async function buildProject(projectRoot) {
         ...(Array.isArray(result.clientImports) ? result.clientImports : []),
         ...resolveRouteClientImports(routeResult, projectRoot, clientAssets),
       ];
-      const urls = collectTransitiveAssetPreloads(clientImports, clientAssets);
+      const hydratedClientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
+      const urls = hydratedClientImports.length > 0
+        ? [...new Set([
+          ...hydratedClientImports,
+          ...collectTransitiveAssetPreloads(hydratedClientImports, clientAssets),
+        ])]
+        : [];
       const styleUrls = collectTransitiveStyleUrls(clientImports, clientAssets);
 
       return [
-        ...urls.map((href) => `<link rel="modulepreload" href="${href}">`),
-        ...styleUrls.map((href) => `<link rel="stylesheet" href="${href}">`),
+        ...urls.map((href) => `<link rel="modulepreload" href="${href}" data-evolit-route-asset="preload">`),
+        ...styleUrls.map((href) => `<link rel="stylesheet" href="${href}" data-evolit-route-asset="style">`),
       ].join("\n");
     },
     resolveBootstrap({ routeResult, result }) {

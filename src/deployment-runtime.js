@@ -32,6 +32,7 @@ import {
   resolveResponseCacheRuntime,
 } from "./response-cache.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
+import { createNavigationResponseFromDocument } from "./route-segments.js";
 const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".css", "text/css; charset=utf-8"],
   [".svg", "image/svg+xml"],
@@ -232,6 +233,11 @@ export async function createRequestRenderer({
     mode,
     "@litsx/ssr/hydration",
   );
+  let currentNavigationModuleUrl = await resolveSharedVendorModuleUrl(
+    projectRoot,
+    mode,
+    "evolit/navigation",
+  );
   const devBundledEntries = new Set();
   const devPreparedClientModules = new Set();
   const devClientModuleDependencies = new Map();
@@ -244,6 +250,7 @@ export async function createRequestRenderer({
     selectivelyInvalidatedClientEntries: 0,
   };
   const usesFrameworkRouteResolver = !routeResolver;
+  let sharedSegmentRenderCache = null;
 
   function enqueueDevClientAssetWork(work) {
     const nextWork = devClientAssetWork.then(work, work);
@@ -261,12 +268,18 @@ export async function createRequestRenderer({
     return path.resolve(projectRoot, clientModule);
   }
   async function createFrameworkRouteResolver() {
-    return createRouteResolver(projectRoot, mode, {
+    const resolver = await createRouteResolver(projectRoot, mode, {
       onDevelopmentEvent,
+      segmentRenderCache: sharedSegmentRenderCache,
       getStaticAssetPublicUrls() {
         return createStaticAssetPublicUrlMap(currentAssetManifest);
       },
+      assetResolver(moduleId) {
+        return currentAssetResolver(moduleId);
+      },
     });
+    sharedSegmentRenderCache ??= resolver.segmentRenderCache;
+    return resolver;
   }
   let effectiveRouteResolver = routeResolver ?? await createFrameworkRouteResolver();
   const ssrAdapter = createSsrAdapter({
@@ -278,8 +291,12 @@ export async function createRequestRenderer({
         ...(Array.isArray(result.clientImports) ? result.clientImports : []),
         ...resolveRouteClientImports(routeResult, projectRoot, currentAssetManifest),
       ];
-      const urls = currentAssetManifest
-        ? collectTransitiveAssetPreloads(clientImports, currentAssetManifest)
+      const hydratedClientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
+      const urls = currentAssetManifest && hydratedClientImports.length > 0
+        ? [...new Set([
+          ...hydratedClientImports,
+          ...collectTransitiveAssetPreloads(hydratedClientImports, currentAssetManifest),
+        ])]
         : [];
       const styleUrls = currentAssetManifest
         ? collectTransitiveStyleUrls(clientImports, currentAssetManifest)
@@ -289,8 +306,8 @@ export async function createRequestRenderer({
       }
 
       return [
-        ...urls.map((href) => `<link rel="modulepreload" href="${href}">`),
-        ...styleUrls.map((href) => `<link rel="stylesheet" href="${href}">`),
+        ...urls.map((href) => `<link rel="modulepreload" href="${href}" data-evolit-route-asset="preload">`),
+        ...styleUrls.map((href) => `<link rel="stylesheet" href="${href}" data-evolit-route-asset="style">`),
       ].join("\n");
     },
     resolveBootstrap({ routeResult, result }) {
@@ -309,6 +326,7 @@ export async function createRequestRenderer({
           return currentAssetResolver(moduleId);
         },
         hydrationModuleUrl: currentHydrationModuleUrl,
+        navigationModuleUrl: currentNavigationModuleUrl,
       });
     },
     transformDocument({ routeResult, result, document }) {
@@ -380,6 +398,8 @@ export async function createRequestRenderer({
         });
 
         if (usesFrameworkRouteResolver) {
+          const segmentEntryCount = effectiveRouteResolver.invalidateSegmentCache?.(changedPaths) ?? 0;
+          reportDevelopmentEvent({ type: "segment-cache-invalidated", entryCount: segmentEntryCount });
           effectiveRouteResolver = await createFrameworkRouteResolver();
         }
       });
@@ -536,6 +556,16 @@ export async function createDeploymentRuntime({
   const runtimeState = {
     assetManifest: mode === "development" ? null : normalizeClientAssetManifest(assetManifest),
   };
+
+  function formatResponseForRequest(request, response) {
+    const representation = request.headers.get("accept")?.includes("application/vnd.evolit.navigation+json")
+      ? createNavigationResponseFromDocument(response)
+      : response;
+    // The same URL has an HTML document representation and a navigation
+    // delta representation. Tell intermediary HTTP caches that Accept selects
+    // between them.
+    return addNavigationVaryHeader(representation);
+  }
   const assets = createPublicAssetOrigin({
     projectRoot,
     mode,
@@ -579,7 +609,7 @@ export async function createDeploymentRuntime({
       const cachedResponse = await renderer.responseCacheController.read(request, routePolicyResult);
       if (cachedResponse) {
         if (cachedResponse.fresh) {
-          return cachedResponse.response;
+          return formatResponseForRequest(request, cachedResponse.response);
         }
 
         if (
@@ -603,12 +633,15 @@ export async function createDeploymentRuntime({
           revalidationTasks.set(cachedResponse.cacheKey, revalidationTask);
         }
 
-        return cachedResponse.response;
+        return formatResponseForRequest(request, cachedResponse.response);
       }
 
       const { routeResult, response } = await renderer.renderRoute(request, routePolicyResult);
       runtimeState.assetManifest = normalizeClientAssetManifest(renderer.assetManifest);
-      return renderer.responseCacheController.write(request, routeResult, response);
+      return formatResponseForRequest(
+        request,
+        await renderer.responseCacheController.write(request, routeResult, response),
+      );
     },
     async close() {
       const revalidationTasks = this.revalidationTasks;
@@ -616,5 +649,18 @@ export async function createDeploymentRuntime({
         await Promise.all(revalidationTasks.values());
       }
     },
+  };
+}
+
+function addNavigationVaryHeader(response) {
+  if (!response?.headers) return response;
+  const fields = String(response.headers.vary ?? "")
+    .split(",")
+    .map((field) => field.trim())
+    .filter(Boolean);
+  if (!fields.some((field) => field.toLowerCase() === "accept")) fields.push("accept");
+  return {
+    ...response,
+    headers: { ...response.headers, vary: fields.join(", ") },
   };
 }

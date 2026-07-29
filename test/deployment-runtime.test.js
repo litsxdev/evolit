@@ -167,7 +167,7 @@ test("development requests reuse hot client assets until development state is in
       await fs.access(styleAsset.outputPath);
       assert.match(
         html,
-        new RegExp(`<link rel="stylesheet" href="${styleAsset.publicUrl.replaceAll(".", "\\.")}">`),
+        new RegExp(`<link rel="stylesheet" href="${styleAsset.publicUrl.replaceAll(".", "\\.")}" data-evolit-route-asset="style">`),
       );
     }
 
@@ -184,6 +184,7 @@ test("development requests reuse hot client assets until development state is in
     assert.equal(await fs.readFile(sentinelPath, "utf8"), "preserved");
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactCacheHits, 1);
     assert.equal(developmentEvents.some((event) => event.type === "client-assets-cache-hit"), true);
+    assert.equal(developmentEvents.some((event) => event.type === "segment-cache-hit"), true);
 
     await runtime.invalidateDevelopmentState();
     await runtime.handle(new Request("http://evolit.local/"));
@@ -191,6 +192,7 @@ test("development requests reuse hot client assets until development state is in
     assert.equal(runtime.renderer.developmentMetrics.invalidations, 1);
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactBuilds, 2);
     assert.equal(developmentEvents.some((event) => event.type === "invalidated"), true);
+    assert.equal(developmentEvents.some((event) => event.type === "segment-cache-invalidated"), true);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

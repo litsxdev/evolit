@@ -1,0 +1,206 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createBrowserNavigation } from "../src/navigation-client.js";
+
+function createBrowserWindow(fetch) {
+  const listeners = new Map();
+  const documentListeners = new Map();
+  return {
+    location: {
+      href: "http://example.test/",
+      origin: "http://example.test",
+      assign(href) { this.lastAssign = href; },
+      replace(href) { this.lastReplace = href; },
+    },
+    scrollX: 12,
+    scrollY: 34,
+    scrollTo(x, y) { this.lastScroll = { x, y }; },
+    fetch,
+    document: {
+      addEventListener(type, listener) { documentListeners.set(type, listener); },
+      getElementById() { return null; },
+      querySelector() { return null; },
+      dispatch(type, event) { documentListeners.get(type)?.(event); },
+    },
+    history: {
+      state: null,
+      pushState(state, _title, href) { this.state = state; this.lastPush = href; },
+      replaceState(state, _title, href) { this.state = state; this.lastReplace = href; },
+    },
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    dispatch(type, event) { listeners.get(type)?.(event); },
+  };
+}
+
+test("a superseded navigation cannot apply its late delta", async () => {
+  const pending = new Map();
+  const windowRef = createBrowserWindow((href) => new Promise((resolve) => {
+    pending.set(new URL(href).pathname, resolve);
+  }));
+  const applied = [];
+  const navigation = createBrowserNavigation({
+    window: windowRef,
+    applyDelta: async (delta) => { applied.push(delta.url); },
+  });
+
+  const first = navigation.push("/first");
+  const second = navigation.push("/second");
+  pending.get("/second")({
+    headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+    json: async () => ({ type: "route", url: "/second", route: {} }),
+  });
+  await second;
+  pending.get("/first")({
+    headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+    json: async () => ({ type: "route", url: "/first", route: {} }),
+  });
+  await first;
+
+  assert.deepEqual(applied, ["/second"]);
+  assert.equal(windowRef.history.lastPush, "http://example.test/second");
+  assert.deepEqual(navigation.getState(), {
+    status: "idle",
+    url: "http://example.test/second",
+    pendingUrl: null,
+    error: null,
+  });
+});
+
+test("an internal GET form becomes a client navigation with repeated query parameters", async () => {
+  const requested = [];
+  const windowRef = createBrowserWindow(async (href) => {
+    requested.push(href);
+    return {
+      headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+      json: async () => ({ type: "route", url: new URL(href).pathname + new URL(href).search, route: {} }),
+    };
+  });
+  const form = {
+    tagName: "FORM",
+    method: "get",
+    target: "",
+    action: "http://example.test/explore?ignored=yes",
+    dataset: {},
+    querySelector() { return null; },
+  };
+  const originalFormData = globalThis.FormData;
+  globalThis.FormData = class {
+    constructor(receivedForm) {
+      assert.equal(receivedForm, form);
+      return [["facet", "brand"], ["facet", "material"], ["sort", "price"]];
+    }
+  };
+  try {
+    createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+    let prevented = false;
+    windowRef.document.dispatch("submit", {
+      target: form,
+      submitter: null,
+      defaultPrevented: false,
+      preventDefault() { prevented = true; },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(prevented, true);
+    assert.deepEqual(requested, ["http://example.test/explore?facet=brand&facet=material&sort=price"]);
+  } finally {
+    globalThis.FormData = originalFormData;
+  }
+});
+
+test("non-GET, upload, external, and opted-out forms keep native submission", () => {
+  const windowRef = createBrowserWindow(async () => { throw new Error("must not fetch"); });
+  createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+  const cases = [
+    { method: "post", target: "", action: "http://example.test/explore", upload: false, optOut: false },
+    { method: "get", target: "", action: "http://example.test/explore", upload: true, optOut: false },
+    { method: "get", target: "", action: "https://other.test/explore", upload: false, optOut: false },
+    { method: "get", target: "", action: "http://example.test/explore", upload: false, optOut: true },
+  ];
+  for (const item of cases) {
+    let prevented = false;
+    windowRef.document.dispatch("submit", {
+      target: {
+        tagName: "FORM",
+        method: item.method,
+        target: item.target,
+        action: item.action,
+        dataset: item.optOut ? { evolitNavigation: "false" } : {},
+        querySelector() { return item.upload ? {} : null; },
+      },
+      submitter: null,
+      defaultPrevented: false,
+      preventDefault() { prevented = true; },
+    });
+    assert.equal(prevented, false);
+  }
+});
+
+test("non-delta responses fall back to a document navigation", async () => {
+  const windowRef = createBrowserWindow(async () => new Response("<!doctype html><h1>404</h1>", {
+    status: 404,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  }));
+  const applied = [];
+  const navigation = createBrowserNavigation({
+    window: windowRef,
+    applyDelta: async (delta) => applied.push(delta),
+  });
+
+  await navigation.push("/missing");
+  await navigation.replace("/also-missing");
+
+  assert.deepEqual(applied, []);
+  assert.equal(windowRef.location.lastAssign, "http://example.test/missing");
+  assert.equal(windowRef.location.lastReplace, "http://example.test/also-missing");
+});
+
+test("malformed navigation payloads fall back to a document navigation", async () => {
+  const windowRef = createBrowserWindow(async () => new Response("not json", {
+    headers: { "content-type": "application/vnd.evolit.navigation+json" },
+  }));
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+
+  await navigation.push("/broken");
+
+  assert.equal(windowRef.location.lastAssign, "http://example.test/broken");
+});
+
+test("a client navigation saves the previous position and resets scroll for the new route", async () => {
+  const windowRef = createBrowserWindow(async () => ({
+    headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+    json: async () => ({ type: "route", url: "/catalog", route: {} }),
+  }));
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+
+  await navigation.push("/catalog");
+
+  assert.deepEqual(windowRef.history.lastReplace, "http://example.test/");
+  assert.deepEqual(windowRef.history.lastPush, "http://example.test/catalog");
+  assert.deepEqual(windowRef.lastScroll, { x: 0, y: 0 });
+});
+
+test("a history entry reuses its delta on popstate without a second request", async () => {
+  let requests = 0;
+  let applied = 0;
+  const windowRef = createBrowserWindow(async () => {
+    requests += 1;
+    return {
+      headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+      json: async () => ({
+        type: "route",
+        url: "/catalog",
+        route: { cachePolicy: { mode: "static" } },
+      }),
+    };
+  });
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => { applied += 1; } });
+
+  await navigation.push("/catalog");
+  const catalogState = windowRef.history.state;
+  windowRef.location.href = "http://example.test/catalog";
+  windowRef.dispatch("popstate", { state: catalogState });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(requests, 1);
+  assert.equal(applied, 2);
+});

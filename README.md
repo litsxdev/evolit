@@ -76,6 +76,70 @@ The current runtime is split into a few small layers:
 - `src/scaffold.js`: creates new site projects from templates
 - `src/cli.js`: framework entrypoint
 
+## Client Navigation
+
+Evolit hydrates a small browser router automatically for SSR page documents. It requests a route
+delta, replaces only the changed route segment, and keeps parent layouts mounted when possible.
+Plain `<a>` elements remain valid SSR HTML; same-origin links are progressively intercepted after
+hydration.
+
+Use `useNavigation()` inside a LitSX browser component for imperative navigation and pending UI:
+
+```jsx
+import { useNavigation } from "evolit/navigation";
+
+export default function CollectionControls() {
+  const navigation = useNavigation();
+
+  function changeSort(event) {
+    const searchParams = new URLSearchParams(window.location.search);
+    searchParams.delete("page");
+    searchParams.delete("skip");
+    searchParams.set("sort", event.target.value);
+    navigation.push(navigation.createHref("/explore/home-garden", searchParams));
+  }
+
+  return <select onChange={changeSort} disabled={navigation.status === "pending"}>…</select>;
+}
+```
+
+The hook returns `{ status, url, pendingUrl, error, push, replace, refresh, createHref }`:
+
+- `push(target)` adds a browser-history entry.
+- `replace(target)` updates the current entry, useful for visual-only query state.
+- `refresh()` bypasses the client delta cache for the current URL.
+- `createHref(pathname, searchParams)` creates a relative internal URL. It accepts standard
+  `URLSearchParams`, preserving repeated keys such as `facet=brand&facet=material`.
+
+`createHref` can also be imported directly from `evolit/navigation`; it is browser-free and safe to
+share with server-evaluated route code. `useNavigation()` itself is browser-only and must only run
+from a connected client component.
+
+### Progressive links and forms
+
+Links work without JavaScript. With JavaScript, Evolit intercepts ordinary same-origin left-clicks.
+Set `data-evolit-navigation="false"` on a link to keep native navigation.
+
+Internal `<form method="get">` elements are treated the same way: their successful controls become
+`URLSearchParams` and navigate through a delta. Without JavaScript the browser submits the exact
+same GET form normally. Evolit intentionally does not intercept `POST`, file-upload, external,
+targeted, or opted-out forms.
+
+### Navigation cache and document updates
+
+The browser cache is scoped to browser-history entries, not a global URL map. Going back or forward
+can reuse the delta for that exact entry; opening a new branch after going back discards its known
+forward branch. This avoids an unbounded catalog cache in a long-lived tab.
+
+- `dynamic` routes are never cached in the browser.
+- `revalidate` entries remain reusable only until their route TTL expires.
+- `static` entries remain reusable while their history entry exists in the current tab session.
+
+Each delta also synchronizes route `<title>`, route-specific `<head>` markup, managed styles and
+module preloads, `html`/`body` attributes, scroll position, hash targets, and focus. If a response
+cannot be represented as an Evolit delta —for example a 404 from another adapter— navigation falls
+back to a normal document load.
+
 ## Route Cache Policies
 
 Route modules can export a `routeConfig` object with a `cache` policy:

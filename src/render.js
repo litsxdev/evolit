@@ -1,10 +1,14 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { html } from "lit";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { renderToString } from "@litsx/ssr";
 import { discoverAppRouteHandlers, discoverAppRoutes, matchRoute } from "./app-discovery.js";
 import { importCompiledModule } from "./compiler.js";
 import { APP_DIRECTORY, MODULE_EXTENSIONS } from "./constants.js";
 import { pathExists } from "./fs-utils.js";
 import { mergeRouteConfig, normalizeRouteCachePolicy } from "./route-config.js";
+import { createRouteSegmentPlan, wrapRouteSegment } from "./route-segments.js";
 import {
   createRequestContext,
   applyRequestContextToResponse,
@@ -160,24 +164,275 @@ function getNearestBoundary(route, boundaryName) {
   return (route?.[boundaryName] ?? []).at(-1)?.module ?? null;
 }
 
-async function renderComponentTree(component, layoutComponents, requestContext, request, extraProps = {}) {
-  let renderedTree = await component({
-    params: requestContext.params,
-    searchParams: requestContext.searchParams,
-    request,
-    ...extraProps,
-  });
+async function renderComponentTree(
+  component,
+  layoutComponents,
+  requestContext,
+  request,
+  extraProps = {},
+  segments = [],
+) {
+  let renderedTree = wrapRouteSegment(
+    segments.at(-1),
+    await component({
+      params: requestContext.params,
+      searchParams: requestContext.searchParams,
+      request,
+      ...extraProps,
+    }),
+  );
 
   for (let index = layoutComponents.length - 1; index >= 0; index -= 1) {
-    renderedTree = await layoutComponents[index]({
+    renderedTree = wrapRouteSegment(segments[index], await layoutComponents[index]({
       params: requestContext.params,
       searchParams: requestContext.searchParams,
       request,
       children: renderedTree,
-    });
+    }));
   }
 
   return renderedTree;
+}
+
+function createSegmentChildrenMarker(segment) {
+  return `<!--evolit:children:${segment.id}-->`;
+}
+
+function combineSegmentSsrArtifacts(results) {
+  const roots = [];
+  const payload = { roots: {}, instances: {} };
+  const clientImports = new Set();
+  const headTags = new Set();
+
+  for (const result of results) {
+    if (!result) continue;
+    for (const clientImport of result.clientImports ?? []) clientImports.add(clientImport);
+    for (const headTag of result.headTags ?? []) headTags.add(headTag);
+    if (!result.hydrationData) continue;
+    roots.push(...(result.hydrationData.roots ?? []));
+    Object.assign(payload.roots, result.hydrationData.payload?.roots ?? {});
+    Object.assign(payload.instances, result.hydrationData.payload?.instances ?? {});
+  }
+
+  return {
+    clientImports: [...clientImports],
+    headTags: [...headTags],
+    hydrationData: roots.length > 0
+      ? { version: 1, roots, payload, clientImports: [...clientImports] }
+      : null,
+  };
+}
+
+function createTrackedRouteValues(values) {
+  const accessedKeys = new Set();
+  let accessedAll = false;
+  const value = new Proxy(values, {
+    get(target, property, receiver) {
+      if (typeof property === "string") accessedKeys.add(property);
+      return Reflect.get(target, property, receiver);
+    },
+    has(target, property) {
+      if (typeof property === "string") accessedKeys.add(property);
+      return Reflect.has(target, property);
+    },
+    ownKeys(target) {
+      accessedAll = true;
+      return Reflect.ownKeys(target);
+    },
+  });
+
+  return {
+    value,
+    profile() {
+      return accessedAll ? { all: true, keys: [] } : { all: false, keys: [...accessedKeys].sort() };
+    },
+  };
+}
+
+function createSegmentCacheKey(segment, idPrefix, profile, params, searchParams) {
+  const select = (values) => Object.fromEntries(
+    (profile.all ? Object.keys(values) : profile.keys)
+      .sort()
+      .map((key) => [key, values[key]]),
+  );
+  return JSON.stringify({
+    modulePath: segment.modulePath,
+    idPrefix,
+    params: select(params),
+    searchParams: select(searchParams),
+  });
+}
+
+function getSegmentCacheExpiry(cachePolicy) {
+  if (cachePolicy?.mode === "static") return Number.POSITIVE_INFINITY;
+  if (cachePolicy?.mode === "revalidate" && Number.isFinite(cachePolicy.ttlSeconds)) {
+    return Date.now() + (cachePolicy.ttlSeconds * 1_000);
+  }
+  return null;
+}
+
+function createSegmentRenderCache(projectRoot, onDevelopmentEvent) {
+  const entries = new Map();
+  const profiles = new Map();
+
+  return {
+    get(segment, idPrefix, params, searchParams) {
+      const profile = profiles.get(segment.modulePath);
+      if (!profile) {
+        onDevelopmentEvent?.({ type: "segment-cache-miss", modulePath: segment.modulePath, reason: "cold" });
+        return null;
+      }
+      const key = createSegmentCacheKey(segment, idPrefix, profile, params, searchParams);
+      const entry = entries.get(key);
+      if (!entry || entry.expiresAt <= Date.now()) {
+        if (entry) entries.delete(key);
+        onDevelopmentEvent?.({
+          type: "segment-cache-miss",
+          modulePath: segment.modulePath,
+          reason: entry ? "expired" : "key-change",
+        });
+        return null;
+      }
+      onDevelopmentEvent?.({ type: "segment-cache-hit", modulePath: segment.modulePath });
+      return entry.result;
+    },
+    set(segment, idPrefix, params, searchParams, profile, result, cachePolicy) {
+      const expiresAt = getSegmentCacheExpiry(cachePolicy);
+      if (expiresAt == null) return;
+      profiles.set(segment.modulePath, profile);
+      const key = createSegmentCacheKey(segment, idPrefix, profile, params, searchParams);
+      entries.set(key, { result, expiresAt, modulePath: segment.modulePath });
+      if (entries.size > 256) entries.delete(entries.keys().next().value);
+    },
+    invalidate(changedPaths = null) {
+      if (!Array.isArray(changedPaths) || changedPaths.length === 0) {
+        const entryCount = entries.size;
+        entries.clear();
+        profiles.clear();
+        return entryCount;
+      }
+      const normalizedPaths = new Set(changedPaths.map((changedPath) => path.resolve(changedPath)));
+      const hasSharedChange = [...normalizedPaths].some((changedPath) =>
+        !path.relative(projectRoot, changedPath).startsWith(`app${path.sep}`),
+      );
+      if (hasSharedChange) {
+        const entryCount = entries.size;
+        entries.clear();
+        profiles.clear();
+        return entryCount;
+      }
+      let entryCount = 0;
+      for (const [key, entry] of entries) {
+        if (normalizedPaths.has(path.resolve(projectRoot, entry.modulePath))) {
+          entries.delete(key);
+          entryCount += 1;
+        }
+      }
+      for (const modulePath of profiles.keys()) {
+        if (normalizedPaths.has(path.resolve(projectRoot, modulePath))) profiles.delete(modulePath);
+      }
+      return entryCount;
+    },
+    clear() {
+      const entryCount = entries.size;
+      entries.clear();
+      profiles.clear();
+      return entryCount;
+    },
+  };
+}
+
+/**
+ * Renders route segments separately, then composes layout shells through an
+ * internal children marker. Authored layouts still receive a normal Lit
+ * renderable and can project children any number of times.
+ */
+async function renderSegmentedComponentTree(
+  component,
+  layoutComponents,
+  requestContext,
+  request,
+  extraProps = {},
+  segments = [],
+  options = {},
+) {
+  if (segments.length !== layoutComponents.length + 1) return null;
+  const results = [];
+
+  async function renderSegmentAt(index, projectionPath) {
+    const segment = segments[index];
+    const idPrefix = `${segment.id}-p${projectionPath.join("-") || "0"}`;
+
+    if (index === layoutComponents.length) {
+      const pageValue = await component({
+        params: requestContext.params,
+        searchParams: requestContext.searchParams,
+        request,
+        ...extraProps,
+      });
+      const pageResult = await renderToString(wrapRouteSegment(segment, pageValue), {
+        assetResolver: options.assetResolver,
+        context: { idPrefix },
+      });
+      results.push(pageResult);
+      return pageResult.html;
+    }
+
+    const childrenMarker = createSegmentChildrenMarker(segment);
+    let layoutResult = options.segmentCache?.get(
+      segment,
+      idPrefix,
+      requestContext.params,
+      requestContext.searchParams,
+    ) ?? null;
+    if (!layoutResult) {
+      const trackedParams = createTrackedRouteValues(requestContext.params);
+      const trackedSearchParams = createTrackedRouteValues(requestContext.searchParams);
+      const didUseDynamicRequestData = requestContext.didUseDynamicRequestData;
+      const layoutValue = await layoutComponents[index]({
+        params: trackedParams.value,
+        searchParams: trackedSearchParams.value,
+        request,
+        children: html`${unsafeHTML(childrenMarker)}`,
+      });
+      layoutResult = await renderToString(wrapRouteSegment(segment, layoutValue), {
+        assetResolver: options.assetResolver,
+        context: { idPrefix },
+      });
+      if (!didUseDynamicRequestData && !requestContext.didUseDynamicRequestData) {
+        options.segmentCache?.set(
+          segment,
+          idPrefix,
+          requestContext.params,
+          requestContext.searchParams,
+          {
+            all: trackedParams.profile().all || trackedSearchParams.profile().all,
+            keys: [...new Set([
+              ...trackedParams.profile().keys,
+              ...trackedSearchParams.profile().keys,
+            ])].sort(),
+          },
+          layoutResult,
+          options.cachePolicy,
+        );
+      }
+    }
+    results.push(layoutResult);
+    const projectionCount = layoutResult.html.split(childrenMarker).length - 1;
+    if (projectionCount === 0) return null;
+
+    const childHtml = [];
+    for (let projection = 0; projection < projectionCount; projection += 1) {
+      const renderedChild = await renderSegmentAt(index + 1, [...projectionPath, projection]);
+      if (renderedChild == null) return null;
+      childHtml.push(renderedChild);
+    }
+    let projection = 0;
+    return layoutResult.html.replaceAll(childrenMarker, () => childHtml[projection++]);
+  }
+
+  const tree = await renderSegmentAt(0, []);
+  return tree == null ? null : { tree, ssrArtifacts: combineSegmentSsrArtifacts(results) };
 }
 
 export async function resolveStaticParamsForRoute(route, projectRoot, mode = "production", options = {}) {
@@ -224,6 +479,8 @@ export async function resolveStaticParamsForRoute(route, projectRoot, mode = "pr
 export async function createRouteResolver(projectRoot, mode = "development", resolverOptions = {}) {
   const routes = await discoverAppRoutes(projectRoot);
   const routeHandlers = await discoverAppRouteHandlers(projectRoot);
+  const segmentRenderCache = resolverOptions.segmentRenderCache
+    ?? createSegmentRenderCache(projectRoot, resolverOptions.onDevelopmentEvent);
   const rootLayoutPath = await findAppModule(projectRoot, "layout");
   const rootNotFoundPath = await findAppModule(projectRoot, "not-found");
 
@@ -439,8 +696,31 @@ export async function createRouteResolver(projectRoot, mode = "development", res
     });
 
     try {
-      const tree = await runWithRequestContext(requestContext, () =>
-        renderComponentTree(pageComponent, layoutComponents, requestContext, requestContext.routeRequest),
+      const segments = createRouteSegmentPlan(match.route, projectRoot);
+      const segmentedRender = await runWithRequestContext(requestContext, () =>
+        renderSegmentedComponentTree(
+          pageComponent,
+          layoutComponents,
+          requestContext,
+          requestContext.routeRequest,
+          {},
+          segments,
+          {
+            assetResolver: resolverOptions.assetResolver,
+            segmentCache: segmentRenderCache,
+            cachePolicy,
+          },
+        ),
+      );
+      const tree = segmentedRender?.tree ?? await runWithRequestContext(requestContext, () =>
+        renderComponentTree(
+          pageComponent,
+          layoutComponents,
+          requestContext,
+          requestContext.routeRequest,
+          {},
+          segments,
+        ),
       );
       const contextResponse = getRequestContextResponse(requestContext);
 
@@ -453,6 +733,8 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         params: match.params,
         searchParams: requestContext.searchParams,
         routeConfig,
+        segments,
+        ssrArtifacts: segmentedRender?.ssrArtifacts ?? null,
         cachePolicy: contextResponse.didUseDynamicRequestData ? { mode: "dynamic" } : cachePolicy,
         cacheKey: createRequestCacheKey(url),
         responseHeaders: contextResponse.headers,
@@ -494,10 +776,18 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         route: match.route,
         reportRouteError: resolverOptions.reportRouteError,
       });
+      const segments = createRouteSegmentPlan(match.route, projectRoot, {
+        boundaryModule: errorBoundaryPath,
+      });
       const tree = await runWithRequestContext(requestContext, () =>
-        renderComponentTree(boundary.component, layoutComponents, requestContext, requestContext.routeRequest, {
-          error: boundaryError,
-        }),
+        renderComponentTree(
+          boundary.component,
+          layoutComponents,
+          requestContext,
+          requestContext.routeRequest,
+          { error: boundaryError },
+          segments,
+        ),
       );
       const contextResponse = getRequestContextResponse(requestContext);
       return {
@@ -505,6 +795,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         status: 500,
         tree,
         boundaryModule: errorBoundaryPath,
+        segments,
         metadata: mergeMetadata([...layoutModules, boundary.moduleRecord]),
         route: match.route,
         params: match.params,
@@ -526,5 +817,9 @@ export async function createRouteResolver(projectRoot, mode = "development", res
     async resolveRequest(request, routePolicyResult = null) {
       return resolveMatchedRequest(request, { renderTree: true, routePolicyResult });
     },
+    invalidateSegmentCache(changedPaths = null) {
+      return segmentRenderCache.invalidate(changedPaths);
+    },
+    segmentRenderCache,
   };
 }

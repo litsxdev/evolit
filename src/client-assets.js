@@ -3,6 +3,7 @@ import { existsSync, realpathSync } from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import MagicString from "magic-string";
 import { rollup } from "rollup";
 import { nodeResolve } from "@rollup/plugin-node-resolve";
@@ -24,10 +25,12 @@ const MODULE_SPECIFIER_PATTERN =
   /\b(?:import|export)\s*[^"']*?from\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 
 const requireFromHere = createRequire(import.meta.url);
+const EVOLIT_NAVIGATION_BROWSER_ENTRY = fileURLToPath(new URL("./navigation-client.js", import.meta.url));
 const SHARED_VENDOR_SPECIFIERS = [
   "@litsx/core",
   "@litsx/core/elements",
   "@litsx/ssr/hydration",
+  "evolit/navigation",
   "lit",
 ];
 const browserSpecifierFilePathCache = new Map();
@@ -516,6 +519,15 @@ export async function buildSharedVendorRuntime(
     const bundle = await rollup({
       input: inputEntries,
       plugins: [
+        {
+          name: "evolit-browser-exports",
+          resolveId(source) {
+            // A consuming application does not normally have an `evolit`
+            // package nested in its node_modules. Resolve Evolit's own
+            // browser-only public entry before node-resolve marks it external.
+            return source === "evolit/navigation" ? EVOLIT_NAVIGATION_BROWSER_ENTRY : null;
+          },
+        },
         nodeResolve({
           browser: true,
           exportConditions: ["browser", "import", "default"],
@@ -1084,6 +1096,7 @@ export function createHydrationBootstrap({
   hydrationData,
   assetResolver,
   hydrationModuleUrl = "@litsx/ssr/hydration",
+  navigationModuleUrl = null,
 }) {
   const normalizedHydrationData = normalizeHydrationDataForClient(hydrationData);
   const rootModuleUrls = [...new Set([
@@ -1113,6 +1126,7 @@ export function createHydrationBootstrap({
 
   const source = `
 import { hydratePage, registerHydrationModules } from ${JSON.stringify(hydrationModuleUrl)};
+${navigationModuleUrl ? `import { getNavigation } from ${JSON.stringify(navigationModuleUrl)};` : ""}
 
 await hydratePage({
   clientImports: ${JSON.stringify(clientImports)},
@@ -1120,6 +1134,7 @@ await hydratePage({
 ${moduleLoaders}
   ])
 });
+${navigationModuleUrl ? "getNavigation();" : ""}
 `;
 
   return escapeInlineScriptText(source);

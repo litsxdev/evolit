@@ -37,6 +37,15 @@ export function createDevelopmentEventReporter() {
       case "client-assets-cache-hit":
         console.log(`${terminal.cyan("[evolit]")} ${terminal.blue("●")} Client assets served from cache.`);
         break;
+      case "segment-cache-hit":
+        console.log(`${terminal.cyan("[evolit]")} ${terminal.blue("●")} Reused route segment ${terminal.dim(event.modulePath)}.`);
+        break;
+      case "segment-cache-miss":
+        console.log(`${terminal.cyan("[evolit]")} ${terminal.magenta("○")} Rendering route segment ${terminal.dim(event.modulePath)} ${terminal.dim(`(${event.reason})`)}.`);
+        break;
+      case "segment-cache-invalidated":
+        console.log(`${terminal.cyan("[evolit]")} ${terminal.yellow("△")} Invalidated ${event.entryCount} cached route segments.`);
+        break;
       case "invalidated":
         console.log(
           `${terminal.cyan("[evolit]")} ${terminal.yellow("△")} Source change detected${event.changedPathCount == null ? "" : ` (${event.changedPathCount} files)`}; invalidated ${event.affectedClientEntryCount} client entries.`,

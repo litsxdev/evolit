@@ -243,6 +243,12 @@ before(async () => {
   await fs.mkdir(path.join(fixtureRoot, "app", "explore", "[...slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "optional", "[[...slug]]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "lit"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "multi"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "cached-layout", "a"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "cached-layout", "b"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "request-layout", "a"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "request-layout", "b"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "param-layout", "[slug]"), { recursive: true });
   await fs.writeFile(
     path.join(fixtureRoot, "app", "cached-static", "page.litsx"),
     createCounterPageSource(
@@ -345,6 +351,109 @@ before(async () => {
       "LitPage.elements = {",
       '  "product-card": ProductCard,',
       "};",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "multi", "layout.litsx"),
+    [
+      "export default async function MultiLayout({ children }) {",
+      "  return <section data-route-layout=\"multi\"><aside>{children}</aside><main>{children}</main></section>;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "multi", "page.litsx"),
+    [
+      'import FeatureCard from "../components/feature-card.litsx";',
+      "",
+      "export default async function MultiPage() {",
+      '  return <FeatureCard title="Repeated projection" body="Rendered twice by the layout." />;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "cached-layout", "layout.litsx"),
+    [
+      "globalThis.__EVOLIT_LAYOUT_RENDER_COUNT ??= 0;",
+      "",
+      "export default async function CachedLayout({ children }) {",
+      "  globalThis.__EVOLIT_LAYOUT_RENDER_COUNT += 1;",
+      "  return <section data-cached-layout={String(globalThis.__EVOLIT_LAYOUT_RENDER_COUNT)}>{children}</section>;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "cached-layout", "a", "page.litsx"),
+    [
+      "export default async function CachedLayoutPageA() {",
+      '  return <main data-cached-layout-page="a">A</main>; ',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "cached-layout", "b", "page.litsx"),
+    [
+      "export default async function CachedLayoutPageB() {",
+      '  return <main data-cached-layout-page="b">B</main>; ',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "request-layout", "layout.litsx"),
+    [
+      "globalThis.__EVOLIT_REQUEST_LAYOUT_RENDER_COUNT ??= 0;",
+      "",
+      "export default async function RequestLayout({ children, request }) {",
+      "  globalThis.__EVOLIT_REQUEST_LAYOUT_RENDER_COUNT += 1;",
+      "  return <section data-request-layout={new URL(request.url).pathname} data-request-layout-count={String(globalThis.__EVOLIT_REQUEST_LAYOUT_RENDER_COUNT)}>{children}</section>;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  for (const page of ["a", "b"]) {
+    await fs.writeFile(
+      path.join(fixtureRoot, "app", "request-layout", page, "page.litsx"),
+      [
+        `export default async function RequestLayoutPage${page.toUpperCase()}() {`,
+        `  return <main data-request-layout-page="${page}">${page.toUpperCase()}</main>;`,
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+  }
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "param-layout", "[slug]", "layout.litsx"),
+    [
+      "globalThis.__EVOLIT_PARAM_LAYOUT_RENDER_COUNT ??= 0;",
+      "",
+      "export default async function ParamLayout({ children, params, searchParams }) {",
+      "  globalThis.__EVOLIT_PARAM_LAYOUT_RENDER_COUNT += 1;",
+      "  return <section data-param-layout={String(params.slug)} data-param-layout-view={String(searchParams.view ?? \"default\")} data-param-layout-count={String(globalThis.__EVOLIT_PARAM_LAYOUT_RENDER_COUNT)}>{children}</section>;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "param-layout", "[slug]", "page.litsx"),
+    [
+      "export default async function ParamLayoutPage({ params }) {",
+      "  return <main data-param-layout-page={String(params.slug)}>{params.slug}</main>;",
+      "}",
       "",
     ].join("\n"),
     "utf8",
@@ -457,14 +566,41 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   assert.match(html, /await hydratePage\(\{/);
   assert.match(html, /clientImports: \["\/_evolit\/static\/app\/components\/feature-card\.mjs"/);
   assert.match(html, /\/_evolit\/static\/app\/components\/feature-card\.mjs/);
-  assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/components\/card-accent\.[a-f0-9]{8}\.css">/);
-  assert.ok(html.includes(`<link rel="stylesheet" href="${globalCssUrl}">`));
+  assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/components\/card-accent\.[a-f0-9]{8}\.css" data-evolit-route-asset="style">/);
+  assert.ok(html.includes(`<link rel="stylesheet" href="${globalCssUrl}" data-evolit-route-asset="style">`));
   assert.match(html, /id="__LITSX_HYDRATION__"/);
+  assert.match(html, /<!--evolit:segment:start:layout-[A-Za-z0-9_-]+-->/);
+  assert.match(html, /<!--evolit:segment:start:page-[A-Za-z0-9_-]+-->/);
+  assert.match(html, /id="__EVOLIT_ROUTE__"/);
+  assert.match(html, /"kind":"layout"/);
+  assert.match(html, /"kind":"page"/);
   assert.match(html, /data-evolit-live-reload/);
   assert.match(html, /new WebSocket/);
-  assert.match(html, /data-litsx-root="litsx-root-0"/);
+  assert.match(html, /data-litsx-root="page-[A-Za-z0-9_-]+-p0-root-0"/);
   assert.doesNotMatch(html, /__evolit\/hydration/);
   assert.doesNotMatch(html, /customElements\.define/);
+});
+
+test("dev server returns route segment deltas from the canonical SSR document", async () => {
+  const response = await fetch(`${baseUrl}/`, {
+    headers: { accept: "application/vnd.evolit.navigation+json" },
+  });
+  const delta = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /application\/vnd\.evolit\.navigation\+json/);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.match(response.headers.get("vary") ?? "", /accept/i);
+  assert.equal(delta.version, 1);
+  assert.equal(delta.type, "route");
+  assert.equal(delta.url, "/");
+  assert.equal(delta.route.pathname, "/");
+  assert.deepEqual(delta.route.cachePolicy, { mode: "revalidate", ttlSeconds: 60 });
+  assert.ok(delta.headAssets.styles.some((href) => href.includes("app/global.")));
+  assert.ok(delta.headAssets.styles.some((href) => href.includes("card-accent.")));
+  assert.ok(delta.route.segments.some((segment) => segment.kind === "layout"));
+  assert.ok(delta.route.segments.some((segment) => segment.kind === "page"));
+  assert.ok(delta.route.segments.every((segment) => Array.isArray(segment.projections)));
 });
 
 test("dev server accepts live reload WebSocket connections", async () => {
@@ -482,11 +618,91 @@ test("dev server renders native Lit page and layout modules", async () => {
   assert.match(html, /data-route-layout="lit"/);
   assert.match(html, /data-route="lit"/);
   assert.match(html, /Native Lit route/);
-  assert.match(html, /<product-card\b[^>]*data-litsx-root="litsx-root-0"/);
+  assert.match(html, /<product-card\b[^>]*data-litsx-root="page-[A-Za-z0-9_-]+-p0-0-root-0"/);
   assert.match(html, /data-product-card[\s\S]*?Field Guide/);
   assert.match(html, /"moduleId":"\/app\/lit\/product-card\.js"/);
   assert.match(html, /\/_evolit\/static\/app\/lit\/product-card\.mjs/);
   assert.doesNotMatch(html, /customElements\.define/);
+});
+
+test("dev server composes every repeated children projection with distinct hydration roots", async () => {
+  const response = await fetch(`${baseUrl}/multi`);
+  const html = await response.text();
+  const hydration = JSON.parse(html.match(/<script type="application\/json" id="__LITSX_HYDRATION__">([\s\S]*?)<\/script>/)?.[1] ?? "null");
+
+  assert.equal(response.status, 200);
+  assert.match(html, /data-route-layout="multi"/);
+  assert.equal((html.match(/<feature-card\b/g) ?? []).length, 2);
+  assert.equal(hydration.roots.length, 2);
+  assert.notEqual(hydration.roots[0].id, hydration.roots[1].id);
+  assert.match(hydration.roots[0].id, /-p0-0-root-0$/);
+  assert.match(hydration.roots[1].id, /-p0-1-root-0$/);
+
+  const deltaResponse = await fetch(`${baseUrl}/multi`, {
+    headers: { accept: "application/vnd.evolit.navigation+json" },
+  });
+  const delta = await deltaResponse.json();
+  const pageSegment = delta.route.segments.find((segment) => segment.kind === "page");
+  assert.equal(pageSegment.projections.length, 2);
+});
+
+test("dev server reuses a layout shell across cacheable sibling pages", async () => {
+  const first = await fetch(`${baseUrl}/cached-layout/a`);
+  const second = await fetch(`${baseUrl}/cached-layout/b`);
+  const firstHtml = await first.text();
+  const secondHtml = await second.text();
+
+  assert.match(firstHtml, /data-cached-layout="1"/);
+  assert.match(secondHtml, /data-cached-layout="1"/);
+  assert.match(secondHtml, /data-cached-layout-page="b"/);
+});
+
+test("dev invalidation preserves unaffected cached layout shells", async () => {
+  const pagePath = path.join(fixtureRoot, "app", "cached-layout", "a", "page.litsx");
+  const originalSource = await fs.readFile(pagePath, "utf8");
+  const eventCount = developmentEvents.length;
+  await fs.writeFile(pagePath, originalSource.replace(">A</main>", ">A changed</main>"), "utf8");
+
+  await waitForResponse(
+    () => fetch(`${baseUrl}/cached-layout/a?invalidate=1`),
+    ({ body }) => body.includes("A changed"),
+  );
+  const siblingResponse = await fetch(`${baseUrl}/cached-layout/b?after-invalidation=1`);
+  const siblingHtml = await siblingResponse.text();
+  const invalidationEvents = developmentEvents.slice(eventCount);
+
+  assert.match(siblingHtml, /data-cached-layout="1"/);
+  assert.ok(invalidationEvents.some((event) => event.type === "segment-cache-invalidated"));
+});
+
+test("dev server does not cache a layout that reads the request", async () => {
+  const first = await fetch(`${baseUrl}/request-layout/a`);
+  const second = await fetch(`${baseUrl}/request-layout/b`);
+  const firstHtml = await first.text();
+  const secondHtml = await second.text();
+
+  assert.match(firstHtml, /data-request-layout="\/request-layout\/a"/);
+  assert.match(firstHtml, /data-request-layout-count="1"/);
+  assert.match(secondHtml, /data-request-layout="\/request-layout\/b"/);
+  assert.match(secondHtml, /data-request-layout-count="2"/);
+});
+
+test("dev server keys cached shells by the params and query values read by a layout", async () => {
+  const first = await fetch(`${baseUrl}/param-layout/a?view=grid`);
+  const changedParam = await fetch(`${baseUrl}/param-layout/b?view=grid`);
+  const changedQuery = await fetch(`${baseUrl}/param-layout/a?view=list`);
+  const restored = await fetch(`${baseUrl}/param-layout/a?view=grid`);
+  const [firstHtml, changedParamHtml, changedQueryHtml, restoredHtml] = await Promise.all([
+    first.text(),
+    changedParam.text(),
+    changedQuery.text(),
+    restored.text(),
+  ]);
+
+  assert.match(firstHtml, /data-param-layout-count="1"/);
+  assert.match(changedParamHtml, /data-param-layout-count="2"/);
+  assert.match(changedQueryHtml, /data-param-layout-count="3"/);
+  assert.match(restoredHtml, /data-param-layout-count="1"/);
 });
 
 test("dev server serves imported client css assets", async () => {
@@ -542,7 +758,7 @@ test("non-hydrated route omits the generated hydration bootstrap", async () => {
   assert.equal(response.status, 200);
   assert.match(html, /<title>About \| evolit<\/title>/);
   assert.doesNotMatch(html, /<script type="importmap">/);
-  assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/global\.[a-f0-9]{8}\.css">/);
+  assert.match(html, /<link rel="stylesheet" href="\/_evolit\/static\/app\/global\.[a-f0-9]{8}\.css" data-evolit-route-asset="style">/);
   assert.doesNotMatch(html, /registerHydrationModules/);
   assert.doesNotMatch(html, /await hydratePage\(\)/);
   assert.doesNotMatch(html, /id="__LITSX_HYDRATION__"/);
@@ -630,6 +846,24 @@ test("dev server injects the catch-all route entry into LitSX hydration metadata
     assert.ok(hydrationData.clientImports.includes(routeEntry.publicUrl));
     assert.match(html, new RegExp(routeEntry.publicUrl.replaceAll(".", "\\.")));
   }
+});
+
+test("dev server returns navigation deltas for catch-all routes and repeated query params", async () => {
+  const pathname = "/explore/home-garden/furniture?facet=brand&facet=material&sort=price";
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    headers: { accept: "application/vnd.evolit.navigation+json" },
+  });
+  const delta = await response.json();
+  const pageSegment = delta.route.segments.find((segment) => segment.kind === "page");
+
+  assert.equal(response.status, 200);
+  assert.equal(delta.url, pathname);
+  assert.equal(delta.route.pathname, "/explore/home-garden/furniture");
+  assert.ok(pageSegment);
+  assert.equal(pageSegment.projections.length, 1);
+  assert.match(pageSegment.projections[0].html, /home-garden/);
+  assert.match(pageSegment.projections[0].html, /furniture/);
+  assert.ok(delta.hydrationData.clientImports.some((specifier) => specifier.includes("app/explore/")));
 });
 
 test("dev server resolves optional catch-all routes with and without trailing segments", async () => {
