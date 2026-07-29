@@ -15,6 +15,7 @@ const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 let fixtureRoot;
 let server;
 let baseUrl;
+let unmanagedSharedPath;
 const developmentEvents = [];
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 const cardBadgeSpecialPngFile = "card badge@2x.png";
@@ -368,6 +369,56 @@ before(async () => {
     "utf8",
   );
 
+  await fs.mkdir(path.join(fixtureRoot, "src"), { recursive: true });
+  await fs.writeFile(
+    path.join(fixtureRoot, "src", "shared.litsx"),
+    'export const sharedMessage = "shared source version one";\n',
+    "utf8",
+  );
+  await fs.mkdir(path.join(fixtureRoot, "app", "watcher-app"), { recursive: true });
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "watcher-app", "page.litsx"),
+    [
+      'export const routeConfig = { cache: "static" };',
+      "",
+      "export default function WatcherAppPage() {",
+      '  return "<main>app watcher version one</main>";',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.mkdir(path.join(fixtureRoot, "app", "watcher-source"), { recursive: true });
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "watcher-source", "page.litsx"),
+    [
+      'import { sharedMessage } from "../../src/shared.litsx";',
+      'export const routeConfig = { cache: "static" };',
+      "",
+      "export default function WatcherSourcePage() {",
+      '  return `<main>${sharedMessage}</main>`;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  unmanagedSharedPath = path.join(path.dirname(fixtureRoot), "unmanaged-shared.litsx");
+  await fs.writeFile(unmanagedSharedPath, 'export const unmanagedMessage = "unmanaged version one";\n', "utf8");
+  await fs.mkdir(path.join(fixtureRoot, "app", "watcher-unmanaged"), { recursive: true });
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "watcher-unmanaged", "page.litsx"),
+    [
+      'import { unmanagedMessage } from "../../../unmanaged-shared.litsx";',
+      'export const routeConfig = { cache: "static" };',
+      "",
+      "export default function WatcherUnmanagedPage() {",
+      '  return `<main>${unmanagedMessage}</main>`;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
   const port = await getAvailablePort();
   server = await createDevServer(fixtureRoot, {
     port,
@@ -701,4 +752,75 @@ test("dev server discovers new routes and invalidates cached route responses", a
     () => fetch(`${baseUrl}/watcher-route`),
     ({ response, body }) => response.status === 200 && body.includes("watcher version two"),
   );
+});
+
+test("dev server invalidates routes when an app source changes", async () => {
+  const pagePath = path.join(fixtureRoot, "app", "watcher-app", "page.litsx");
+  const invalidationCount = developmentEvents.filter((event) => event.type === "invalidated").length;
+
+  const initialResponse = await fetch(`${baseUrl}/watcher-app`);
+  assert.match(await initialResponse.text(), /app watcher version one/);
+
+  await fs.writeFile(
+    pagePath,
+    [
+      'export const routeConfig = { cache: "static" };',
+      "",
+      "export default function WatcherAppPage() {",
+      '  return "<main>app watcher version two</main>";',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await waitForResponse(
+    () => fetch(`${baseUrl}/watcher-app`),
+    ({ response, body }) => response.status === 200 && body.includes("app watcher version two"),
+  );
+  assert.ok(developmentEvents.filter((event) => event.type === "invalidated").length > invalidationCount);
+});
+
+test("dev server invalidates routes when an imported project src module changes", async () => {
+  const sharedPath = path.join(fixtureRoot, "src", "shared.litsx");
+  const invalidationCount = developmentEvents.filter((event) => event.type === "invalidated").length;
+  const liveReloadSocket = await openLiveReloadSocket();
+  const liveReloadEvent = waitForLiveReload(liveReloadSocket);
+
+  const initialResponse = await fetch(`${baseUrl}/watcher-source`);
+  assert.match(await initialResponse.text(), /shared source version one/);
+
+  await fs.writeFile(sharedPath, 'export const sharedMessage = "shared source version two";\n', "utf8");
+
+  await waitForResponse(
+    () => fetch(`${baseUrl}/watcher-source`),
+    ({ response, body }) => response.status === 200 && body.includes("shared source version two"),
+  );
+  await liveReloadEvent;
+  liveReloadSocket.close();
+  assert.ok(developmentEvents.filter((event) => event.type === "invalidated").length > invalidationCount);
+});
+
+test("dev server ignores generated Evolit output changes", async () => {
+  const generatedPath = path.join(fixtureRoot, ".evolit", "dev", "watcher-ignore.txt");
+  const invalidationCount = developmentEvents.filter((event) => event.type === "invalidated").length;
+
+  await fs.writeFile(generatedPath, "generated\n", "utf8");
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  assert.equal(developmentEvents.filter((event) => event.type === "invalidated").length, invalidationCount);
+});
+
+test("dev server does not watch unmanaged modules outside the project root", async () => {
+  const invalidationCount = developmentEvents.filter((event) => event.type === "invalidated").length;
+
+  const initialResponse = await fetch(`${baseUrl}/watcher-unmanaged`);
+  assert.match(await initialResponse.text(), /unmanaged version one/);
+
+  await fs.writeFile(unmanagedSharedPath, 'export const unmanagedMessage = "unmanaged version two";\n', "utf8");
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  const response = await fetch(`${baseUrl}/watcher-unmanaged`);
+  assert.match(await response.text(), /unmanaged version one/);
+  assert.equal(developmentEvents.filter((event) => event.type === "invalidated").length, invalidationCount);
 });

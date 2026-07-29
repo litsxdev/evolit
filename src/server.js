@@ -5,7 +5,7 @@ import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { loadEvolitConfig } from "./config.js";
 import { createDeploymentRuntime } from "./deployment-runtime.js";
-import { APP_DIRECTORY, BUILD_DIRECTORY, INTERNAL_DIRECTORY, MANIFEST_FILENAME } from "./constants.js";
+import { BUILD_DIRECTORY, INTERNAL_DIRECTORY, MANIFEST_FILENAME } from "./constants.js";
 import { normalizeClientAssetManifest } from "./client-assets.js";
 import { pathExists, readJson } from "./fs-utils.js";
 import { createDefaultRouteCacheKey, resolveResponseCacheRuntime } from "./response-cache.js";
@@ -67,22 +67,26 @@ function createLiveReloadSnippet() {
   return `<script data-evolit-live-reload>const evolitProtocol=window.location.protocol==="https:"?"wss:":"ws:";const evolitSocket=new WebSocket(evolitProtocol+"//"+window.location.host+${JSON.stringify(LIVE_RELOAD_PATHNAME)});evolitSocket.addEventListener("message",({data})=>{if(data==="reload")window.location.reload()});</script>`;
 }
 
-async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
+async function createRecursiveDirectoryWatcher(rootDirectory, onChange, options = {}) {
   const watchers = new Map();
+  const shouldIgnorePath = options.shouldIgnorePath ?? (() => false);
   let closed = false;
 
   async function watchDirectory(directory) {
-    if (closed || watchers.has(directory)) {
+    if (closed || watchers.has(directory) || shouldIgnorePath(directory)) {
       return;
     }
 
     let watcher;
     try {
       watcher = watch(directory, (eventType, fileName) => {
-        onChange(fileName ? path.join(directory, String(fileName)) : null);
+        const changedPath = fileName ? path.join(directory, String(fileName)) : null;
+        if (!changedPath || !shouldIgnorePath(changedPath)) {
+          onChange(changedPath);
+        }
 
-        if (eventType === "rename" && fileName) {
-          void watchNewDirectory(path.join(directory, fileName));
+        if (eventType === "rename" && changedPath && !shouldIgnorePath(changedPath)) {
+          void watchNewDirectory(changedPath);
         }
       });
     } catch (error) {
@@ -114,6 +118,10 @@ async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
   }
 
   async function watchNewDirectory(candidate) {
+    if (shouldIgnorePath(candidate)) {
+      return;
+    }
+
     try {
       const stat = await fs.stat(candidate);
       if (stat.isDirectory()) {
@@ -136,6 +144,29 @@ async function createRecursiveDirectoryWatcher(rootDirectory, onChange) {
       }
       watchers.clear();
     },
+  };
+}
+
+function createProjectWatchIgnorePath(projectRoot) {
+  const ignoredDirectoryNames = new Set([
+    "node_modules",
+    INTERNAL_DIRECTORY,
+    ".git",
+  ]);
+
+  return (candidate) => {
+    const relativePath = path.relative(projectRoot, candidate);
+    if (
+      relativePath === ".."
+      || relativePath.startsWith(`..${path.sep}`)
+      || path.isAbsolute(relativePath)
+    ) {
+      return true;
+    }
+
+    return relativePath
+      .split(path.sep)
+      .some((segment) => ignoredDirectoryNames.has(segment));
   };
 }
 
@@ -215,8 +246,9 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
 
   const watcher = mode === "development"
     ? await createRecursiveDirectoryWatcher(
-      path.join(projectRoot, APP_DIRECTORY),
+      projectRoot,
       scheduleDevelopmentInvalidation,
+      { shouldIgnorePath: createProjectWatchIgnorePath(projectRoot) },
     )
     : null;
 
