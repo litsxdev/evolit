@@ -81,11 +81,12 @@ export function createRouteSegmentPayload(routeResult) {
           : {}),
       }
       : null,
-    segments: segments.map(({ id, kind, depth, modulePath }) => ({
+    segments: segments.map(({ id, kind, depth, modulePath, inputKey }) => ({
       id,
       kind,
       depth,
       modulePath,
+      ...(typeof inputKey === "string" ? { inputKey } : {}),
     })),
   };
 }

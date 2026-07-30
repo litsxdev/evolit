@@ -165,6 +165,53 @@ test("malformed navigation payloads fall back to a document navigation", async (
   assert.equal(windowRef.location.lastAssign, "http://example.test/broken");
 });
 
+test("a projection-cardinality mismatch falls back before mutating the live document", async () => {
+  const windowRef = createBrowserWindow(async () => ({
+    headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+    json: async () => ({ type: "route", url: "/catalog", route: {} }),
+  }));
+  let applied = false;
+  const navigation = createBrowserNavigation({
+    window: windowRef,
+    applyDelta: async () => {
+      applied = true;
+      return false;
+    },
+  });
+
+  await navigation.push("/catalog");
+
+  assert.equal(applied, true);
+  assert.equal(windowRef.location.lastAssign, "http://example.test/catalog");
+  assert.equal(windowRef.history.lastPush, undefined);
+});
+
+test("a navigation redirect is followed client-side without a document reload", async () => {
+  const requested = [];
+  const windowRef = createBrowserWindow(async (href) => {
+    const pathname = new URL(href).pathname;
+    requested.push(pathname);
+    return {
+      headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+      json: async () => pathname === "/old"
+        ? { type: "redirect", location: "/new" }
+        : { type: "route", url: "/new", route: {} },
+    };
+  });
+  const applied = [];
+  const navigation = createBrowserNavigation({
+    window: windowRef,
+    applyDelta: async (delta) => { applied.push(delta.url); },
+  });
+
+  await navigation.push("/old");
+
+  assert.deepEqual(requested, ["/old", "/new"]);
+  assert.deepEqual(applied, ["/new"]);
+  assert.equal(windowRef.location.lastAssign, undefined);
+  assert.equal(windowRef.history.lastReplace, "http://example.test/new");
+});
+
 test("a client navigation saves the previous position and resets scroll for the new route", async () => {
   const windowRef = createBrowserWindow(async () => ({
     headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),

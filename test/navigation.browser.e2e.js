@@ -31,6 +31,17 @@ async function runCli(projectRoot, ...args) {
   if (code !== 0) throw new Error(`evolit ${args.join(" ")} failed:\n${output}`);
 }
 
+async function navigate(page, href) {
+  await page.evaluate(async (target) => {
+    const bootstrap = [...document.scripts]
+      .map((script) => script.textContent ?? "")
+      .find((source) => source.includes("getNavigation"));
+    const moduleUrl = bootstrap.match(/import \{ getNavigation \} from "([^"]+)"/)[1];
+    const { getNavigation } = await import(moduleUrl);
+    await getNavigation().push(target);
+  }, href);
+}
+
 test("browser can load an Evolit SSR document with route segment metadata", async ({ page }, testInfo) => {
   const port = 3500 + testInfo.workerIndex;
   const origin = `http://127.0.0.1:${port}`;
@@ -79,6 +90,11 @@ test("browser can load an Evolit SSR document with route segment metadata", asyn
     await page.goBack();
     await expect(page).toHaveURL(/\/$/);
     const restoredCard = page.locator("feature-card").first();
+    await expect.poll(() => restoredCard.evaluate((element) => ({
+      cards: element.shadowRoot?.querySelectorAll(".card").length ?? 0,
+      titles: [...(element.shadowRoot?.querySelectorAll(".title") ?? [])]
+        .map((node) => node.textContent?.trim()),
+    }))).toEqual({ cards: 1, titles: ["File Routing"] });
     const deltaDiagnostics = await page.evaluate(async () => {
       const response = await fetch("/", {
         cache: "no-store",
@@ -146,6 +162,256 @@ test("browser navigation falls back to the SSR document for a route without a de
   }
 });
 
+test("incremental navigation preserves scoped hydrated shadow roots with the registry polyfill", async ({ page }, testInfo) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-navigation-hydration-"));
+  const projectRoot = path.join(tempRoot, "app");
+  const port = 3900 + testInfo.workerIndex;
+  const origin = `http://127.0.0.1:${port}`;
+  const pageErrors = [];
+  let child;
+
+  try {
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.addInitScript({
+      path: path.join(
+        frameworkRoot,
+        "node_modules",
+        "@webcomponents",
+        "scoped-custom-element-registry",
+        "scoped-custom-element-registry.min.js",
+      ),
+    });
+    await scaffoldSite(projectRoot);
+    await fs.symlink(path.join(frameworkRoot, "node_modules"), path.join(projectRoot, "node_modules"), "dir");
+    await fs.mkdir(path.join(projectRoot, "app", "components"), { recursive: true });
+    await fs.writeFile(
+      path.join(projectRoot, "app", "components", "payload-leaf.litsx"),
+      [
+        'import { useHost } from "@litsx/core";',
+        "",
+        "export default function PayloadLeaf({ payload }) {",
+        "  useHost();",
+        '  static styles = `:host { display: block; }`;',
+        '  return <article class=\"payload-card\">{payload?.label ?? "missing"}</article>;',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "app", "components", "payload-card.litsx"),
+      [
+        'import { useHost, useOnConnect } from "@litsx/core";',
+        'import PayloadLeaf from "./payload-leaf.litsx";',
+        "",
+        "export default function PayloadCard({ payload, showDetails }) {",
+        '  static elements = { "payload-leaf": PayloadLeaf };',
+        "  const host = useHost();",
+        "  useOnConnect(() => {",
+        '    host.setAttribute("data-connected", "true");',
+        "  }, []);",
+        '  return <section>{showDetails ? <PayloadLeaf .payload={payload} /> : ""}<slot name="actions"></slot></section>;',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const payloadRoute = path.join(projectRoot, "app", "payload", "[name]");
+    await fs.mkdir(payloadRoute, { recursive: true });
+    await fs.writeFile(
+      path.join(payloadRoute, "page.litsx"),
+      [
+        'import PayloadCard from "../../components/payload-card.litsx";',
+        "",
+        "export default async function PayloadPage({ params }) {",
+        '  return <main><PayloadCard .payload={{ label: params.name }} .showDetails={params.name !== "hidden"}><span slot="actions" data-payload-action>{params.name}</span></PayloadCard><PayloadCard .payload={{ label: params.name + "-second" }} .showDetails={params.name !== "hidden"}><span slot="actions" data-payload-action>{params.name}-second</span></PayloadCard></main>;',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    child = spawn(process.execPath, [path.join(frameworkRoot, "src", "cli.js"), "dev", "--port", String(port)], {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    await waitForServer(`${origin}/payload/alpha`);
+    await page.goto(`${origin}/payload/alpha`, { waitUntil: "networkidle", timeout: 20_000 });
+    const payloadCards = page.locator("payload-card");
+    await expect(payloadCards).toHaveCount(2);
+    const payloadCard = payloadCards.first();
+    await expect(payloadCard).toHaveAttribute("data-connected", "true");
+    await expect.poll(() => payloadCard.evaluate((element) =>
+      element.shadowRoot?.querySelector("payload-leaf")?.shadowRoot?.querySelector(".payload-card")?.textContent?.trim(),
+    ))
+      .toBe("alpha");
+    await navigate(page, "/about");
+    await expect(page).toHaveURL(/\/about$/);
+    await navigate(page, "/payload/hidden");
+    await expect(page).toHaveURL(/\/payload\/hidden$/);
+    await expect.poll(() => payloadCards.evaluateAll((elements) => elements.map((element) => ({
+      cards: element.shadowRoot?.querySelector("payload-leaf")?.shadowRoot?.querySelectorAll(".payload-card").length ?? 0,
+      actions: element.querySelectorAll("[data-payload-action]").length,
+    })))).toEqual([
+      { cards: 0, actions: 1 },
+      { cards: 0, actions: 1 },
+    ]);
+    await navigate(page, "/payload/beta");
+    await expect(page).toHaveURL(/\/payload\/beta$/);
+    await expect.poll(() => payloadCard.evaluate((element) => ({
+      cards: element.shadowRoot?.querySelector("payload-leaf")?.shadowRoot?.querySelectorAll(".payload-card").length ?? 0,
+      text: element.shadowRoot?.querySelector("payload-leaf")?.shadowRoot?.querySelector(".payload-card")?.textContent?.trim(),
+      connected: element.getAttribute("data-connected"),
+      constructorName: element.constructor.name,
+      root: element.getAttribute("data-litsx-root"),
+    }))).toEqual({
+      cards: 1,
+      text: "beta",
+      connected: "true",
+      constructorName: expect.not.stringMatching(/^HTMLElement$/),
+      root: expect.any(String),
+    });
+    await expect.poll(() => payloadCards.evaluateAll((elements) => elements.map((element) => ({
+      text: element.shadowRoot?.querySelector("payload-leaf")?.shadowRoot?.querySelector(".payload-card")?.textContent?.trim(),
+      connected: element.getAttribute("data-connected"),
+      root: element.getAttribute("data-litsx-root"),
+    })))).toEqual([
+      { text: "beta", connected: "true", root: expect.any(String) },
+      { text: "beta-second", connected: "true", root: expect.any(String) },
+    ]);
+    expect(await payloadCards.evaluateAll((elements) => new Set(
+      elements.map((element) => element.getAttribute("data-litsx-root")),
+    ).size)).toBe(2);
+    expect(pageErrors).toEqual([]);
+  } finally {
+    if (child?.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("incremental navigation never reuses a segment projection when its cardinality changes", async ({ page }, testInfo) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-navigation-projections-"));
+  const projectRoot = path.join(tempRoot, "app");
+  const port = 4000 + testInfo.workerIndex;
+  const origin = `http://127.0.0.1:${port}`;
+  let child;
+
+  try {
+    await scaffoldSite(projectRoot);
+    await fs.symlink(path.join(frameworkRoot, "node_modules"), path.join(projectRoot, "node_modules"), "dir");
+    const routeRoot = path.join(projectRoot, "app", "shape", "[mode]");
+    await fs.mkdir(routeRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(routeRoot, "layout.litsx"),
+      [
+        "export default async function ShapeLayout({ children, params }) {",
+        '  return params.mode === "many"',
+        '    ? <section data-shape=\"many\"><aside>{children}</aside><main>{children}</main></section>',
+        '    : <section data-shape=\"one\"><main>{children}</main></section>;',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(routeRoot, "page.litsx"),
+      [
+        "export default async function ShapePage({ params }) {",
+        '  return <article data-shape-page>{params.mode}</article>;',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    child = spawn(process.execPath, [path.join(frameworkRoot, "src", "cli.js"), "dev", "--port", String(port)], {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    await waitForServer(`${origin}/`);
+    await page.goto(`${origin}/`, { waitUntil: "networkidle", timeout: 20_000 });
+    await navigate(page, "/shape/many");
+    await expect(page).toHaveURL(/\/shape\/many$/);
+    await expect(page.locator("[data-shape-page]")).toHaveCount(2);
+
+    await navigate(page, "/shape/one");
+    await expect(page).toHaveURL(/\/shape\/one$/);
+    await expect(page.locator("[data-shape=\"one\"]")).toHaveCount(1);
+    await expect(page.locator("[data-shape-page]")).toHaveCount(1);
+
+    await navigate(page, "/shape/many");
+    await expect(page).toHaveURL(/\/shape\/many$/);
+    await expect(page.locator("[data-shape=\"many\"]")).toHaveCount(1);
+    await expect(page.locator("[data-shape-page]")).toHaveCount(2);
+  } finally {
+    if (child?.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("incremental navigation preserves unaffected nested layouts", async ({ page }, testInfo) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-navigation-nested-layouts-"));
+  const projectRoot = path.join(tempRoot, "app");
+  const port = 4100 + testInfo.workerIndex;
+  const origin = `http://127.0.0.1:${port}`;
+  let child;
+
+  try {
+    await scaffoldSite(projectRoot);
+    await fs.symlink(path.join(frameworkRoot, "node_modules"), path.join(projectRoot, "node_modules"), "dir");
+    const routeRoot = path.join(projectRoot, "app", "nested", "[outer]", "[inner]");
+    await fs.mkdir(routeRoot, { recursive: true });
+    await fs.writeFile(path.join(projectRoot, "app", "nested", "[outer]", "layout.litsx"), [
+      "export default async function OuterLayout({ children, params, searchParams }) {",
+      '  return <section data-outer={params.outer} data-view={searchParams.view ?? "default"}>{children}</section>;',
+      "}",
+      "",
+    ].join("\n"));
+    await fs.writeFile(path.join(routeRoot, "layout.litsx"), [
+      "export default async function InnerLayout({ children, params }) {",
+      '  return <section data-inner={params.inner}>{children}</section>;',
+      "}",
+      "",
+    ].join("\n"));
+    await fs.writeFile(path.join(routeRoot, "page.litsx"), [
+      "export default async function NestedPage({ params, searchParams }) {",
+      '  return <article data-page>{params.outer}:{params.inner}:{searchParams.page ?? "1"}</article>;',
+      "}",
+      "",
+    ].join("\n"));
+    child = spawn(process.execPath, [path.join(frameworkRoot, "src", "cli.js"), "dev", "--port", String(port)], {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    await waitForServer(`${origin}/`);
+    await page.goto(`${origin}/`, { waitUntil: "networkidle", timeout: 20_000 });
+    await navigate(page, "/nested/a/one?view=grid&page=1");
+    await page.locator('[data-outer="a"]').evaluate((element) => { window.__evolitOuterLayout = element; });
+
+    await navigate(page, "/nested/a/two?view=grid&page=2");
+    await expect(page.locator('[data-outer="a"]')).toHaveText("a:two:2");
+    expect(await page.locator('[data-outer="a"]').evaluate((element) => element === window.__evolitOuterLayout)).toBe(true);
+
+    await navigate(page, "/nested/a/two?view=list&page=2");
+    await expect(page.locator('[data-outer="a"]')).toHaveText("a:two:2");
+    expect(await page.locator('[data-outer="a"]').evaluate((element) => element === window.__evolitOuterLayout)).toBe(false);
+
+    await navigate(page, "/nested/b/two?view=list&page=2");
+    await expect(page.locator('[data-outer="b"]')).toHaveText("b:two:2");
+    expect(await page.locator('[data-outer="b"]').evaluate((element) => element === window.__evolitOuterLayout)).toBe(false);
+  } finally {
+    if (child?.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("browser navigation works with production build assets", async ({ page }, testInfo) => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-navigation-production-"));
   const projectRoot = path.join(tempRoot, "app");
@@ -177,6 +443,12 @@ test("browser navigation works with production build assets", async ({ page }, t
     });
     await expect(page).toHaveURL(/\/about$/);
     await expect(page.locator("main")).toContainText("About");
+    await navigate(page, "/");
+    const restoredCard = page.locator("feature-card").first();
+    await expect.poll(() => restoredCard.evaluate((element) => ({
+      cards: element.shadowRoot?.querySelectorAll(".card").length ?? 0,
+      upgraded: element.constructor.name !== "HTMLElement",
+    }))).toEqual({ cards: 1, upgraded: true });
   } finally {
     if (child?.exitCode === null) {
       child.kill();
@@ -289,6 +561,12 @@ test("browser navigation preserves catch-all params and repeated query params", 
     await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
     await expect(page.locator("html")).toHaveAttribute("data-route", "explore");
     await expect(page.locator("body")).toHaveAttribute("data-route", "explore");
+    await expect.poll(() => page.evaluate(() =>
+      [...document.head.querySelectorAll('link[data-evolit-route-asset="style"]')].map((link) => link.getAttribute("href")),
+    )).toEqual(expect.arrayContaining([expect.stringContaining("explore")]));
+    expect(await page.evaluate(() =>
+      [...document.head.querySelectorAll('link[data-evolit-route-asset="style"]')].map((link) => link.getAttribute("href")),
+    )).not.toEqual(expect.arrayContaining([expect.stringContaining("app/other")]));
     await page.goBack();
     await expect(page).toHaveURL(/\/explore\/home-garden\/furniture\?facet=brand&facet=color$/);
     await expect(routeMain).toHaveAttribute("data-slug", '["home-garden","furniture"]');

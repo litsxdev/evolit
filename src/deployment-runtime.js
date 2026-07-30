@@ -17,6 +17,7 @@ import {
   normalizeHydrationDataForClient,
   normalizeClientAssetManifest,
   resetDevelopmentAssetCaches,
+  resolveHydrationRootClientImports,
   resolveRouteClientImports,
   resolveSharedVendorModuleUrl,
   resolveBrowserPackageAssetFilePath,
@@ -33,6 +34,7 @@ import {
 } from "./response-cache.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 import { createNavigationResponseFromDocument } from "./route-segments.js";
+import { appendSsrUrqlData, runWithOptionalSsrUrqlScope } from "./urql-ssr.js";
 const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".css", "text/css; charset=utf-8"],
   [".svg", "image/svg+xml"],
@@ -340,7 +342,13 @@ export async function createRequestRenderer({
         normalizeHydrationDataForClient(
           result.hydrationData,
           projectRoot,
-          routeClientImports,
+          [
+            ...routeClientImports,
+            ...resolveHydrationRootClientImports(
+              result.hydrationData,
+              currentAssetResolver,
+            ),
+          ],
         ),
       );
     },
@@ -495,22 +503,27 @@ export async function createRequestRenderer({
       return effectiveRouteResolver.resolveRoutePolicy(request);
     },
     async renderRoute(request, routePolicyResult = null) {
-      const shouldPrepareBeforeResolve = mode === "development" && !currentAssetManifest;
-      let resolvedRoutePolicyResult = routePolicyResult;
-      if (shouldPrepareBeforeResolve) {
-        resolvedRoutePolicyResult ??= await effectiveRouteResolver.resolveRoutePolicy(request);
-        await this.prepareRouteClientArtifacts(resolvedRoutePolicyResult);
-      }
+      return runWithOptionalSsrUrqlScope(async (urqlAdapter) => {
+        const shouldPrepareBeforeResolve = mode === "development" && !currentAssetManifest;
+        let resolvedRoutePolicyResult = routePolicyResult;
+        if (shouldPrepareBeforeResolve) {
+          resolvedRoutePolicyResult ??= await effectiveRouteResolver.resolveRoutePolicy(request);
+          await this.prepareRouteClientArtifacts(resolvedRoutePolicyResult);
+        }
 
-      const routeResult = await effectiveRouteResolver.resolveRequest(request, resolvedRoutePolicyResult);
-      if (!shouldPrepareBeforeResolve || routeResult.boundaryModule) {
-        await this.prepareRouteClientArtifacts(routeResult);
-      }
-      const response = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
-      return {
-        routeResult,
-        response,
-      };
+        const routeResult = await effectiveRouteResolver.resolveRequest(request, resolvedRoutePolicyResult);
+        if (!shouldPrepareBeforeResolve || routeResult.boundaryModule) {
+          await this.prepareRouteClientArtifacts(routeResult);
+        }
+        const renderedResponse = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
+        const response = urqlAdapter
+          ? appendSsrUrqlData(renderedResponse, await urqlAdapter.getUrqlSsrData())
+          : renderedResponse;
+        return {
+          routeResult,
+          response,
+        };
+      });
     },
     get assetManifest() {
       return currentAssetManifest;

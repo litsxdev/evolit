@@ -263,6 +263,18 @@ function createSegmentCacheKey(segment, idPrefix, profile, params, searchParams)
   });
 }
 
+function createSegmentInputKey(profile, params, searchParams) {
+  const select = (values) => Object.fromEntries(
+    (profile.all ? Object.keys(values) : profile.keys)
+      .sort()
+      .map((key) => [key, values[key]]),
+  );
+  return JSON.stringify({
+    params: select(params),
+    searchParams: select(searchParams),
+  });
+}
+
 function getSegmentCacheExpiry(cachePolicy) {
   if (cachePolicy?.mode === "static") return Number.POSITIVE_INFINITY;
   if (cachePolicy?.mode === "revalidate" && Number.isFinite(cachePolicy.ttlSeconds)) {
@@ -295,6 +307,9 @@ function createSegmentRenderCache(projectRoot, onDevelopmentEvent) {
       }
       onDevelopmentEvent?.({ type: "segment-cache-hit", modulePath: segment.modulePath });
       return entry.result;
+    },
+    getProfile(segment) {
+      return profiles.get(segment.modulePath) ?? null;
     },
     set(segment, idPrefix, params, searchParams, profile, result, cachePolicy) {
       const expiresAt = getSegmentCacheExpiry(cachePolicy);
@@ -379,6 +394,7 @@ async function renderSegmentedComponentTree(
     }
 
     const childrenMarker = createSegmentChildrenMarker(segment);
+    let profile = options.segmentCache?.getProfile(segment) ?? null;
     let layoutResult = options.segmentCache?.get(
       segment,
       idPrefix,
@@ -399,23 +415,31 @@ async function renderSegmentedComponentTree(
         assetResolver: options.assetResolver,
         context: { idPrefix },
       });
+      profile = {
+        all: trackedParams.profile().all || trackedSearchParams.profile().all,
+        keys: [...new Set([
+          ...trackedParams.profile().keys,
+          ...trackedSearchParams.profile().keys,
+        ])].sort(),
+      };
       if (!didUseDynamicRequestData && !requestContext.didUseDynamicRequestData) {
         options.segmentCache?.set(
           segment,
           idPrefix,
           requestContext.params,
           requestContext.searchParams,
-          {
-            all: trackedParams.profile().all || trackedSearchParams.profile().all,
-            keys: [...new Set([
-              ...trackedParams.profile().keys,
-              ...trackedSearchParams.profile().keys,
-            ])].sort(),
-          },
+          profile,
           layoutResult,
           options.cachePolicy,
         );
       }
+    }
+    if (profile) {
+      segment.inputKey = createSegmentInputKey(
+        profile,
+        requestContext.params,
+        requestContext.searchParams,
+      );
     }
     results.push(layoutResult);
     const projectionCount = layoutResult.html.split(childrenMarker).length - 1;

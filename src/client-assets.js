@@ -2032,6 +2032,25 @@ export function resolveRouteClientImports(routeResult, projectRoot, assetManifes
   }).filter((publicUrl) => typeof publicUrl === "string"))];
 }
 
+/**
+ * Resolve the client modules which define the hydrated custom-element roots.
+ *
+ * Route entry modules are not required to re-export their LitSX components.
+ * The document bootstrap has always loaded these root modules independently;
+ * navigation deltas need the same information in their hydration payload.
+ */
+export function resolveHydrationRootClientImports(hydrationData, assetResolver) {
+  if (!hydrationData || typeof hydrationData !== "object" || typeof assetResolver !== "function") {
+    return [];
+  }
+
+  return [...new Set(
+    (Array.isArray(hydrationData.roots) ? hydrationData.roots : [])
+      .map((root) => assetResolver(root?.moduleId))
+      .filter((publicUrl) => typeof publicUrl === "string" && publicUrl.length > 0),
+  )];
+}
+
 export function collectTransitiveStyleUrls(publicUrls, assetManifest) {
   const normalizedManifest = normalizeClientAssetManifest(assetManifest);
   if (!normalizedManifest) {

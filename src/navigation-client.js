@@ -1,5 +1,9 @@
 import { useHost, useOnConnect, useState } from "@litsx/core";
-import { hydrateRoot, registerHydrationModules } from "@litsx/ssr/hydration";
+import {
+  applyHydrationPayload,
+  hydrateRoot,
+  registerHydrationModules,
+} from "@litsx/ssr/hydration";
 import { createHref } from "./navigation-url.js";
 
 export { createHref } from "./navigation-url.js";
@@ -162,11 +166,21 @@ async function applyRouteDelta(delta, documentRef = document, signal) {
   const nextSegments = delta.route?.segments ?? [];
   const currentSegments = current?.segments ?? [];
   let index = nextSegments.findIndex((segment, offset) => segment.id !== currentSegments[offset]?.id);
+  if (index < 0) {
+    index = nextSegments.findIndex(
+      (segment, offset) => segment.inputKey !== currentSegments[offset]?.inputKey,
+    );
+  }
   if (index < 0) index = Math.max(0, nextSegments.length - 1);
   const next = nextSegments[index];
   const previous = currentSegments[index] ?? currentSegments.at(-1);
   if (!next || !previous) return;
   const targets = findMarkers(documentRef, previous.id);
+  // A projection is positional: reusing projection zero for a second target
+  // duplicates DOM (and hydration roots) when a layout changes its children
+  // cardinality. A full document navigation is the only safe recovery when
+  // the live tree and delta disagree.
+  if (targets.length !== next.projections.length) return false;
   await syncRouteHeadAssets(delta.headAssets, documentRef);
   throwIfAborted(signal);
   syncRouteHeadMarkup(delta.head, documentRef);
@@ -184,6 +198,14 @@ async function applyRouteDelta(delta, documentRef = document, signal) {
       root,
       element: findHydrationElement(fragment, root.id),
     })).filter((entry) => entry.element);
+    // A custom element already defined by an earlier route is upgraded as
+    // soon as this fragment is connected. Apply its SSR data while it is
+    // still detached, otherwise Lit starts an update against its declarative
+    // shadow root without the properties used to render it on the server.
+    applyHydrationPayload(
+      roots.map(({ root, element }) => ({ ...root, element })),
+      delta.hydrationData,
+    );
     const range = documentRef.createRange();
     range.setStartAfter(target.start);
     range.setEndBefore(target.end);
@@ -201,13 +223,14 @@ async function applyRouteDelta(delta, documentRef = document, signal) {
     await Promise.all((delta.hydrationData?.clientImports ?? []).map((specifier) => import(specifier))),
   );
   for (const { root, element } of insertedRoots) {
-      throwIfAborted(signal);
-      await hydrateRoot(element, {
-        rootId: root.id,
-        hydrationData: delta.hydrationData,
-        clientImports: delta.hydrationData.clientImports,
-      });
+    throwIfAborted(signal);
+    await hydrateRoot(element, {
+      rootId: root.id,
+      hydrationData: delta.hydrationData,
+      clientImports: delta.hydrationData.clientImports,
+    });
   }
+  return true;
 }
 
 function toHref(target, location) {
@@ -440,7 +463,11 @@ export function createBrowserNavigation(options = {}) {
         })();
       if (!delta || !isCurrent()) return null;
       if (delta.type === "redirect") return navigate(delta.location, "replace", false);
-      await applyDelta(delta, { signal: navigationController.signal });
+      const applied = await applyDelta(delta, { signal: navigationController.signal });
+      if (applied === false) {
+        navigateDocument(href, mode);
+        return null;
+      }
       if (!isCurrent()) return null;
       const canonicalHref = toHref(delta.url ?? href, windowRef.location);
       if (!fromPopState) {

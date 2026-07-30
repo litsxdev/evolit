@@ -15,6 +15,7 @@ import {
   getSharedOutputRoot,
   normalizeHydrationDataForClient,
   normalizeClientAssetManifest,
+  resolveHydrationRootClientImports,
   resolveRouteClientImports,
   resolveBrowserPackageAssetFilePath,
   resolveBrowserSpecifierFilePath,
@@ -254,6 +255,24 @@ test("createHydrationBootstrap deduplicates module imports by moduleId", () => {
     bootstrap.includes("\\u003E"),
     false,
   );
+});
+
+test("resolveHydrationRootClientImports includes component modules without route re-exports", () => {
+  const imports = resolveHydrationRootClientImports({
+    roots: [
+      { id: "root-0", moduleId: "/app/components/payload-card.litsx" },
+      { id: "root-1", moduleId: "/app/components/payload-card.litsx" },
+      { id: "root-2", moduleId: "/app/components/hero-banner.litsx" },
+      { id: "root-3" },
+    ],
+  }, (moduleId) => (typeof moduleId === "string"
+    ? `/_evolit/static${moduleId.replace(/\.litsx$/, ".mjs")}`
+    : null));
+
+  assert.deepEqual(imports, [
+    "/_evolit/static/app/components/payload-card.mjs",
+    "/_evolit/static/app/components/hero-banner.mjs",
+  ]);
 });
 
 test("createHydrationBootstrap registers route client imports alongside hydration roots", () => {

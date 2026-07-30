@@ -998,6 +998,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@webcomponents/scoped-custom-element-registry@npm:^0.0.10":
+  version: 0.0.10
+  resolution: "@webcomponents/scoped-custom-element-registry@npm:0.0.10"
+  checksum: 10c0/97fdb174f6795b20a3f6e8af9018b6c3e48c6a2bf40b87ef606d9b4616df32b0dc67a085f8ca1fda0e4327b3237ae76626bf1bbea3cfea0e03ce743f915a39cc
+  languageName: node
+  linkType: hard
+
 "abbrev@npm:^5.0.0":
   version: 5.0.0
   resolution: "abbrev@npm:5.0.0"
@@ -1146,12 +1153,18 @@ __metadata:
     "@litsx/typescript": "npm:^0.9.0"
     "@playwright/test": "npm:^1.62.0"
     "@rollup/plugin-node-resolve": "npm:^16.0.3"
+    "@webcomponents/scoped-custom-element-registry": "npm:^0.0.10"
     lit: "npm:^3.3.3"
     magic-string: "npm:^1.1.0"
     rollup: "npm:^4.46.1"
     typescript: "npm:^6.0.0"
     vite: "npm:^8.1.5"
     ws: "npm:^8.18.3"
+  peerDependencies:
+    "@litsx/urql": ^0.3.0
+  peerDependenciesMeta:
+    "@litsx/urql":
+      optional: true
   bin:
     evolit: ./src/cli.js
   languageName: unknown

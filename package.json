@@ -63,8 +63,17 @@
     "typescript": "^6.0.0",
     "ws": "^8.18.3"
   },
+  "peerDependencies": {
+    "@litsx/urql": "^0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@litsx/urql": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
+    "@webcomponents/scoped-custom-element-registry": "^0.0.10",
     "vite": "^8.1.5"
   }
 }

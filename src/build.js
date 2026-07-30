@@ -15,6 +15,7 @@ import {
   emitBundledClientAssets,
   emitHashedClientAssets,
   normalizeHydrationDataForClient,
+  resolveHydrationRootClientImports,
   resolveRouteClientImports,
   resolveSharedVendorModuleUrl,
   rewriteHydrationDataScript,
@@ -39,6 +40,7 @@ import {
 import { serializeRouteCachePolicy } from "./route-config.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 import { ensureDirectory, writeJson } from "./fs-utils.js";
+import { appendSsrUrqlData, runWithOptionalSsrUrqlScope } from "./urql-ssr.js";
 
 const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -288,7 +290,10 @@ export async function buildProject(projectRoot) {
         normalizeHydrationDataForClient(
           result.hydrationData,
           projectRoot,
-          routeClientImports,
+          [
+            ...routeClientImports,
+            ...resolveHydrationRootClientImports(result.hydrationData, assetResolver),
+          ],
         ),
       );
     },
@@ -337,12 +342,23 @@ export async function buildProject(projectRoot) {
       seenPrerenderTargets.add(targetPathname);
 
       const targetRequest = new Request(`http://evolit.local${targetPathname}`);
-      const routeResult = await routeResolver.resolveRequest(targetRequest);
-      if (routeResult.type !== "route" || routeResult.cachePolicy.mode === "dynamic") {
+      const { routeResult, response } = await runWithOptionalSsrUrqlScope(async (urqlAdapter) => {
+        const resolvedRouteResult = await routeResolver.resolveRequest(targetRequest);
+        if (resolvedRouteResult.type !== "route" || resolvedRouteResult.cachePolicy.mode === "dynamic") {
+          return { routeResult: resolvedRouteResult, response: null };
+        }
+
+        const renderedResponse = await renderRouteTreeWithAdapter(resolvedRouteResult, ssrAdapter);
+        return {
+          routeResult: resolvedRouteResult,
+          response: urqlAdapter
+            ? appendSsrUrqlData(renderedResponse, await urqlAdapter.getUrqlSsrData())
+            : renderedResponse,
+        };
+      });
+      if (!response) {
         continue;
       }
-
-      const response = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
       if (response.status !== 200) {
         continue;
       }
