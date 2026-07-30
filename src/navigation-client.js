@@ -18,6 +18,20 @@ function readRoute(documentRef) {
   try { return source ? JSON.parse(source) : null; } catch { return null; }
 }
 
+function readRouteParams(documentRef) {
+  const params = readRoute(documentRef)?.params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return Object.freeze({});
+  }
+
+  return Object.freeze(Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? Object.freeze([...value]) : value,
+    ]),
+  ));
+}
+
 function findMarkers(root, segmentId, matches = []) {
   const documentRef = root.ownerDocument ?? root;
   const walker = documentRef.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
@@ -309,14 +323,16 @@ function findHashTarget(documentRef, href) {
   }
 }
 
-function restoreScrollAndFocus(windowRef, href, position) {
-  const target = findHashTarget(windowRef.document, href);
-  if (target?.scrollIntoView) {
-    target.scrollIntoView();
-  } else if (position) {
-    windowRef.scrollTo?.(position.x, position.y);
-  } else {
-    windowRef.scrollTo?.(0, 0);
+function restoreScrollAndFocus(windowRef, href, position, preserveScroll = false) {
+  if (!preserveScroll) {
+    const target = findHashTarget(windowRef.document, href);
+    if (target?.scrollIntoView) {
+      target.scrollIntoView();
+    } else if (position) {
+      windowRef.scrollTo?.(position.x, position.y);
+    } else {
+      windowRef.scrollTo?.(0, 0);
+    }
   }
 
   const main = windowRef.document.querySelector?.("main");
@@ -410,6 +426,9 @@ export function createBrowserNavigation(options = {}) {
   async function navigate(target, mode = "push", fromPopState = false, options = {}) {
     const href = toHref(target, windowRef.location);
     const cacheKey = toCacheKey(href);
+    const scrollPosition = options.scroll === false
+      ? currentScrollPosition(windowRef)
+      : options.scrollPosition;
     controller?.abort();
     const navigationController = new AbortController();
     controller = navigationController;
@@ -475,14 +494,19 @@ export function createBrowserNavigation(options = {}) {
           {
             ...(mode === "replace" ? windowRef.history.state : {}),
             __evolitNavigationEntry: entryId,
-            __evolitScroll: { x: 0, y: 0 },
+            __evolitScroll: scrollPosition ?? { x: 0, y: 0 },
           },
           "",
           canonicalHref,
         );
       }
       cacheDelta(entryId, toCacheKey(canonicalHref), delta);
-      restoreScrollAndFocus(windowRef, canonicalHref, options.scrollPosition);
+      restoreScrollAndFocus(
+        windowRef,
+        canonicalHref,
+        scrollPosition,
+        options.scroll === false,
+      );
       state = { status: "idle", url: canonicalHref, pendingUrl: null, error: null };
       emit();
       return delta;
@@ -519,9 +543,9 @@ export function createBrowserNavigation(options = {}) {
   return {
     getState: () => state,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    push: (target) => navigate(target, "push"),
-    replace: (target) => navigate(target, "replace"),
-    refresh: () => navigate(windowRef.location.href, "replace", false, { force: true }),
+    push: (target, options) => navigate(target, "push", false, options),
+    replace: (target, options) => navigate(target, "replace", false, options),
+    refresh: (options) => navigate(windowRef.location.href, "replace", false, { ...options, force: true }),
     createHref,
   };
 }
@@ -543,4 +567,23 @@ export function useNavigation() {
     refresh: navigation.refresh,
     createHref: navigation.createHref,
   };
+}
+
+/**
+ * Returns the dynamic route parameters for the active client route.
+ * The returned object is a read-only snapshot and updates after navigation.
+ */
+export function useParams() {
+  useNavigation();
+  return readRouteParams(globalThis.document);
+}
+
+/**
+ * Returns a URLSearchParams snapshot for the active client route.
+ * Mutating it is local only; use createHref() and navigation.push()/replace()
+ * to update the URL.
+ */
+export function useSearchParams() {
+  const navigation = useNavigation();
+  return new URL(navigation.url).searchParams;
 }

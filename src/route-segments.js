@@ -73,6 +73,9 @@ export function createRouteSegmentPayload(routeResult) {
     version: 1,
     url: routeResult.cacheKey ?? routeResult.route?.pathname ?? null,
     pathname: routeResult.cacheKey?.split("?")[0] ?? routeResult.route?.pathname ?? null,
+    params: routeResult.params && typeof routeResult.params === "object"
+      ? routeResult.params
+      : {},
     cachePolicy: routeResult.cachePolicy
       ? {
         mode: routeResult.cachePolicy.mode,

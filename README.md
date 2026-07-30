@@ -105,8 +105,10 @@ export default function CollectionControls() {
 
 The hook returns `{ status, url, pendingUrl, error, push, replace, refresh, createHref }`:
 
-- `push(target)` adds a browser-history entry.
-- `replace(target)` updates the current entry, useful for visual-only query state.
+- `push(target, { scroll: false })` adds a browser-history entry. Pass
+  `scroll: false` to keep the current viewport position.
+- `replace(target, { scroll: false })` updates the current entry, useful for
+  visual-only query state. It accepts the same scroll option.
 - `refresh()` bypasses the client delta cache for the current URL.
 - `createHref(pathname, searchParams)` creates a relative internal URL. It accepts standard
   `URLSearchParams`, preserving repeated keys such as `facet=brand&facet=material`.
@@ -114,6 +116,20 @@ The hook returns `{ status, url, pendingUrl, error, push, replace, refresh, crea
 `createHref` can also be imported directly from `evolit/navigation`; it is browser-free and safe to
 share with server-evaluated route code. `useNavigation()` itself is browser-only and must only run
 from a connected client component.
+
+Client components can also read the active route state with browser-only hooks:
+
+```jsx
+import { useParams, useSearchParams } from "evolit/navigation";
+
+const { slug = [] } = useParams();
+const searchParams = useSearchParams();
+const selectedFacets = searchParams.getAll("facet");
+```
+
+Both hooks update after client navigation. `useParams()` returns a read-only snapshot; the
+`URLSearchParams` from `useSearchParams()` is a local snapshot, so build a new href and navigate to
+it to update the URL.
 
 ### Progressive links and forms
 

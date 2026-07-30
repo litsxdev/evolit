@@ -516,11 +516,17 @@ test("browser navigation preserves catch-all params and repeated query params", 
     const routeMain = page.locator("main[data-slug]");
     await expect(routeMain).toHaveAttribute("data-slug", '["home-garden"]');
     await expect(routeMain).toHaveAttribute("data-facets", '["brand","material"]');
+    expect(await page.evaluate(() => JSON.parse(
+      document.getElementById("__EVOLIT_ROUTE__").textContent,
+    ).params)).toEqual({ slug: ["home-garden"] });
 
     await page.locator("form[data-explore-filter]").evaluate((form) => form.requestSubmit());
     await expect(page).toHaveURL(/\/explore\/home-garden\/furniture\?facet=brand&facet=color$/);
     await expect(routeMain).toHaveAttribute("data-slug", '["home-garden","furniture"]');
     await expect(routeMain).toHaveAttribute("data-facets", '["brand","color"]');
+    expect(await page.evaluate(() => JSON.parse(
+      document.getElementById("__EVOLIT_ROUTE__").textContent,
+    ).params)).toEqual({ slug: ["home-garden", "furniture"] });
 
     await page.evaluate(async () => {
       const bootstrap = [...document.scripts].map((script) => script.textContent ?? "").find((source) => source.includes("getNavigation"));

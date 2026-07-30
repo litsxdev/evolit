@@ -226,6 +226,32 @@ test("a client navigation saves the previous position and resets scroll for the 
   assert.deepEqual(windowRef.lastScroll, { x: 0, y: 0 });
 });
 
+test("a client navigation can preserve its current scroll position", async () => {
+  const windowRef = createBrowserWindow(async () => ({
+    headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+    json: async () => ({ type: "route", url: "/catalog", route: {} }),
+  }));
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+
+  await navigation.push("/catalog", { scroll: false });
+
+  assert.deepEqual(windowRef.history.state.__evolitScroll, { x: 12, y: 34 });
+  assert.deepEqual(windowRef.lastScroll, undefined);
+});
+
+test("replace can preserve its current scroll position", async () => {
+  const windowRef = createBrowserWindow(async () => ({
+    headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+    json: async () => ({ type: "route", url: "/catalog?view=grid", route: {} }),
+  }));
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+
+  await navigation.replace("/catalog?view=grid", { scroll: false });
+
+  assert.deepEqual(windowRef.history.state.__evolitScroll, { x: 12, y: 34 });
+  assert.deepEqual(windowRef.lastScroll, undefined);
+});
+
 test("a history entry reuses its delta on popstate without a second request", async () => {
   let requests = 0;
   let applied = 0;

@@ -45,6 +45,7 @@ test("route segment markers preserve string children for string layouts", () => 
 test("route segment payload does not expose absolute project paths", () => {
   const payload = createRouteSegmentPayload({
     cacheKey: "/explore/home-garden?sort=price",
+    params: { slug: ["home-garden"] },
     segments: [{
       id: "page-example",
       kind: "page",
@@ -57,6 +58,7 @@ test("route segment payload does not expose absolute project paths", () => {
     version: 1,
     url: "/explore/home-garden?sort=price",
     pathname: "/explore/home-garden",
+    params: { slug: ["home-garden"] },
     cachePolicy: null,
     segments: [{
       id: "page-example",
