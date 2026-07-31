@@ -1893,6 +1893,13 @@ async function bundleClientAssets(projectRoot, options = {}) {
       [...scriptAssetRecords, ...nonScriptAssets, ...mapAssets]
         .map((asset) => asset.outputPath),
     );
+    // Requests for an asset from the previous manifest can still be in flight
+    // while a development rebuild publishes this one. Keep precisely that
+    // generation for one rebuild so those requests do not resolve to a file
+    // which this cleanup has just removed.
+    for (const outputPath of options.retainOutputPaths ?? []) {
+      retainedOutputPaths.add(outputPath);
+    }
     for (const filePath of await walkFiles(staticRoot)) {
       if (!retainedOutputPaths.has(filePath)) {
         await fs.rm(filePath, { force: true });

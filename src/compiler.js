@@ -179,6 +179,7 @@ async function rewriteRelativeSpecifiers({
   outputPath,
   inputSourceMap,
   onDevelopmentEvent,
+  staticAssetFiles,
 }) {
   const magicSource = new MagicString(code);
   let didRewrite = false;
@@ -220,6 +221,7 @@ async function rewriteRelativeSpecifiers({
     if (shouldCompileModule(resolvedImportPath)) {
       compiledImportPath = await compileModule(resolvedImportPath);
     } else if (isStaticAssetPath(resolvedImportPath)) {
+      staticAssetFiles?.add(resolvedImportPath);
       const relativeAssetPath = toOutputRelativePath(projectRoot, resolvedImportPath);
       const assetOutputPath = path.join(outputRoot, relativeAssetPath);
       const stubOutputPath = `${assetOutputPath}.mjs`;
@@ -381,6 +383,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
 
   const outputRoot = getTypedOutputRoot(projectRoot, mode, target);
   const visited = new Map();
+  const staticAssetFiles = new Set();
   const moduleMetadata = new Map();
   const serverImportQuery = target === "server" && mode === "development"
     ? `t=${Date.now()}`
@@ -416,6 +419,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
       outputPath,
       inputSourceMap: transformed.map ?? null,
       onDevelopmentEvent,
+      staticAssetFiles,
     });
 
     await fs.writeFile(outputPath, rewritten.code, "utf8");
@@ -444,7 +448,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
   return {
     entrypoint: await compileModule(entryPath),
     outputRoot,
-    sourceFiles: [...visited.keys()],
+    sourceFiles: [...new Set([...visited.keys(), ...staticAssetFiles])],
   };
 }
 

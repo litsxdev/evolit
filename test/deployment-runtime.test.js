@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildProject } from "../src/build.js";
 import { getSharedOutputRoot } from "../src/client-assets.js";
-import { createDeploymentRuntime } from "../src/deployment-runtime.js";
+import { createDeploymentRuntime, createPublicAssetOrigin } from "../src/deployment-runtime.js";
 import { scaffoldSite } from "../src/scaffold.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -193,6 +193,69 @@ test("development requests reuse hot client assets until development state is in
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactBuilds, 2);
     assert.equal(developmentEvents.some((event) => event.type === "invalidated"), true);
     assert.equal(developmentEvents.some((event) => event.type === "segment-cache-invalidated"), true);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("development rebuilds retain a catch-all route's previous CSS generation for in-flight requests", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-runtime-dev-catch-all-css-"));
+  const fixtureRoot = path.join(tempRoot, "app");
+
+  try {
+    await scaffoldSite(fixtureRoot);
+    await fs.symlink(
+      path.join(frameworkRoot, "node_modules"),
+      path.join(fixtureRoot, "node_modules"),
+      "dir",
+    );
+    const routeRoot = path.join(fixtureRoot, "app", "explore", "[...slug]");
+    const stylePath = path.join(routeRoot, "page.css");
+    await fs.mkdir(routeRoot, { recursive: true });
+    await fs.writeFile(stylePath, ".explore { color: tomato; }\n", "utf8");
+    await fs.writeFile(
+      path.join(routeRoot, "page.litsx"),
+      [
+        'import "./page.css";',
+        "",
+        "export default async function ExplorePage() {",
+        '  return "<main class=\\"explore\\">explore</main>";',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const runtime = await createDeploymentRuntime({ projectRoot: fixtureRoot, mode: "development" });
+    await runtime.handle(new Request("http://evolit.local/explore/home-garden"));
+    const previousManifest = runtime.renderer.assetManifest;
+    const previousStyle = previousManifest.assets.find(
+      (asset) => asset.clientModule === "app/explore/[...slug]/page.css",
+    );
+    assert.ok(previousStyle);
+
+    // This models a stylesheet request already resolved using the manifest
+    // that was live when the browser received the previous document.
+    const previousAssetOrigin = createPublicAssetOrigin({
+      projectRoot: fixtureRoot,
+      mode: "development",
+      assetManifest: previousManifest,
+    });
+    await fs.writeFile(stylePath, ".explore { color: rebeccapurple; }\n", "utf8");
+    await runtime.invalidateDevelopmentState([stylePath]);
+    await runtime.handle(new Request("http://evolit.local/explore/home-garden"));
+
+    const refreshedStyle = runtime.renderer.assetManifest.assets.find(
+      (asset) => asset.clientModule === "app/explore/[...slug]/page.css",
+    );
+    assert.ok(refreshedStyle);
+    assert.notEqual(refreshedStyle.publicUrl, previousStyle.publicUrl);
+
+    const encodedStyleUrl = new URL(`http://evolit.local${previousStyle.publicUrl}`).pathname;
+    assert.match(encodedStyleUrl, /%5B\.\.\.slug%5D/);
+    const response = await previousAssetOrigin.read(encodedStyleUrl);
+    assert.equal(response?.status, 200);
+    assert.match(String(response?.body), /tomato/);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

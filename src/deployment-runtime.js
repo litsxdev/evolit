@@ -243,6 +243,7 @@ export async function createRequestRenderer({
   const devBundledEntries = new Set();
   const devPreparedClientModules = new Set();
   const devClientModuleDependencies = new Map();
+  let devPreviousAssetOutputPaths = new Set();
   let devRollupCache = null;
   let devClientAssetWork = Promise.resolve();
   const developmentMetrics = {
@@ -388,6 +389,12 @@ export async function createRequestRenderer({
 
         if (affectedClientModules.size > 0 || normalizedChangedPaths == null) {
           developmentMetrics.selectivelyInvalidatedClientEntries += affectedClientModules.size;
+          // The public asset origin can still be serving this manifest while
+          // the next bundle is being emitted. Retain its files for exactly one
+          // generation to make the manifest/file-system transition safe.
+          devPreviousAssetOutputPaths = new Set(
+            (currentAssetManifest?.assets ?? []).map((asset) => asset.outputPath),
+          );
           currentAssetManifest = null;
           currentAssetResolver = createAssetResolver(projectRoot, {
             assetManifest: currentAssetManifest,
@@ -477,8 +484,10 @@ export async function createRequestRenderer({
           mode: "development",
           entryClientModules: devBundledEntries,
           rollupCache: devRollupCache,
+          retainOutputPaths: devPreviousAssetOutputPaths,
         });
         currentAssetManifest = bundledClientAssets.manifest;
+        devPreviousAssetOutputPaths = new Set();
         currentAssetResolver = createAssetResolver(projectRoot, {
           assetManifest: currentAssetManifest,
         });
