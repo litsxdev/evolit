@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import MagicString from "magic-string";
 import { rollup } from "rollup";
+import commonjs from "@rollup/plugin-commonjs";
 import { nodeResolve } from "@rollup/plugin-node-resolve";
 import {
   BUILD_DIRECTORY,
@@ -52,6 +53,12 @@ export function resetDevelopmentAssetCaches(projectRoot) {
       if (key.startsWith(developmentPrefix)) {
         cache.delete(key);
       }
+    }
+  }
+  const resolutionPrefix = `${normalizedProjectRoot}::`;
+  for (const cache of [browserSpecifierFilePathCache, packageRootCache]) {
+    for (const key of cache.keys()) {
+      if (key.startsWith(resolutionPrefix)) cache.delete(key);
     }
   }
 }
@@ -125,13 +132,20 @@ function parsePackageSpecifier(specifier) {
   };
 }
 
-export async function resolvePackageRoot(packageName) {
-  if (packageRootCache.has(packageName)) {
-    return packageRootCache.get(packageName);
+export async function resolvePackageRoot(packageName, options = {}) {
+  const resolveFrom = path.resolve(options.projectRoot ?? path.dirname(fileURLToPath(import.meta.url)));
+  const cacheKey = `${resolveFrom}::${packageName}`;
+  if (packageRootCache.has(cacheKey)) {
+    return packageRootCache.get(cacheKey);
   }
 
   const pendingResolution = (async () => {
-    const packageEntryPath = requireFromHere.resolve(packageName);
+    let packageEntryPath;
+    try {
+      packageEntryPath = createRequire(path.join(resolveFrom, "package.json")).resolve(packageName);
+    } catch {
+      packageEntryPath = requireFromHere.resolve(packageName);
+    }
     let currentPath = path.dirname(packageEntryPath);
 
     while (true) {
@@ -157,12 +171,12 @@ export async function resolvePackageRoot(packageName) {
     throw new Error(`Unable to resolve package root for ${packageName}`);
   })();
 
-  packageRootCache.set(packageName, pendingResolution);
+  packageRootCache.set(cacheKey, pendingResolution);
 
   try {
     return await pendingResolution;
   } catch (error) {
-    packageRootCache.delete(packageName);
+    packageRootCache.delete(cacheKey);
     throw error;
   }
 }
@@ -184,13 +198,15 @@ function pickBrowserExportTarget(target) {
     ?? null;
 }
 
-export async function resolveBrowserSpecifierFilePath(specifier) {
+export async function resolveBrowserSpecifierFilePath(specifier, options = {}) {
   if (!isBareSpecifier(specifier)) {
     return null;
   }
 
-  if (browserSpecifierFilePathCache.has(specifier)) {
-    return browserSpecifierFilePathCache.get(specifier);
+  const resolveFrom = path.resolve(options.projectRoot ?? path.dirname(fileURLToPath(import.meta.url)));
+  const cacheKey = `${resolveFrom}::${specifier}`;
+  if (browserSpecifierFilePathCache.has(cacheKey)) {
+    return browserSpecifierFilePathCache.get(cacheKey);
   }
 
   const pendingResolution = (async () => {
@@ -200,13 +216,32 @@ export async function resolveBrowserSpecifierFilePath(specifier) {
     }
 
     const { packageName, subpath } = parsedSpecifier;
-    const { packageRoot, packageJson } = await resolvePackageRoot(packageName);
+    const { packageRoot, packageJson } = await resolvePackageRoot(packageName, { projectRoot: resolveFrom });
     const exportKey = subpath.length > 0 ? `./${subpath}` : ".";
-    const exportTarget = pickBrowserExportTarget(packageJson.exports?.[exportKey]);
+    const exportsField = packageJson.exports;
+    const exportTarget = pickBrowserExportTarget(
+      exportsField && typeof exportsField === "object" && Object.keys(exportsField).some((key) => key.startsWith("."))
+        ? exportsField[exportKey]
+        : exportKey === "." ? exportsField : null,
+    );
     const fallbackTarget = subpath.length > 0
       ? `./${subpath}`
-      : packageJson.module ?? packageJson.main ?? null;
-    const resolvedTarget = exportTarget ?? fallbackTarget;
+      : typeof packageJson.browser === "string"
+        ? packageJson.browser
+        : packageJson.module ?? packageJson.main ?? null;
+    let resolvedTarget = exportTarget ?? fallbackTarget;
+    if (resolvedTarget && packageJson.browser && typeof packageJson.browser === "object") {
+      const normalizedTarget = resolvedTarget.startsWith("./")
+        ? resolvedTarget
+        : `./${resolvedTarget}`;
+      const browserTarget = packageJson.browser[normalizedTarget]
+        ?? packageJson.browser[resolvedTarget]
+        ?? packageJson.browser[exportKey];
+      if (browserTarget === false) {
+        throw new Error(`Browser entry is disabled for ${specifier}`);
+      }
+      if (typeof browserTarget === "string") resolvedTarget = browserTarget;
+    }
 
     if (typeof resolvedTarget !== "string" || resolvedTarget.length === 0) {
       throw new Error(`Unable to resolve browser entry for ${specifier}`);
@@ -215,12 +250,12 @@ export async function resolveBrowserSpecifierFilePath(specifier) {
     return path.resolve(packageRoot, resolvedTarget);
   })();
 
-  browserSpecifierFilePathCache.set(specifier, pendingResolution);
+  browserSpecifierFilePathCache.set(cacheKey, pendingResolution);
 
   try {
     return await pendingResolution;
   } catch (error) {
-    browserSpecifierFilePathCache.delete(specifier);
+    browserSpecifierFilePathCache.delete(cacheKey);
     throw error;
   }
 }
@@ -272,16 +307,22 @@ export async function collectSharedVendorSpecifiers(
   ])].sort();
 }
 
-async function writeSharedRuntimeEntrySources(entriesRoot, specifiers) {
+async function createSharedRuntimeInputEntries(projectRoot, entriesRoot, specifiers) {
   await fs.rm(entriesRoot, { recursive: true, force: true });
   await ensureDirectory(entriesRoot);
 
   const inputEntries = {};
   for (const specifier of specifiers) {
     const entryName = createSharedEntryName(specifier);
-    const entryPath = path.join(entriesRoot, `${entryName}.mjs`);
-    await fs.writeFile(entryPath, createSharedEntrySource(specifier), "utf8");
-    inputEntries[entryName] = entryPath;
+    if (specifier === "@litsx/ssr/hydration") {
+      const entryPath = path.join(entriesRoot, `${entryName}.mjs`);
+      await fs.writeFile(entryPath, createSharedEntrySource(specifier), "utf8");
+      inputEntries[entryName] = entryPath;
+      continue;
+    }
+    inputEntries[entryName] = specifier === "evolit/navigation"
+      ? EVOLIT_NAVIGATION_BROWSER_ENTRY
+      : await resolveBrowserSpecifierFilePath(specifier, { projectRoot });
   }
 
   return inputEntries;
@@ -508,7 +549,7 @@ export async function buildSharedVendorRuntime(
     const specifiers = await collectSharedVendorSpecifiers(additionalEntrySpecifiers, {
       includeBase: options.includeBase !== false,
     });
-    const inputEntries = await writeSharedRuntimeEntrySources(entriesRoot, specifiers);
+    const inputEntries = await createSharedRuntimeInputEntries(projectRoot, entriesRoot, specifiers);
 
     await fs.rm(sharedRoot, { recursive: true, force: true });
     await ensureDirectory(sharedRoot);
@@ -534,7 +575,11 @@ export async function buildSharedVendorRuntime(
           extensions: [".mjs", ".js", ".json"],
           preferBuiltins: false,
         }),
+        commonjs({
+          transformMixedEsModules: true,
+        }),
       ],
+      preserveEntrySignatures: "strict",
       onwarn(warning, warn) {
         if (warning.code === "CIRCULAR_DEPENDENCY") {
           return;
@@ -1597,6 +1642,8 @@ export async function emitHashedClientAssets(projectRoot, options = {}) {
     chunks,
     styles,
     resources,
+    serverAssetImportsByEntry: options.serverAssetImportsByEntry ?? {},
+    clientBoundariesByEntry: options.clientBoundariesByEntry ?? {},
     assets: assets.sort((left, right) => left.clientModule.localeCompare(right.clientModule)),
   };
 
@@ -1921,6 +1968,8 @@ async function bundleClientAssets(projectRoot, options = {}) {
       .filter((asset) => asset.kind === "asset" && !asset.clientModule.endsWith(".map"))
       .map((asset) => asset.clientModule)
       .sort(),
+    serverAssetImportsByEntry: options.serverAssetImportsByEntry ?? {},
+    clientBoundariesByEntry: options.clientBoundariesByEntry ?? {},
     assets,
   };
 
@@ -2099,6 +2148,40 @@ export function collectTransitiveStyleUrls(publicUrls, assetManifest) {
   return [...styles].sort();
 }
 
+function getServerAssetImports(routeResult, projectRoot, assetManifest) {
+  if (routeResult?.serverAssetImports && typeof routeResult.serverAssetImports === "object") {
+    return routeResult.serverAssetImports;
+  }
+
+  const entryPaths = routeResult?.boundaryModule
+    ? [routeResult.boundaryModule]
+    : [
+      ...(routeResult?.route?.layouts ?? []),
+      routeResult?.route?.page,
+    ].filter((entryPath) => typeof entryPath === "string");
+  if (entryPaths.length === 0 || !assetManifest) {
+    return { styles: [], assets: [] };
+  }
+  const styles = new Set();
+  const assets = new Set();
+  for (const entryPath of entryPaths) {
+    const entry = path.relative(projectRoot, entryPath).split(path.sep).join("/");
+    const imports = assetManifest.serverAssetImportsByEntry?.[entry];
+    for (const style of imports?.styles ?? []) styles.add(style);
+    for (const asset of imports?.assets ?? []) assets.add(asset);
+  }
+  return { styles: [...styles], assets: [...assets] };
+}
+
+export function resolveServerStyleUrls(routeResult, projectRoot, assetManifest) {
+  const normalizedManifest = normalizeClientAssetManifest(assetManifest);
+  if (!normalizedManifest) return [];
+  const imports = getServerAssetImports(routeResult, projectRoot, normalizedManifest);
+  return [...new Set((imports.styles ?? [])
+    .map((style) => normalizedManifest.byClientModule[style])
+    .filter((url) => typeof url === "string"))].sort();
+}
+
 export function normalizeClientAssetManifest(manifest) {
   if (!manifest || typeof manifest !== "object" || !Array.isArray(manifest.assets)) {
     return null;
@@ -2113,6 +2196,14 @@ export function normalizeClientAssetManifest(manifest) {
     chunks: Array.isArray(manifest.chunks) ? manifest.chunks : [],
     styles: Array.isArray(manifest.styles) ? manifest.styles : [],
     resources: Array.isArray(manifest.resources) ? manifest.resources : [],
+    serverAssetImportsByEntry:
+      manifest.serverAssetImportsByEntry && typeof manifest.serverAssetImportsByEntry === "object"
+        ? manifest.serverAssetImportsByEntry
+        : {},
+    clientBoundariesByEntry:
+      manifest.clientBoundariesByEntry && typeof manifest.clientBoundariesByEntry === "object"
+        ? manifest.clientBoundariesByEntry
+        : {},
     assets: manifest.assets,
   };
 }

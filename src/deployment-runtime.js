@@ -1,8 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   compileModuleGraph,
+  collectClientGraphInventory,
+  emitClientStaticAssets,
+  getClientStaticAssetModule,
+  getCompiledClientModule,
   invalidateDevelopmentCompilationCache,
+  resolveProjectModuleSpecifier,
 } from "./compiler.js";
 import {
   collectTransitiveAssetPreloads,
@@ -18,12 +24,12 @@ import {
   normalizeClientAssetManifest,
   resetDevelopmentAssetCaches,
   resolveHydrationRootClientImports,
-  resolveRouteClientImports,
+  resolveServerStyleUrls,
   resolveSharedVendorModuleUrl,
   resolveBrowserPackageAssetFilePath,
   rewriteHydrationDataScript,
 } from "./client-assets.js";
-import { loadEvolitConfig } from "./config.js";
+import { loadEvolitConfig, resolveManagedSourceRoots } from "./config.js";
 import { DEV_DIRECTORY, INTERNAL_DIRECTORY } from "./constants.js";
 import { createRouteResolver } from "./render.js";
 import {
@@ -225,6 +231,7 @@ export async function createRequestRenderer({
   routeResolver,
   responseCacheRuntime,
   onDevelopmentEvent,
+  managedSourceRoots,
 }) {
   let currentAssetManifest = normalizeClientAssetManifest(assetManifest);
   let currentAssetResolver = createAssetResolver(projectRoot, {
@@ -243,6 +250,9 @@ export async function createRequestRenderer({
   const devBundledEntries = new Set();
   const devPreparedClientModules = new Set();
   const devClientModuleDependencies = new Map();
+  const devInventoryByEntry = new Map();
+  const devServerAssetImportsByEntry = {};
+  const devClientBoundariesByEntry = {};
   let devPreviousAssetOutputPaths = new Set();
   let devRollupCache = null;
   let devClientAssetWork = Promise.resolve();
@@ -270,9 +280,21 @@ export async function createRequestRenderer({
   function getDevClientModuleKey(clientModule) {
     return path.resolve(projectRoot, clientModule);
   }
+  function getDevelopmentEntryInventory(entryPath) {
+    let inventory = devInventoryByEntry.get(entryPath);
+    if (!inventory) {
+      inventory = collectClientGraphInventory([entryPath], { projectRoot, managedSourceRoots });
+      devInventoryByEntry.set(entryPath, inventory);
+      inventory.catch(() => {
+        if (devInventoryByEntry.get(entryPath) === inventory) devInventoryByEntry.delete(entryPath);
+      });
+    }
+    return inventory;
+  }
   async function createFrameworkRouteResolver() {
     const resolver = await createRouteResolver(projectRoot, mode, {
       onDevelopmentEvent,
+      managedSourceRoots,
       segmentRenderCache: sharedSegmentRenderCache,
       getStaticAssetPublicUrls() {
         return createStaticAssetPublicUrlMap(currentAssetManifest);
@@ -284,17 +306,211 @@ export async function createRequestRenderer({
     sharedSegmentRenderCache ??= resolver.segmentRenderCache;
     return resolver;
   }
+
+  async function compileDevelopmentClientBoundary(sourcePath) {
+    const clientModuleKey = path.resolve(sourcePath);
+    if (devPreparedClientModules.has(clientModuleKey)) return false;
+    const clientBuild = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "development",
+      sourceMaps: true,
+      target: "client",
+      onDevelopmentEvent,
+      managedSourceRoots,
+    });
+    devPreparedClientModules.add(clientModuleKey);
+    devClientModuleDependencies.set(
+      clientModuleKey,
+      new Set(clientBuild.sourceFiles ?? [clientModuleKey]),
+    );
+    devBundledEntries.add(
+      path.relative(clientBuild.outputRoot, clientBuild.entrypoint).split(path.sep).join("/"),
+    );
+    return true;
+  }
+
+  async function emitDevelopmentClientAssetManifest() {
+    developmentMetrics.clientArtifactBuilds += 1;
+    const buildStartedAt = performance.now();
+    reportDevelopmentEvent({
+      type: "client-assets-building",
+      entryCount: devBundledEntries.size,
+    });
+    const bundledClientAssets = await emitBundledClientAssetsWithState(projectRoot, {
+      mode: "development",
+      entryClientModules: devBundledEntries,
+      rollupCache: devRollupCache,
+      retainOutputPaths: devPreviousAssetOutputPaths,
+      serverAssetImportsByEntry: devServerAssetImportsByEntry,
+      clientBoundariesByEntry: devClientBoundariesByEntry,
+    });
+    currentAssetManifest = bundledClientAssets.manifest;
+    devPreviousAssetOutputPaths = new Set();
+    currentAssetResolver = createAssetResolver(projectRoot, {
+      assetManifest: currentAssetManifest,
+    });
+    currentHydrationModuleUrl = await resolveSharedVendorModuleUrl(
+      projectRoot,
+      "development",
+      "@litsx/ssr/hydration",
+      {
+        assetManifest: currentAssetManifest,
+        entryClientModules: [...devBundledEntries],
+      },
+    ) ?? currentHydrationModuleUrl;
+    devRollupCache = bundledClientAssets.rollupCache;
+    reportDevelopmentEvent({
+      type: "client-assets-ready",
+      durationMs: Math.round(performance.now() - buildStartedAt),
+      entryCount: devBundledEntries.size,
+    });
+  }
+
+  function hasClientArtifact(moduleId) {
+    return (
+      typeof currentAssetResolver(moduleId) === "string"
+      || typeof currentAssetManifest?.byPublicPath?.[moduleId] === "string"
+    );
+  }
+
+  async function resolveRenderedClientSource(moduleId, routeResult) {
+    if (typeof moduleId !== "string" || moduleId.length === 0 || moduleId.startsWith("/_evolit/")) {
+      return null;
+    }
+    if (moduleId.startsWith("file:")) {
+      try { return fileURLToPath(moduleId); } catch { return null; }
+    }
+    if (path.isAbsolute(moduleId) && !moduleId.startsWith("/app/") && !moduleId.startsWith("/src/")) {
+      try {
+        if ((await fs.stat(moduleId)).isFile()) return moduleId;
+      } catch {}
+    }
+
+    const importerPath = routeResult?.boundaryModule
+      ?? routeResult?.route?.page
+      ?? path.join(projectRoot, "app", "page.litsx");
+    if (moduleId.startsWith("/")) {
+      const projectSpecifier = `.${moduleId}`;
+      return resolveProjectModuleSpecifier(projectRoot, importerPath, projectSpecifier);
+    }
+    return resolveProjectModuleSpecifier(projectRoot, importerPath, moduleId);
+  }
+
+  async function reconcileRenderedClientArtifacts(routeResult, result) {
+    const segmentEntriesByModule = new Map();
+    for (const root of result?.hydrationData?.roots ?? []) {
+      if (typeof root?.moduleId !== "string" || typeof root?.segmentModulePath !== "string") continue;
+      const entries = segmentEntriesByModule.get(root.moduleId) ?? new Set();
+      entries.add(root.segmentModulePath);
+      segmentEntriesByModule.set(root.moduleId, entries);
+    }
+    const renderedModules = [...new Set([
+      ...(Array.isArray(result?.clientImports) ? result.clientImports : []),
+      ...(Array.isArray(result?.hydrationData?.roots)
+        ? result.hydrationData.roots.map((root) => root?.moduleId)
+        : []),
+    ].filter((moduleId) => typeof moduleId === "string" && moduleId.length > 0))];
+    const unresolvedModules = [];
+    for (const moduleId of renderedModules) {
+      if (hasClientArtifact(moduleId)) continue;
+      const sourcePath = await resolveRenderedClientSource(moduleId, routeResult);
+      const publicUrl = sourcePath ? currentAssetResolver(sourcePath) : null;
+      if (typeof publicUrl === "string") {
+        for (const root of result.hydrationData?.roots ?? []) {
+          if (root?.moduleId === moduleId) root.moduleId = sourcePath;
+        }
+        if (Array.isArray(result.clientImports)) {
+          result.clientImports = result.clientImports.map((value) => value === moduleId ? publicUrl : value);
+        }
+        if (Array.isArray(result.hydrationData?.clientImports)) {
+          result.hydrationData.clientImports = result.hydrationData.clientImports
+            .map((value) => value === moduleId ? publicUrl : value);
+        }
+        continue;
+      }
+      unresolvedModules.push({
+        moduleId,
+        sourcePath,
+        segmentEntries: [...(segmentEntriesByModule.get(moduleId) ?? [])],
+      });
+    }
+    if (unresolvedModules.length === 0) return;
+
+    if (mode !== "development") {
+      throw new Error(
+        `SSR rendered client boundaries without production artifacts: ${unresolvedModules.map(({ moduleId }) => moduleId).join(", ")}. `
+        + "Run evolit build again and ensure every rendered component has a browser-resolvable module.",
+      );
+    }
+
+    await enqueueDevClientAssetWork(async () => {
+      const compiledModules = [];
+      for (const { moduleId, sourcePath } of unresolvedModules) {
+        if (!sourcePath) {
+          throw new Error(
+            `SSR rendered an unresolved client boundary ${JSON.stringify(moduleId)}. `
+            + "Use a relative import, a configured path alias, or a package with a browser-resolvable export.",
+          );
+        }
+        await compileDevelopmentClientBoundary(sourcePath);
+        compiledModules.push(getCompiledClientModule(projectRoot, sourcePath));
+      }
+
+      const fallbackEntry = routeResult?.boundaryModule ?? routeResult?.route?.page;
+      for (let index = 0; index < unresolvedModules.length; index += 1) {
+        const unresolvedModule = unresolvedModules[index];
+        const entryKeys = unresolvedModule.segmentEntries.length > 0
+          ? unresolvedModule.segmentEntries
+          : fallbackEntry
+            ? [path.relative(projectRoot, fallbackEntry).split(path.sep).join("/")]
+            : [];
+        for (const entryKey of entryKeys) {
+          devClientBoundariesByEntry[entryKey] = [...new Set([
+            ...(devClientBoundariesByEntry[entryKey] ?? []),
+            compiledModules[index],
+          ])].sort();
+        }
+      }
+      await emitDevelopmentClientAssetManifest();
+    });
+
+    const stillUnresolved = [];
+    for (const { moduleId, sourcePath } of unresolvedModules) {
+      const publicUrl = sourcePath ? currentAssetResolver(sourcePath) : null;
+      if (!publicUrl) {
+        stillUnresolved.push(moduleId);
+        continue;
+      }
+      for (const root of result.hydrationData?.roots ?? []) {
+        if (root?.moduleId === moduleId) root.moduleId = sourcePath;
+      }
+      if (Array.isArray(result.clientImports)) {
+        result.clientImports = result.clientImports.map((value) => value === moduleId ? publicUrl : value);
+      }
+      if (Array.isArray(result.hydrationData?.clientImports)) {
+        result.hydrationData.clientImports = result.hydrationData.clientImports
+          .map((value) => value === moduleId ? publicUrl : value);
+      }
+    }
+    if (stillUnresolved.length > 0) {
+      throw new Error(`Unable to materialize rendered client boundaries: ${stillUnresolved.join(", ")}`);
+    }
+  }
+
   let effectiveRouteResolver = routeResolver ?? await createFrameworkRouteResolver();
   const ssrAdapter = createSsrAdapter({
     assetResolver(moduleId) {
       return currentAssetResolver(moduleId);
     },
+    onSsrResult({ routeResult, result }) {
+      return reconcileRenderedClientArtifacts(routeResult, result);
+    },
     async resolveAdditionalHead({ routeResult, result }) {
-      const clientImports = [
+      const clientImports = [...new Set([
         ...(Array.isArray(result.clientImports) ? result.clientImports : []),
-        ...resolveRouteClientImports(routeResult, projectRoot, currentAssetManifest),
-      ];
-      const hydratedClientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
+        ...resolveHydrationRootClientImports(result.hydrationData, currentAssetResolver),
+      ])];
+      const hydratedClientImports = clientImports;
       const urls = currentAssetManifest && hydratedClientImports.length > 0
         ? [...new Set([
           ...hydratedClientImports,
@@ -302,7 +518,10 @@ export async function createRequestRenderer({
         ])]
         : [];
       const styleUrls = currentAssetManifest
-        ? collectTransitiveStyleUrls(clientImports, currentAssetManifest)
+        ? [...new Set([
+          ...collectTransitiveStyleUrls(clientImports, currentAssetManifest),
+          ...resolveServerStyleUrls(routeResult, projectRoot, currentAssetManifest),
+        ])]
         : [];
       if (urls.length === 0 && styleUrls.length === 0) {
         return "";
@@ -314,16 +533,11 @@ export async function createRequestRenderer({
       ].join("\n");
     },
     resolveBootstrap({ routeResult, result }) {
-      const routeClientImports = resolveRouteClientImports(
-        routeResult,
-        projectRoot,
-        currentAssetManifest,
-      );
       return createHydrationBootstrap({
         hydrationData: normalizeHydrationDataForClient(
           result.hydrationData,
           projectRoot,
-          routeClientImports,
+          resolveHydrationRootClientImports(result.hydrationData, currentAssetResolver),
         ),
         assetResolver(moduleId) {
           return currentAssetResolver(moduleId);
@@ -333,23 +547,15 @@ export async function createRequestRenderer({
       });
     },
     transformDocument({ routeResult, result, document }) {
-      const routeClientImports = resolveRouteClientImports(
-        routeResult,
-        projectRoot,
-        currentAssetManifest,
-      );
       return rewriteHydrationDataScript(
         document,
         normalizeHydrationDataForClient(
           result.hydrationData,
           projectRoot,
-          [
-            ...routeClientImports,
-            ...resolveHydrationRootClientImports(
+          resolveHydrationRootClientImports(
               result.hydrationData,
               currentAssetResolver,
             ),
-          ],
         ),
       );
     },
@@ -377,6 +583,21 @@ export async function createRequestRenderer({
           ? new Set(changedPaths.map((changedPath) => path.resolve(changedPath)))
           : null;
         invalidateDevelopmentCompilationCache(projectRoot, changedPaths);
+        const moduleResolutionChanged = normalizedChangedPaths != null
+          && [...normalizedChangedPaths].some((changedPath) =>
+            /^(?:tsconfig|jsconfig)(?:\..+)?\.json$/.test(path.basename(changedPath))
+            || path.basename(changedPath) === "package.json"
+          );
+        if (normalizedChangedPaths == null || moduleResolutionChanged) {
+          devInventoryByEntry.clear();
+        } else {
+          for (const [entryPath, pendingInventory] of devInventoryByEntry) {
+            const inventory = await pendingInventory;
+            if (inventory.sourceFiles.some((sourcePath) => normalizedChangedPaths.has(path.resolve(sourcePath)))) {
+              devInventoryByEntry.delete(entryPath);
+            }
+          }
+        }
         const affectedClientModules = normalizedChangedPaths == null
           ? new Set(devPreparedClientModules)
           : new Set(
@@ -403,6 +624,12 @@ export async function createRequestRenderer({
           for (const clientModule of affectedClientModules) {
             devPreparedClientModules.delete(clientModule);
             devClientModuleDependencies.delete(clientModule);
+            delete devServerAssetImportsByEntry[
+              path.relative(projectRoot, clientModule).split(path.sep).join("/")
+            ];
+            delete devClientBoundariesByEntry[
+              path.relative(projectRoot, clientModule).split(path.sep).join("/")
+            ];
           }
         }
 
@@ -420,23 +647,58 @@ export async function createRequestRenderer({
       });
     },
     async prepareRouteClientArtifacts(routeResult) {
-      if (routeResult.type !== "route" && !routeResult.boundaryModule) {
-        return;
-      }
-
+      if (routeResult.type !== "route" && !routeResult.boundaryModule) return;
       const clientModules = [
         ...(routeResult.type === "route" ? [routeResult.route.page, ...routeResult.route.layouts] : []),
         ...(routeResult.boundaryModule ? [routeResult.boundaryModule] : []),
       ];
+      const inventoriesByEntry = new Map(await Promise.all(clientModules.map(async (entryPath) => [
+        entryPath,
+        await getDevelopmentEntryInventory(entryPath),
+      ])));
+      const inventory = {
+        clientBoundaries: [...new Set([...inventoriesByEntry.values()].flatMap((entry) => entry.clientBoundaries))].sort(),
+        styles: [...new Set([...inventoriesByEntry.values()].flatMap((entry) => entry.styles))].sort(),
+        assets: [...new Set([...inventoriesByEntry.values()].flatMap((entry) => entry.assets))].sort(),
+        sourceFiles: [...new Set([...inventoriesByEntry.values()].flatMap((entry) => entry.sourceFiles))].sort(),
+      };
+      const clientBoundaries = inventory.clientBoundaries;
+      const toProjectRelative = (filePath) => path.relative(projectRoot, filePath).split(path.sep).join("/");
+      const serverAssetImports = {
+        styles: inventory.styles.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
+        assets: inventory.assets.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
+      };
+      routeResult.serverAssetImports = serverAssetImports;
+      for (const [entryPath, entryInventory] of inventoriesByEntry) {
+        const entryKey = toProjectRelative(entryPath);
+        devServerAssetImportsByEntry[entryKey] = {
+          styles: entryInventory.styles.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
+          assets: entryInventory.assets.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
+        };
+        devClientBoundariesByEntry[entryKey] = entryInventory.clientBoundaries
+          .map((filePath) => getCompiledClientModule(projectRoot, filePath))
+          .sort();
+      }
+      const requiresManifestRefresh = !currentAssetManifest
+        || [...serverAssetImports.styles, ...serverAssetImports.assets]
+          .some((clientModule) => !currentAssetManifest.byClientModule[clientModule])
+        || [...inventoriesByEntry.keys()].some((entryPath) =>
+          currentAssetManifest.clientBoundariesByEntry?.[toProjectRelative(entryPath)] == null
+        );
+      await emitClientStaticAssets([...inventory.styles, ...inventory.assets], {
+        projectRoot,
+        mode,
+      });
 
       if (mode !== "development") {
-        for (const clientModule of new Set(clientModules)) {
+        for (const clientModule of clientBoundaries) {
           await compileModuleGraph(clientModule, {
             projectRoot,
             mode,
             sourceMaps: false,
             target: "client",
             onDevelopmentEvent,
+            managedSourceRoots,
           });
         }
         return;
@@ -444,68 +706,24 @@ export async function createRequestRenderer({
 
       return enqueueDevClientAssetWork(async () => {
         let discoveredClientEntry = false;
-        for (const clientModule of new Set(clientModules)) {
-          const clientModuleKey = getDevClientModuleKey(clientModule);
-          if (devPreparedClientModules.has(clientModuleKey)) {
-            continue;
-          }
-
-          const clientBuild = await compileModuleGraph(clientModule, {
-            projectRoot,
-            mode,
-            sourceMaps: true,
-            target: "client",
-            onDevelopmentEvent,
-          });
-          devPreparedClientModules.add(clientModuleKey);
+        for (const [entryPath, entryInventory] of inventoriesByEntry) {
           devClientModuleDependencies.set(
-            clientModuleKey,
-            new Set(clientBuild.sourceFiles ?? [clientModuleKey]),
+            getDevClientModuleKey(entryPath),
+            new Set(entryInventory.sourceFiles),
           );
-          devBundledEntries.add(
-            path.relative(clientBuild.outputRoot, clientBuild.entrypoint).split(path.sep).join("/"),
-          );
-          discoveredClientEntry = true;
+        }
+        for (const clientModule of clientBoundaries) {
+          discoveredClientEntry = await compileDevelopmentClientBoundary(clientModule)
+            || discoveredClientEntry;
         }
 
-        if (!discoveredClientEntry && currentAssetManifest) {
+        if (!discoveredClientEntry && !requiresManifestRefresh && currentAssetManifest) {
           developmentMetrics.clientArtifactCacheHits += 1;
           reportDevelopmentEvent({ type: "client-assets-cache-hit" });
           return;
         }
 
-        developmentMetrics.clientArtifactBuilds += 1;
-        const buildStartedAt = performance.now();
-        reportDevelopmentEvent({
-          type: "client-assets-building",
-          entryCount: devBundledEntries.size,
-        });
-        const bundledClientAssets = await emitBundledClientAssetsWithState(projectRoot, {
-          mode: "development",
-          entryClientModules: devBundledEntries,
-          rollupCache: devRollupCache,
-          retainOutputPaths: devPreviousAssetOutputPaths,
-        });
-        currentAssetManifest = bundledClientAssets.manifest;
-        devPreviousAssetOutputPaths = new Set();
-        currentAssetResolver = createAssetResolver(projectRoot, {
-          assetManifest: currentAssetManifest,
-        });
-        currentHydrationModuleUrl = await resolveSharedVendorModuleUrl(
-          projectRoot,
-          mode,
-          "@litsx/ssr/hydration",
-          {
-            assetManifest: currentAssetManifest,
-            entryClientModules: [...devBundledEntries],
-          },
-        ) ?? currentHydrationModuleUrl;
-        devRollupCache = bundledClientAssets.rollupCache;
-        reportDevelopmentEvent({
-          type: "client-assets-ready",
-          durationMs: Math.round(performance.now() - buildStartedAt),
-          entryCount: devBundledEntries.size,
-        });
+        await emitDevelopmentClientAssetManifest();
       });
     },
     async resolveRoutePolicy(request) {
@@ -550,7 +768,11 @@ export async function createDeploymentRuntime({
   responseCacheRuntime,
   routeResolver,
   onDevelopmentEvent,
+  managedSourceRoots,
 } = {}) {
+  const evolitConfig = await loadEvolitConfig(projectRoot);
+  const effectiveManagedSourceRoots = managedSourceRoots
+    ?? resolveManagedSourceRoots(projectRoot, evolitConfig);
   function reportDevelopmentEvent(event) {
     if (mode === "development" && typeof onDevelopmentEvent === "function") {
       onDevelopmentEvent(event);
@@ -573,7 +795,7 @@ export async function createDeploymentRuntime({
     ?? await resolveResponseCacheRuntime(
       projectRoot,
       mode,
-      await loadEvolitConfig(projectRoot),
+      evolitConfig,
     );
   const runtimeState = {
     assetManifest: mode === "development" ? null : normalizeClientAssetManifest(assetManifest),
@@ -602,6 +824,7 @@ export async function createDeploymentRuntime({
     responseCacheRuntime: effectiveResponseCacheRuntime,
     routeResolver,
     onDevelopmentEvent,
+    managedSourceRoots: effectiveManagedSourceRoots,
   });
 
   return {

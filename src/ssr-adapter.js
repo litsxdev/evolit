@@ -162,6 +162,9 @@ export function createSsrAdapter(options = {}) {
 
       if (typeof routeResult.tree === "string" && routeResult.ssrArtifacts) {
         const result = routeResult.ssrArtifacts;
+        if (typeof options.onSsrResult === "function") {
+          await options.onSsrResult({ routeResult, result });
+        }
         const metadata = resolveDocumentMetadata(routeResult.metadata, options);
         const generatedBootstrap =
           !options.bootstrap && !options.clientEntry && typeof options.resolveBootstrap === "function"
@@ -244,6 +247,9 @@ export function createSsrAdapter(options = {}) {
         clientEntry: options.clientEntry,
         template: options.template,
       });
+      if (typeof options.onSsrResult === "function") {
+        await options.onSsrResult({ routeResult, result });
+      }
 
       const generatedBootstrap =
         !options.bootstrap && !options.clientEntry && typeof options.resolveBootstrap === "function"

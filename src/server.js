@@ -3,7 +3,7 @@ import { watch } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
-import { loadEvolitConfig } from "./config.js";
+import { loadEvolitConfig, resolveManagedSourceRoots } from "./config.js";
 import { createDeploymentRuntime } from "./deployment-runtime.js";
 import { BUILD_DIRECTORY, INTERNAL_DIRECTORY, MANIFEST_FILENAME } from "./constants.js";
 import { normalizeClientAssetManifest } from "./client-assets.js";
@@ -148,7 +148,7 @@ async function createRecursiveDirectoryWatcher(rootDirectory, onChange, options 
   };
 }
 
-function createProjectWatchIgnorePath(projectRoot) {
+function createSourceWatchIgnorePath(sourceRoot) {
   const ignoredDirectoryNames = new Set([
     "node_modules",
     INTERNAL_DIRECTORY,
@@ -156,7 +156,7 @@ function createProjectWatchIgnorePath(projectRoot) {
   ]);
 
   return (candidate) => {
-    const relativePath = path.relative(projectRoot, candidate);
+    const relativePath = path.relative(sourceRoot, candidate);
     if (
       relativePath === ".."
       || relativePath.startsWith(`..${path.sep}`)
@@ -177,6 +177,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     : null;
   reportDevelopmentEvent?.({ type: "server-starting" });
   const evolitConfig = options.evolitConfig ?? await loadEvolitConfig(projectRoot);
+  const managedSourceRoots = resolveManagedSourceRoots(projectRoot, evolitConfig);
   const responseCacheRuntime = options.responseCacheStore
     ? {
       store: options.responseCacheStore,
@@ -189,6 +190,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     assetManifest: normalizeClientAssetManifest(options.assetManifest),
     responseCacheRuntime,
     onDevelopmentEvent: reportDevelopmentEvent,
+    managedSourceRoots,
   });
   const port = getPort(explicitPort);
   const liveReloadServer = mode === "development" ? new WebSocketServer({ noServer: true }) : null;
@@ -245,13 +247,13 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     }, 40);
   }
 
-  const watcher = mode === "development"
-    ? await createRecursiveDirectoryWatcher(
-      projectRoot,
+  const watchers = mode === "development"
+    ? await Promise.all(managedSourceRoots.map((sourceRoot) => createRecursiveDirectoryWatcher(
+      sourceRoot,
       scheduleDevelopmentInvalidation,
-      { shouldIgnorePath: createProjectWatchIgnorePath(projectRoot) },
-    )
-    : null;
+      { shouldIgnorePath: createSourceWatchIgnorePath(sourceRoot) },
+    )))
+    : [];
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -326,7 +328,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       if (invalidationTimer) {
         clearTimeout(invalidationTimer);
       }
-      watcher?.close();
+      for (const watcher of watchers) watcher.close();
       for (const socket of liveReloadSockets) {
         socket.close();
       }

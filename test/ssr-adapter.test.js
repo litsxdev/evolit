@@ -64,3 +64,33 @@ test("SSR adapter respects explicit framework bootstrap options over generated b
   assert.match(response.body, /framework-bootstrap\.js/);
   assert.doesNotMatch(response.body, /registerHydrationModules/);
 });
+
+test("SSR adapter reconciles rendered client roots before resolving head and bootstrap assets", async () => {
+  const calls = [];
+  const adapter = createSsrAdapter({
+    async onSsrResult({ result }) {
+      calls.push("reconcile");
+      result.clientImports = ["/_evolit/static/reconciled.mjs"];
+    },
+    resolveAdditionalHead({ result }) {
+      calls.push("head");
+      assert.deepEqual(result.clientImports, ["/_evolit/static/reconciled.mjs"]);
+      return "";
+    },
+    resolveBootstrap({ result }) {
+      calls.push("bootstrap");
+      assert.deepEqual(result.clientImports, ["/_evolit/static/reconciled.mjs"]);
+      return "";
+    },
+  });
+
+  await adapter.renderRouteTree({
+    type: "route",
+    status: 200,
+    tree: "<main>pre-rendered</main>",
+    metadata: {},
+    ssrArtifacts: { clientImports: [], hydrationData: null, headTags: [] },
+  });
+
+  assert.deepEqual(calls, ["reconcile", "bootstrap", "head"]);
+});

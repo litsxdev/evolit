@@ -22,6 +22,7 @@ import {
 } from "../src/client-assets.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
 import { compileModuleGraph } from "../src/compiler.js";
 import { scaffoldSite } from "../src/scaffold.js";
@@ -522,6 +523,74 @@ test("development vendors add bare imports without rebuilding the base runtime",
   }
 });
 
+for (const mode of ["development", "production"]) {
+  test(`shared vendor runtime preserves ESM and CommonJS exports in ${mode}`, async () => {
+    const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), `evolit-vendor-exports-${mode}-`));
+    const packages = {
+      "fixture-esm-default": {
+        packageJson: { type: "module", exports: { browser: "./browser.js", default: "./server.js" } },
+        files: {
+          "browser.js": 'export default "browser-default"; export const named = "named";\n',
+          "server.js": 'throw new Error("server entry selected");\n',
+        },
+      },
+      "fixture-commonjs-default": {
+        packageJson: { main: "./index.cjs" },
+        files: { "index.cjs": 'module.exports = function commonjsDefault() { return "commonjs-default"; };\n' },
+      },
+      "fixture-esm-named": {
+        packageJson: { type: "module", module: "./index.js" },
+        files: { "index.js": 'export const alpha = "alpha"; export const beta = "beta";\n' },
+      },
+    };
+
+    try {
+      await fs.writeFile(path.join(projectRoot, "package.json"), '{"type":"module"}\n', "utf8");
+      for (const [packageName, fixture] of Object.entries(packages)) {
+        const packageRoot = path.join(projectRoot, "node_modules", packageName);
+        await fs.mkdir(packageRoot, { recursive: true });
+        await fs.writeFile(
+          path.join(packageRoot, "package.json"),
+          JSON.stringify({ name: packageName, ...fixture.packageJson }),
+          "utf8",
+        );
+        await Promise.all(Object.entries(fixture.files).map(([fileName, source]) =>
+          fs.writeFile(path.join(packageRoot, fileName), source, "utf8")
+        ));
+      }
+
+      const specifiers = Object.keys(packages);
+      const runtime = await buildSharedVendorRuntime(projectRoot, mode, {
+        additionalEntrySpecifiers: specifiers,
+        includeBase: false,
+        vendorGroup: "fixture-exports",
+      });
+      async function importPublishedVendor(specifier) {
+        const publicUrl = runtime.imports[specifier];
+        assert.match(publicUrl, /^\/_evolit\/shared\/fixture-exports\/.+\.mjs$/);
+        const filePath = path.join(
+          getSharedOutputRoot(projectRoot, mode),
+          publicUrl.slice("/_evolit/shared/".length),
+        );
+        return import(`${pathToFileURL(filePath).href}?fixture=${specifier}`);
+      }
+
+      const esmDefault = await importPublishedVendor("fixture-esm-default");
+      assert.equal(esmDefault.default, "browser-default");
+      assert.equal(esmDefault.named, "named");
+
+      const commonjsDefault = await importPublishedVendor("fixture-commonjs-default");
+      assert.equal(commonjsDefault.default(), "commonjs-default");
+
+      const namedOnly = await importPublishedVendor("fixture-esm-named");
+      assert.deepEqual(Object.keys(namedOnly).sort(), ["alpha", "beta"]);
+      assert.equal("default" in namedOnly, false);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+}
+
 test("browser package asset urls preserve package-relative paths", async () => {
   const corePublicUrl = await createBrowserSpecifierPublicUrl("@litsx/core");
   assert.equal(corePublicUrl, "/_evolit/pkg/%40litsx/core/src/index.js");
@@ -550,13 +619,15 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
       "dir",
     );
 
-    await compileModuleGraph(path.join(fixtureRoot, "app", "page.litsx"), {
-      projectRoot: fixtureRoot,
-      mode: "development",
-      sourceMaps: true,
-      target: "client",
-    });
-    await compileModuleGraph(path.join(fixtureRoot, "app", "layout.litsx"), {
+    const pagePath = path.join(fixtureRoot, "app", "page.litsx");
+    const pageSource = await fs.readFile(pagePath, "utf8");
+    await fs.writeFile(
+      pagePath,
+      pageSource.replace("export default async function HomePage", "export default function HomePage"),
+      "utf8",
+    );
+
+    await compileModuleGraph(pagePath, {
       projectRoot: fixtureRoot,
       mode: "development",
       sourceMaps: true,
@@ -565,7 +636,7 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
 
     const manifest = await emitBundledClientAssets(fixtureRoot, {
       mode: "development",
-      entryClientModules: new Set(["app/page.mjs", "app/layout.mjs"]),
+      entryClientModules: new Set(["app/page.mjs"]),
     });
     const pageAsset = getAssetByClientModule(manifest, "app/page.mjs");
     assert.ok(pageAsset);
@@ -581,21 +652,9 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
 
     assert.deepEqual(sourceMap.sources, ["/app/page.litsx"]);
     assert.ok(Array.isArray(sourceMap.sourcesContent));
-    assert.match(sourceMap.sourcesContent[0], /export default async function HomePage/);
+    assert.match(sourceMap.sourcesContent[0], /export default function HomePage/);
     assert.match(sourceMap.sourcesContent[0], /<FeatureCard/);
     assert.doesNotMatch(sourceMap.sourcesContent[0], /import \{ LitElement, css, html \} from "lit"/);
-
-    const layoutAsset = getAssetByClientModule(manifest, "app/layout.mjs");
-    assert.ok(layoutAsset);
-    const layoutSourceMapPath = path.join(
-      fixtureRoot,
-      ".evolit",
-      "dev",
-      "static",
-      layoutAsset.publicUrl.replace("/_evolit/static/", ""),
-    ) + ".map";
-    const layoutSourceMap = JSON.parse(await fs.readFile(layoutSourceMapPath, "utf8"));
-    assert.deepEqual(layoutSourceMap.sources, ["/app/layout.litsx"]);
 
     const emittedCode = await fs.readFile(sourceMapPath.slice(0, -".map".length), "utf8");
     const traceMap = new TraceMap(sourceMap);

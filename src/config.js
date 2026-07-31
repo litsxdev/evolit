@@ -18,3 +18,28 @@ export async function loadEvolitConfig(projectRoot) {
 
   return config;
 }
+
+export function resolveManagedSourceRoots(projectRoot, config = {}) {
+  const configuredRoots = config.development?.managedSourceRoots;
+  if (configuredRoots != null && !Array.isArray(configuredRoots)) {
+    throw new Error("Expected development.managedSourceRoots to be an array of paths.");
+  }
+  const roots = [...new Set([
+    path.resolve(projectRoot),
+    ...(configuredRoots ?? []).map((sourceRoot) => {
+      if (typeof sourceRoot !== "string" || sourceRoot.length === 0) {
+        throw new Error("Expected every development.managedSourceRoots entry to be a non-empty path.");
+      }
+      return path.resolve(projectRoot, sourceRoot);
+    }),
+  ])];
+  return roots.filter((candidate, index) => !roots.some((other, otherIndex) => {
+    if (index === otherIndex) return false;
+    const relativePath = path.relative(other, candidate);
+    return relativePath === "" || (
+      relativePath !== ".."
+      && !relativePath.startsWith(`..${path.sep}`)
+      && !path.isAbsolute(relativePath)
+    );
+  }));
+}

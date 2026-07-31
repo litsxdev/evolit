@@ -14,7 +14,9 @@
   "homepage": "https://github.com/litsxdev/nextsx#readme",
   "files": [
     "src",
-    "templates"
+    "templates/default/app/**",
+    "templates/default/jsconfig.json",
+    "templates/default/yarnrc.yml.template"
   ],
   "bin": "./src/cli.js",
   "main": "./src/index.js",
@@ -56,6 +58,7 @@
     "@litsx/core": "0.17.0-canary-feat-ssr-20260726184312",
     "@litsx/ssr": "0.2.0-canary-feat-ssr-20260726184312",
     "@litsx/typescript": "^0.9.0",
+    "@rollup/plugin-commonjs": "^29.0.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "lit": "^3.3.3",
     "magic-string": "^1.1.0",

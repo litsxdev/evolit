@@ -151,8 +151,15 @@ before(async () => {
     path.join(fixtureRoot, "node_modules"),
     "dir",
   );
+  const jsconfigPath = path.join(fixtureRoot, "jsconfig.json");
+  const jsconfig = JSON.parse(await fs.readFile(jsconfigPath, "utf8"));
+  jsconfig.compilerOptions.baseUrl = ".";
+  jsconfig.compilerOptions.paths = { "@components/*": ["app/components/*"] };
+  jsconfig.include.push("src/**/*");
+  await fs.writeFile(jsconfigPath, `${JSON.stringify(jsconfig, null, 2)}\n`, "utf8");
   await fs.mkdir(path.join(fixtureRoot, "src", "styles"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "src", "themes"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "src", "server"), { recursive: true });
   await Promise.all([
     fs.writeFile(
       path.join(fixtureRoot, "src", "styles", "tokens.css"),
@@ -173,6 +180,33 @@ before(async () => {
       'import "../src/styles/tokens.css";',
       'import "../src/themes/composable.css";',
       rootLayoutSource,
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "src", "server", "catalog-fragment.litsx"),
+    [
+      'import { createHash } from "node:crypto";',
+      'import FeatureCard from "@components/feature-card";',
+      "",
+      "export default async function CatalogFragment() {",
+      '  const digest = createHash("sha1").update("server-only").digest("hex").slice(0, 8);',
+      '  return <FeatureCard title="Server graph" body={digest} />;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.mkdir(path.join(fixtureRoot, "app", "server-graph"), { recursive: true });
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "server-graph", "page.litsx"),
+    [
+      'import CatalogFragment from "../../src/server/catalog-fragment.litsx";',
+      "",
+      "export default async function ServerGraphPage() {",
+      "  return <CatalogFragment />;",
+      "}",
+      "",
     ].join("\n"),
     "utf8",
   );
@@ -344,6 +378,16 @@ before(async () => {
     ].join("\n"),
     "utf8",
   );
+  await fs.writeFile(
+    path.join(fixtureRoot, "src", "dynamic-card.litsx"),
+    'export default function DynamicCard() { return <aside>Dynamic card</aside>; }\n',
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "evolit.config.js"),
+    'export default { clientBoundaries: ["./src/dynamic-card.litsx"] };\n',
+    "utf8",
+  );
   await buildProject(fixtureRoot);
   buildManifest = JSON.parse(
     await fs.readFile(
@@ -411,15 +455,43 @@ test("start server emits hashed public asset URLs for hydration bootstrap", asyn
   assert.doesNotMatch(html, /\/Users\//);
 });
 
+test("build materializes configured dynamic client boundaries without preloading them", async () => {
+  const dynamicAsset = buildManifest.clientAssets.assets.find(
+    (asset) => asset.clientModule === "src/dynamic-card.mjs",
+  );
+  assert.ok(dynamicAsset);
+  const html = await (await fetch(`${baseUrl}/`)).text();
+  assert.doesNotMatch(html, new RegExp(dynamicAsset.publicUrl.replaceAll(".", "\\.")));
+});
+
+test("arbitrary Server Components and Node dependencies stay out of the client graph", async () => {
+  const response = await fetch(`${baseUrl}/server-graph`);
+  const html = await response.text();
+  const serverEntry = "app/server-graph/page.litsx";
+  const boundaries = buildManifest.clientAssets.clientBoundariesByEntry[serverEntry];
+
+  assert.equal(response.status, 200);
+  assert.match(html, /Server graph/);
+  assert.deepEqual(boundaries, ["app/components/feature-card.mjs"]);
+  assert.equal(
+    buildManifest.clientAssets.assets.some((asset) =>
+      asset.clientModule.includes("catalog-fragment")
+      || asset.clientModule === "app/server-graph/page.mjs"
+    ),
+    false,
+  );
+  assert.equal(JSON.stringify(buildManifest.clientAssets).includes("node:crypto"), false);
+  assert.doesNotMatch(html, /catalog-fragment|node:crypto/);
+  assert.ok(Array.isArray(buildManifest.clientAssets.clientBoundariesByEntry["app/layout.litsx"]));
+  assert.ok(Array.isArray(buildManifest.clientAssets.clientBoundariesByEntry["app/server-graph/page.litsx"]));
+});
+
 test("build manifest classifies entry and chunk client assets with structured metadata", () => {
   const featureCardAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/feature-card.mjs",
   );
   const cardAccentAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-accent.mjs",
-  );
-  const homePageAsset = buildManifest.clientAssets.assets.find(
-    (asset) => asset.clientModule === "app/page.mjs",
   );
   const cardAccentStyleAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "app/components/card-accent.css",
@@ -436,14 +508,16 @@ test("build manifest classifies entry and chunk client assets with structured me
 
   assert.ok(featureCardAsset);
   assert.ok(cardAccentAsset);
-  assert.ok(homePageAsset);
+  assert.equal(
+    buildManifest.clientAssets.assets.some((asset) => asset.clientModule === "app/page.mjs"),
+    false,
+  );
   assert.ok(cardAccentStyleAsset);
   assert.ok(cardAccentSvgAsset);
   assert.ok(cardBadgePngAsset);
   assert.ok(cardBadgeSpecialPngAsset);
-  assert.equal(featureCardAsset.kind, "chunk");
+  assert.equal(featureCardAsset.kind, "entry");
   assert.equal(cardAccentAsset.kind, "chunk");
-  assert.equal(homePageAsset.kind, "entry");
   assert.equal(cardAccentStyleAsset.kind, "style");
   assert.equal(cardAccentStyleAsset.type, "style");
   assert.equal(cardAccentSvgAsset.kind, "asset");
@@ -454,12 +528,11 @@ test("build manifest classifies entry and chunk client assets with structured me
   assert.equal(cardBadgeSpecialPngAsset.type, "asset");
   assert.equal(buildManifest.clientAssets.version, 1);
   assert.equal(buildManifest.clientAssets.publicPathPrefix, "/_evolit/static/");
-  assert.equal(typeof homePageAsset.hash, "string");
-  assert.equal(homePageAsset.hash.length, 8);
-  assert.equal(typeof homePageAsset.size, "number");
-  assert.equal(homePageAsset.size > 0, true);
-  assert.equal(buildManifest.clientAssets.entries.includes("app/page.mjs"), true);
-  assert.equal(buildManifest.clientAssets.chunks.includes("app/components/feature-card.mjs"), true);
+  assert.equal(typeof featureCardAsset.hash, "string");
+  assert.equal(featureCardAsset.hash.length > 0, true);
+  assert.equal(typeof featureCardAsset.size, "number");
+  assert.equal(featureCardAsset.size > 0, true);
+  assert.equal(buildManifest.clientAssets.entries.includes("app/components/feature-card.mjs"), true);
   assert.equal(buildManifest.clientAssets.styles.includes("app/components/card-accent.css"), true);
   assert.equal(buildManifest.clientAssets.resources.includes("app/components/card-accent.svg"), true);
   assert.equal(buildManifest.clientAssets.resources.includes("app/components/card-badge.png"), true);
@@ -477,6 +550,7 @@ test("build manifest classifies entry and chunk client assets with structured me
       { pathname: "/catalog/:category/:slug", cache: "static" },
       { pathname: "/docs/*slug", cache: { revalidate: 60 } },
       { pathname: "/optional/**slug", cache: { revalidate: 60 } },
+      { pathname: "/server-graph", cache: { revalidate: 60 } },
     ],
   );
   assert.deepEqual(buildManifest.prerenderedRoutes, [
@@ -595,6 +669,14 @@ test("build emits deploy route and asset manifests for external deployment pipel
         pathname: "/optional/**slug",
         cache: { revalidate: 60 },
         cacheKey: "/optional/**slug",
+        prerendered: false,
+        prerenderedPaths: [],
+        responsePath: null,
+      },
+      {
+        pathname: "/server-graph",
+        cache: { revalidate: 60 },
+        cacheKey: "/server-graph",
         prerendered: false,
         prerenderedPaths: [],
         responsePath: null,
@@ -791,9 +873,6 @@ test("start server emits hashed modulepreload links that match the asset manifes
 test("start server emits every stylesheet imported by the root layout", async () => {
   const response = await fetch(`${baseUrl}/`);
   const html = await response.text();
-  const layoutAsset = buildManifest.clientAssets.assets.find(
-    (asset) => asset.clientModule === "app/layout.mjs",
-  );
   const tokensStyleAsset = buildManifest.clientAssets.assets.find(
     (asset) => asset.clientModule === "src/styles/tokens.css",
   );
@@ -804,20 +883,27 @@ test("start server emits every stylesheet imported by the root layout", async ()
     (asset) => asset.clientModule === "app/global.css",
   );
 
-  assert.ok(layoutAsset);
+  assert.equal(
+    buildManifest.clientAssets.assets.some((asset) => asset.clientModule === "app/layout.mjs"),
+    false,
+  );
   assert.ok(tokensStyleAsset);
   assert.ok(composableStyleAsset);
   assert.ok(globalStyleAsset);
-  assert.deepEqual(layoutAsset.styleImports, [
+  assert.deepEqual(buildManifest.clientAssets.serverAssetImportsByEntry["app/layout.litsx"].styles, [
     "app/global.css",
     "src/styles/tokens.css",
     "src/themes/composable.css",
   ]);
-  assert.deepEqual(layoutAsset.styleUrls, [
+  assert.deepEqual(
+    buildManifest.clientAssets.serverAssetImportsByEntry["app/layout.litsx"].styles
+      .map((clientModule) => buildManifest.clientAssets.byClientModule[clientModule]),
+    [
     globalStyleAsset.publicUrl,
     tokensStyleAsset.publicUrl,
     composableStyleAsset.publicUrl,
-  ]);
+    ],
+  );
   for (const styleAsset of [tokensStyleAsset, composableStyleAsset, globalStyleAsset]) {
     assert.match(
       html,

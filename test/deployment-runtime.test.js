@@ -75,7 +75,7 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
     assert.match(String(dynamicRequestResponse.body), /request runtime:acme/);
 
     const assetPublicUrl = buildManifest.clientAssets.assets.find(
-      (asset) => asset.clientModule === "app/page.mjs",
+      (asset) => asset.clientModule === "app/components/feature-card.mjs",
     )?.publicUrl;
     assert.ok(assetPublicUrl);
 
@@ -83,7 +83,7 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
     const assetSource = String(assetResponse.body);
     assert.equal(assetResponse.status, 200);
     assert.equal(assetResponse.headers["content-type"], "text/javascript; charset=utf-8");
-    assert.match(assetSource, /\.\/components\/feature-card-[A-Za-z0-9_-]+\.mjs/);
+    assert.match(assetSource, /customElements|LitElement|litsx/);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
@@ -153,15 +153,16 @@ test("development requests reuse hot client assets until development state is in
     assert.equal(runtime.renderer.developmentMetrics.clientArtifactBuilds, 1);
     assert.equal(developmentEvents.some((event) => event.type === "client-assets-building"), true);
     assert.equal(developmentEvents.some((event) => event.type === "client-assets-ready"), true);
-    const layoutAsset = runtime.renderer.assetManifest.assets.find(
-      (asset) => asset.clientModule === "app/layout.mjs",
-    );
     const externalStyleAssets = runtime.renderer.assetManifest.assets.filter(
       (asset) => asset.clientModule.startsWith("__unmanaged__/__up__/src/") && asset.type === "style",
     );
-    assert.ok(layoutAsset);
+    assert.equal(
+      runtime.renderer.assetManifest.assets.some((asset) => asset.clientModule === "app/layout.mjs"),
+      false,
+    );
     assert.equal(externalStyleAssets.length, 2);
-    assert.equal(layoutAsset.styleUrls.length, 3);
+    assert.equal(runtime.renderer.assetManifest.serverAssetImportsByEntry["app/page.litsx"].styles.length, 0);
+    assert.equal(runtime.renderer.assetManifest.serverAssetImportsByEntry["app/layout.litsx"].styles.length, 3);
     assert.equal(developmentEvents.filter((event) => event.type === "unmanaged-import").length, 2);
     for (const styleAsset of externalStyleAssets) {
       await fs.access(styleAsset.outputPath);

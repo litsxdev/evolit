@@ -144,6 +144,7 @@ function createRouteModuleOptions(projectRoot, mode, options = {}) {
     ssr: true,
     staticAssetPublicUrls: resolvedStaticAssetPublicUrls,
     onDevelopmentEvent: options.onDevelopmentEvent,
+    managedSourceRoots: options.managedSourceRoots,
   };
 }
 
@@ -209,7 +210,12 @@ function combineSegmentSsrArtifacts(results) {
     for (const clientImport of result.clientImports ?? []) clientImports.add(clientImport);
     for (const headTag of result.headTags ?? []) headTags.add(headTag);
     if (!result.hydrationData) continue;
-    roots.push(...(result.hydrationData.roots ?? []));
+    roots.push(...(result.hydrationData.roots ?? []).map((root) => ({
+      ...root,
+      ...(typeof result.segmentModulePath === "string"
+        ? { segmentModulePath: result.segmentModulePath }
+        : {}),
+    })));
     Object.assign(payload.roots, result.hydrationData.payload?.roots ?? {});
     Object.assign(payload.instances, result.hydrationData.payload?.instances ?? {});
   }
@@ -389,6 +395,7 @@ async function renderSegmentedComponentTree(
         assetResolver: options.assetResolver,
         context: { idPrefix },
       });
+      pageResult.segmentModulePath = segment.modulePath;
       results.push(pageResult);
       return pageResult.html;
     }
@@ -415,6 +422,7 @@ async function renderSegmentedComponentTree(
         assetResolver: options.assetResolver,
         context: { idPrefix },
       });
+      layoutResult.segmentModulePath = segment.modulePath;
       profile = {
         all: trackedParams.profile().all || trackedSearchParams.profile().all,
         keys: [...new Set([

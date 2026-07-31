@@ -317,6 +317,33 @@ export default {
 };
 ```
 
+For monorepos, development watches only the application project by default. Additional source
+trees can be opted into explicitly; generated output and dependency directories below every root
+remain ignored:
+
+```js
+export default {
+  development: {
+    managedSourceRoots: ["../packages/design-system/src"],
+  },
+};
+```
+
+Imports outside these roots remain unmanaged and produce the existing development warning.
+
+Evolit normally discovers browser boundaries from the static module graph and reconciles that
+inventory with the components actually emitted by SSR. A genuinely computed import cannot be
+enumerated at build time, so production applications can declare only those exceptional modules:
+
+```js
+export default {
+  clientBoundaries: ["./src/components/dynamic-card.litsx", "@acme/ui/product-card"],
+};
+```
+
+These modules are materialized as build artifacts, but are not automatically imported or
+preloaded. They reach the browser only when an SSR hydration root references them.
+
 The framework also exports `ObjectStorageResponseCacheStore`, which is intended for object-store
 backends such as S3. A concrete app can wire it to the AWS SDK without pulling AWS dependencies
 into `evolit` itself.

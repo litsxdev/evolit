@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   discoverAppRouteHandlers,
   discoverAppRoutes,
@@ -15,13 +16,20 @@ import {
   emitBundledClientAssets,
   emitHashedClientAssets,
   normalizeHydrationDataForClient,
+  resolveServerStyleUrls,
   resolveHydrationRootClientImports,
-  resolveRouteClientImports,
   resolveSharedVendorModuleUrl,
   rewriteHydrationDataScript,
   rewriteServerAssetPlaceholders,
 } from "./client-assets.js";
-import { compileModuleGraph, importCompiledModule } from "./compiler.js";
+import {
+  collectClientGraphInventory,
+  compileModuleGraph,
+  emitClientStaticAssets,
+  getClientStaticAssetModule,
+  importCompiledModule,
+  resolveProjectModuleSpecifier,
+} from "./compiler.js";
 import { loadEvolitConfig } from "./config.js";
 import {
   BUILD_DIRECTORY,
@@ -125,7 +133,37 @@ export async function buildProject(projectRoot) {
   const routeHandlers = await discoverAppRouteHandlers(projectRoot);
   const buildRoot = path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY);
   const entryClientModules = new Set();
+  const serverAssetImportsByEntry = {};
+  const clientBoundariesByEntry = {};
   const deployHandlers = [];
+  const compiledClientBoundaries = new Map();
+  const inventoriesBySourceEntry = new Map();
+
+  function getEntryInventory(entryPath) {
+    let inventory = inventoriesBySourceEntry.get(entryPath);
+    if (!inventory) {
+      inventory = collectClientGraphInventory([entryPath], { projectRoot });
+      inventoriesBySourceEntry.set(entryPath, inventory);
+    }
+    return inventory;
+  }
+
+  async function compileProductionClientBoundary(sourcePath) {
+    let clientModule = compiledClientBoundaries.get(sourcePath);
+    if (clientModule) return clientModule;
+    const clientBuild = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: true,
+      target: "client",
+    });
+    clientModule = path.relative(clientBuild.outputRoot, clientBuild.entrypoint)
+      .split(path.sep)
+      .join("/");
+    compiledClientBoundaries.set(sourcePath, clientModule);
+    entryClientModules.add(clientModule);
+    return clientModule;
+  }
 
   await ensureDirectory(buildRoot);
 
@@ -168,16 +206,6 @@ export async function buildProject(projectRoot) {
       target: "server",
     });
 
-    const pageClientBuild = await compileModuleGraph(route.page, {
-      projectRoot,
-      mode: "production",
-      sourceMaps: true,
-      target: "client",
-    });
-    entryClientModules.add(
-      path.relative(pageClientBuild.outputRoot, pageClientBuild.entrypoint).split(path.sep).join("/"),
-    );
-
     for (const layoutPath of route.layouts) {
       await compileModuleGraph(layoutPath, {
         projectRoot,
@@ -187,15 +215,6 @@ export async function buildProject(projectRoot) {
         target: "server",
       });
 
-      const layoutClientBuild = await compileModuleGraph(layoutPath, {
-        projectRoot,
-        mode: "production",
-        sourceMaps: true,
-        target: "client",
-      });
-      entryClientModules.add(
-        path.relative(layoutClientBuild.outputRoot, layoutClientBuild.entrypoint).split(path.sep).join("/"),
-      );
     }
 
     const boundaryModules = [
@@ -210,23 +229,70 @@ export async function buildProject(projectRoot) {
         ssr: true,
         target: "server",
       });
+    }
 
-      const boundaryClientBuild = await compileModuleGraph(boundaryPath, {
-        projectRoot,
-        mode: "production",
-        sourceMaps: true,
-        target: "client",
-      });
-      entryClientModules.add(
-        path.relative(boundaryClientBuild.outputRoot, boundaryClientBuild.entrypoint)
-          .split(path.sep)
-          .join("/"),
+    const toProjectRelative = (filePath) => path.relative(projectRoot, filePath).split(path.sep).join("/");
+    const segmentEntries = [...new Set([route.page, ...route.layouts, ...boundaryModules])];
+    const inventoriesByEntry = new Map(await Promise.all(segmentEntries.map(async (entryPath) => [
+      entryPath,
+      await getEntryInventory(entryPath),
+    ])));
+    const allStyles = new Set();
+    const allAssets = new Set();
+    const allClientBoundaries = new Set();
+    for (const [entryPath, entryInventory] of inventoriesByEntry) {
+      serverAssetImportsByEntry[toProjectRelative(entryPath)] = {
+        styles: entryInventory.styles.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
+        assets: entryInventory.assets.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
+      };
+      entryInventory.styles.forEach((filePath) => allStyles.add(filePath));
+      entryInventory.assets.forEach((filePath) => allAssets.add(filePath));
+      entryInventory.clientBoundaries.forEach((filePath) => allClientBoundaries.add(filePath));
+    }
+    await emitClientStaticAssets([...allStyles, ...allAssets], {
+      projectRoot,
+      mode: "production",
+    });
+    const compiledBoundaryModules = new Map();
+    for (const clientBoundary of allClientBoundaries) {
+      compiledBoundaryModules.set(
+        clientBoundary,
+        await compileProductionClientBoundary(clientBoundary),
       );
     }
+    for (const [entryPath, entryInventory] of inventoriesByEntry) {
+      clientBoundariesByEntry[toProjectRelative(entryPath)] = entryInventory.clientBoundaries
+        .map((clientBoundary) => compiledBoundaryModules.get(clientBoundary))
+        .filter(Boolean)
+        .sort();
+    }
+  }
+
+  const configuredClientBoundaries = evolitConfig.clientBoundaries ?? [];
+  if (!Array.isArray(configuredClientBoundaries)) {
+    throw new Error("Expected clientBoundaries in evolit.config.js to be an array of module specifiers.");
+  }
+  for (const specifier of configuredClientBoundaries) {
+    if (typeof specifier !== "string" || specifier.length === 0) {
+      throw new Error("Expected every clientBoundaries entry to be a non-empty module specifier.");
+    }
+    const sourcePath = path.isAbsolute(specifier)
+      ? specifier
+      : await resolveProjectModuleSpecifier(
+        projectRoot,
+        path.join(projectRoot, "evolit.config.js"),
+        specifier,
+      );
+    if (!sourcePath) {
+      throw new Error(`Unable to resolve configured client boundary ${JSON.stringify(specifier)}.`);
+    }
+    await compileProductionClientBoundary(sourcePath);
   }
 
   const clientAssets = await emitBundledClientAssets(projectRoot, {
     entryClientModules,
+    serverAssetImportsByEntry,
+    clientBoundariesByEntry,
   });
   const staticAssetPublicUrls = createStaticAssetPublicUrlMap(clientAssets);
   await rewriteServerAssetPlaceholders(projectRoot, clientAssets);
@@ -244,19 +310,68 @@ export async function buildProject(projectRoot) {
   );
   const ssrAdapter = createSsrAdapter({
     assetResolver,
-    async resolveAdditionalHead({ routeResult, result }) {
-      const clientImports = [
+    async onSsrResult({ routeResult, result }) {
+      const renderedModules = [...new Set([
         ...(Array.isArray(result.clientImports) ? result.clientImports : []),
-        ...resolveRouteClientImports(routeResult, projectRoot, clientAssets),
-      ];
-      const hydratedClientImports = Array.isArray(result.clientImports) ? result.clientImports : [];
+        ...(Array.isArray(result.hydrationData?.roots)
+          ? result.hydrationData.roots.map((root) => root?.moduleId)
+          : []),
+      ].filter((moduleId) => typeof moduleId === "string" && moduleId.length > 0))];
+      const unresolved = [];
+      for (const moduleId of renderedModules) {
+        if (assetResolver(moduleId) || clientAssets.byPublicPath?.[moduleId]) continue;
+        const importerPath = routeResult.boundaryModule
+          ?? routeResult.route?.page
+          ?? path.join(projectRoot, "app", "page.litsx");
+        let sourcePath = null;
+        if (moduleId.startsWith("file:")) {
+          try { sourcePath = fileURLToPath(moduleId); } catch {}
+        } else if (path.isAbsolute(moduleId) && !moduleId.startsWith("/app/") && !moduleId.startsWith("/src/")) {
+          sourcePath = moduleId;
+        } else if (moduleId.startsWith("/")) {
+          sourcePath = await resolveProjectModuleSpecifier(projectRoot, importerPath, `.${moduleId}`);
+        } else {
+          sourcePath = await resolveProjectModuleSpecifier(projectRoot, importerPath, moduleId);
+        }
+        const publicUrl = sourcePath ? assetResolver(sourcePath) : null;
+        if (!publicUrl) {
+          unresolved.push(moduleId);
+          continue;
+        }
+        for (const root of result.hydrationData?.roots ?? []) {
+          if (root?.moduleId === moduleId) root.moduleId = sourcePath;
+        }
+        if (Array.isArray(result.clientImports)) {
+          result.clientImports = result.clientImports.map((value) => value === moduleId ? publicUrl : value);
+        }
+        if (Array.isArray(result.hydrationData?.clientImports)) {
+          result.hydrationData.clientImports = result.hydrationData.clientImports
+            .map((value) => value === moduleId ? publicUrl : value);
+        }
+      }
+      if (unresolved.length > 0) {
+        throw new Error(
+          `SSR rendered client boundaries without build artifacts for ${routeResult.route?.pathname ?? "route"}: `
+          + `${unresolved.join(", ")}.`,
+        );
+      }
+    },
+    async resolveAdditionalHead({ routeResult, result }) {
+      const clientImports = [...new Set([
+        ...(Array.isArray(result.clientImports) ? result.clientImports : []),
+        ...resolveHydrationRootClientImports(result.hydrationData, assetResolver),
+      ])];
+      const hydratedClientImports = clientImports;
       const urls = hydratedClientImports.length > 0
         ? [...new Set([
           ...hydratedClientImports,
           ...collectTransitiveAssetPreloads(hydratedClientImports, clientAssets),
         ])]
         : [];
-      const styleUrls = collectTransitiveStyleUrls(clientImports, clientAssets);
+      const styleUrls = [...new Set([
+        ...collectTransitiveStyleUrls(clientImports, clientAssets),
+        ...resolveServerStyleUrls(routeResult, projectRoot, clientAssets),
+      ])];
 
       return [
         ...urls.map((href) => `<link rel="modulepreload" href="${href}" data-evolit-route-asset="preload">`),
@@ -264,36 +379,23 @@ export async function buildProject(projectRoot) {
       ].join("\n");
     },
     resolveBootstrap({ routeResult, result }) {
-      const routeClientImports = resolveRouteClientImports(
-        routeResult,
-        projectRoot,
-        clientAssets,
-      );
       return createHydrationBootstrap({
         hydrationData: normalizeHydrationDataForClient(
           result.hydrationData,
           projectRoot,
-          routeClientImports,
+          resolveHydrationRootClientImports(result.hydrationData, assetResolver),
         ),
         assetResolver,
         hydrationModuleUrl,
       });
     },
     transformDocument({ routeResult, result, document }) {
-      const routeClientImports = resolveRouteClientImports(
-        routeResult,
-        projectRoot,
-        clientAssets,
-      );
       return rewriteHydrationDataScript(
         document,
         normalizeHydrationDataForClient(
           result.hydrationData,
           projectRoot,
-          [
-            ...routeClientImports,
-            ...resolveHydrationRootClientImports(result.hydrationData, assetResolver),
-          ],
+          resolveHydrationRootClientImports(result.hydrationData, assetResolver),
         ),
       );
     },

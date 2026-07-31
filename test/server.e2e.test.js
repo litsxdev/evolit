@@ -7,7 +7,6 @@ import net from "node:net";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import { createDevServer } from "../src/server.js";
-import { resolveRouteClientImports } from "../src/client-assets.js";
 import { scaffoldSite } from "../src/scaffold.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -16,6 +15,7 @@ let fixtureRoot;
 let server;
 let baseUrl;
 let unmanagedSharedPath;
+let managedSharedPath;
 const developmentEvents = [];
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 const cardBadgeSpecialPngFile = "card badge@2x.png";
@@ -527,10 +527,27 @@ before(async () => {
     ].join("\n"),
     "utf8",
   );
+  managedSharedPath = path.join(path.dirname(fixtureRoot), "managed-source", "shared.litsx");
+  await fs.mkdir(path.dirname(managedSharedPath), { recursive: true });
+  await fs.writeFile(managedSharedPath, 'export const managedMessage = "managed version one";\n', "utf8");
+  await fs.mkdir(path.join(fixtureRoot, "app", "watcher-managed"), { recursive: true });
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "watcher-managed", "page.litsx"),
+    [
+      'import { managedMessage } from "../../../managed-source/shared.litsx";',
+      'export const routeConfig = { cache: "static" };',
+      "export default function WatcherManagedPage() {",
+      '  return `<main>${managedMessage}</main>`;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
 
   const port = await getAvailablePort();
   server = await createDevServer(fixtureRoot, {
     port,
+    evolitConfig: { development: { managedSourceRoots: ["../managed-source"] } },
     onDevelopmentEvent(event) {
       developmentEvents.push(event);
     },
@@ -804,7 +821,7 @@ test("dev server resolves catch-all dynamic segments", async () => {
   assert.match(html, /docs:\[&quot;guides&quot;,&quot;routing&quot;,&quot;dynamic&quot;\]/);
 });
 
-test("dev server injects the catch-all route entry into LitSX hydration metadata", async () => {
+test("dev server injects the catch-all route's hydratable boundary without compiling the route entry", async () => {
   const renderedRoutes = [];
   for (const pathname of ["/explore", "/explore/home-garden/furniture"]) {
     const response = await fetch(`${baseUrl}${pathname}`);
@@ -820,22 +837,12 @@ test("dev server injects the catch-all route entry into LitSX hydration metadata
     && asset.clientModule.includes("...slug")
     && asset.clientModule.endsWith("/page.mjs"),
   );
-  const resolvedRouteImports = resolveRouteClientImports({
-    route: {
-      page: path.join(fixtureRoot, "app", "explore", "[...slug]", "page.litsx"),
-      layouts: [],
-    },
-  }, fixtureRoot, manifest);
+  const featureCardEntry = manifest.assets.find(
+    (asset) => asset.clientModule === "app/components/feature-card.mjs",
+  );
 
-  assert.ok(routeEntry, "Expected a compiled catch-all client entry");
-  assert.ok(resolvedRouteImports.includes(routeEntry.publicUrl), JSON.stringify({
-    routeEntry,
-    resolvedRouteImports,
-    manifestLookup: manifest.byClientModule[routeEntry.clientModule],
-    manifestModules: manifest.assets
-      .filter((asset) => asset.clientModule.includes("app/explore/"))
-      .map((asset) => asset.clientModule),
-  }));
+  assert.equal(routeEntry, undefined, "Server route modules must not become client entries");
+  assert.ok(featureCardEntry, "Expected the hydratable component boundary to be compiled");
 
   for (const { pathname, response, html } of renderedRoutes) {
     const hydrationMatch = html.match(/<script type="application\/json" id="__LITSX_HYDRATION__">([\s\S]*?)<\/script>/);
@@ -843,8 +850,8 @@ test("dev server injects the catch-all route entry into LitSX hydration metadata
 
     assert.equal(response.status, 200);
     assert.ok(hydrationData);
-    assert.ok(hydrationData.clientImports.includes(routeEntry.publicUrl));
-    assert.match(html, new RegExp(routeEntry.publicUrl.replaceAll(".", "\\.")));
+    assert.ok(hydrationData.clientImports.includes(featureCardEntry.publicUrl));
+    assert.match(html, new RegExp(featureCardEntry.publicUrl.replaceAll(".", "\\.")));
   }
 });
 
@@ -863,7 +870,7 @@ test("dev server returns navigation deltas for catch-all routes and repeated que
   assert.equal(pageSegment.projections.length, 1);
   assert.match(pageSegment.projections[0].html, /home-garden/);
   assert.match(pageSegment.projections[0].html, /furniture/);
-  assert.ok(delta.hydrationData.clientImports.some((specifier) => specifier.includes("app/explore/")));
+  assert.ok(delta.hydrationData.clientImports.some((specifier) => specifier.includes("app/components/feature-card")));
 });
 
 test("dev server resolves optional catch-all routes with and without trailing segments", async () => {
@@ -1057,4 +1064,17 @@ test("dev server does not watch unmanaged modules outside the project root", asy
   const response = await fetch(`${baseUrl}/watcher-unmanaged`);
   assert.match(await response.text(), /unmanaged version one/);
   assert.equal(developmentEvents.filter((event) => event.type === "invalidated").length, invalidationCount);
+});
+
+test("dev server watches explicitly managed source roots outside the project", async () => {
+  const invalidationCount = developmentEvents.filter((event) => event.type === "invalidated").length;
+  const initialResponse = await fetch(`${baseUrl}/watcher-managed`);
+  assert.match(await initialResponse.text(), /managed version one/);
+
+  await fs.writeFile(managedSharedPath, 'export const managedMessage = "managed version two";\n', "utf8");
+  await waitForResponse(
+    () => fetch(`${baseUrl}/watcher-managed`),
+    ({ response, body }) => response.status === 200 && body.includes("managed version two"),
+  );
+  assert.ok(developmentEvents.filter((event) => event.type === "invalidated").length > invalidationCount);
 });

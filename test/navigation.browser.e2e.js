@@ -31,6 +31,24 @@ async function runCli(projectRoot, ...args) {
   if (code !== 0) throw new Error(`evolit ${args.join(" ")} failed:\n${output}`);
 }
 
+async function linkFrameworkDependencies(projectRoot) {
+  const targetRoot = path.join(projectRoot, "node_modules");
+  await fs.mkdir(targetRoot, { recursive: true });
+  for (const entry of await fs.readdir(path.join(frameworkRoot, "node_modules"), { withFileTypes: true })) {
+    if (entry.name.startsWith(".")) continue;
+    const sourcePath = path.join(frameworkRoot, "node_modules", entry.name);
+    const targetPath = path.join(targetRoot, entry.name);
+    if (entry.name.startsWith("@")) {
+      await fs.mkdir(targetPath, { recursive: true });
+      for (const scopedEntry of await fs.readdir(sourcePath)) {
+        await fs.symlink(path.join(sourcePath, scopedEntry), path.join(targetPath, scopedEntry), "dir");
+      }
+    } else {
+      await fs.symlink(sourcePath, targetPath, "dir");
+    }
+  }
+}
+
 async function navigate(page, href) {
   await page.evaluate(async (target) => {
     const bootstrap = [...document.scripts]
@@ -108,12 +126,14 @@ test("browser can load an Evolit SSR document with route segment metadata", asyn
       return {
         contentType,
         roots: delta.hydrationData?.roots?.map((root) => root.id) ?? [],
+        rootSegments: delta.hydrationData?.roots?.map((root) => root.segmentModulePath) ?? [],
         imports: delta.hydrationData?.clientImports ?? [],
         page: (delta.route.segments.find((segment) => segment.kind === "page")?.projections ?? []).map((projection) => projection.html),
       };
     });
     expect(deltaDiagnostics.contentType).toContain("application/vnd.evolit.navigation+json");
     expect(deltaDiagnostics.roots.length).toBeGreaterThan(0);
+    expect(deltaDiagnostics.rootSegments.every((modulePath) => typeof modulePath === "string")).toBe(true);
     expect(deltaDiagnostics.page.join("\n")).toContain("data-litsx-root");
     await expect.poll(() => restoredCard.evaluate((element) => ({
       shadowRoot: Boolean(element.shadowRoot),
@@ -467,7 +487,69 @@ test("browser navigation preserves catch-all params and repeated query params", 
 
   try {
     await scaffoldSite(projectRoot);
-    await fs.symlink(path.join(frameworkRoot, "node_modules"), path.join(projectRoot, "node_modules"), "dir");
+    await linkFrameworkDependencies(projectRoot);
+    const packageRoot = path.join(projectRoot, "node_modules", "@fixture", "browser-card");
+    await fs.mkdir(packageRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@fixture/browser-card",
+        type: "module",
+        exports: { ".": { browser: "./browser.js", import: "./server.js" } },
+      }),
+    );
+    const createPackageCard = (runtime) => [
+      'import { LITSX_MODULE_ID } from "@litsx/core/elements";',
+      'import { LitElement, html } from "lit";',
+      "export default class PackageCard extends LitElement {",
+      `  static runtime = "${runtime}";`,
+      '  static [LITSX_MODULE_ID] = "@fixture/browser-card";',
+      '  static [Symbol.for("litsx.hydratableTag")] = "package-card";',
+      '  static [Symbol.for("litsx.component")] = true;',
+      `  render() { return html\`<p data-package-runtime="${runtime}">Package card</p>\`; }`,
+      "}",
+      "",
+    ].join("\n");
+    await fs.writeFile(path.join(packageRoot, "browser.js"), createPackageCard("browser"), "utf8");
+    await fs.writeFile(path.join(packageRoot, "server.js"), createPackageCard("server"), "utf8");
+    const formatPackageRoot = path.join(projectRoot, "node_modules", "@fixture", "client-format");
+    await fs.mkdir(formatPackageRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(formatPackageRoot, "package.json"),
+      JSON.stringify({ name: "@fixture/client-format", main: "./index.cjs" }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(formatPackageRoot, "index.cjs"),
+      'module.exports = function format(value) { return String(value); };\n',
+      "utf8",
+    );
+    const jsconfigPath = path.join(projectRoot, "jsconfig.json");
+    const jsconfig = JSON.parse(await fs.readFile(jsconfigPath, "utf8"));
+    jsconfig.compilerOptions.baseUrl = ".";
+    jsconfig.compilerOptions.paths = { "@ui/*": ["src/ui/*"] };
+    jsconfig.include.push("src/**/*");
+    await fs.writeFile(jsconfigPath, `${JSON.stringify(jsconfig, null, 2)}\n`, "utf8");
+    await fs.mkdir(path.join(projectRoot, "src", "ui"), { recursive: true });
+    await fs.writeFile(
+      path.join(projectRoot, "src", "ui", "alias-card.litsx"),
+      [
+        'import format from "@fixture/client-format";',
+        'export default function AliasCard() { return <article data-alias-card="hydrated">{format("Alias card")}</article>; }',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "src", "ui", "mixed-card.litsx"),
+      [
+        'import { createHash } from "node:crypto";',
+        'export default async function ServerOnlyFragment() { return <p>{createHash("sha1").update("server").digest("hex")}</p>; }',
+        'export function MixedCard() { return <article data-mixed-card="hydrated">Mixed card</article>; }',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
     const routeRoot = path.join(projectRoot, "app", "explore", "[...slug]");
     await fs.mkdir(routeRoot, { recursive: true });
     await fs.writeFile(
@@ -493,11 +575,14 @@ test("browser navigation preserves catch-all params and repeated query params", 
       path.join(projectRoot, "app", "other", "page.litsx"),
       [
         'import "./other.css";',
+        'import AliasCard from "@ui/alias-card";',
+        'import PackageCard from "@fixture/browser-card";',
+        'import { MixedCard } from "@ui/mixed-card";',
         "",
         'export const metadata = { title: "Other", description: "Other collection", lang: "es", htmlAttributes: { dir: "rtl", "data-route": "other" }, bodyAttributes: { "data-route": "other" }, head: \'<meta name="robots" content="noindex">\' };',
         "",
         "export default async function OtherPage() {",
-        '  return <main data-other-route="yes">Other</main>;',
+        '  return <main data-other-route="yes">Other<AliasCard /><PackageCard /><MixedCard /></main>;',
         "}",
         "",
       ].join("\n"),
@@ -544,6 +629,21 @@ test("browser navigation preserves catch-all params and repeated query params", 
     });
     await expect(page).toHaveURL(/\/other$/);
     await expect(page.locator("main[data-other-route]")).toHaveCount(1);
+    const aliasCard = page.locator("alias-card");
+    await expect.poll(() => aliasCard.evaluate((element) => ({
+      upgraded: element.constructor.name !== "HTMLElement",
+      content: element.shadowRoot?.querySelector("[data-alias-card]")?.textContent ?? "",
+    }))).toEqual({ upgraded: true, content: "Alias card" });
+    const packageCard = page.locator("package-card");
+    await expect.poll(() => packageCard.evaluate((element) => ({
+      upgraded: element.constructor.name !== "HTMLElement",
+      runtime: element.constructor.runtime,
+    }))).toEqual({ upgraded: true, runtime: "browser" });
+    const mixedCard = page.locator("mixed-card");
+    await expect.poll(() => mixedCard.evaluate((element) => ({
+      upgraded: element.constructor.name !== "HTMLElement",
+      content: element.shadowRoot?.querySelector("[data-mixed-card]")?.textContent,
+    }))).toEqual({ upgraded: true, content: "Mixed card" });
     await expect(page).toHaveTitle("Other");
     await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", "Other collection");
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");
