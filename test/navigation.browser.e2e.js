@@ -155,6 +155,95 @@ test("browser can load an Evolit SSR document with route segment metadata", asyn
   }
 });
 
+test("development refresh applies server deltas and hot-swaps changed client code", async ({ page }, testInfo) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-development-refresh-"));
+  const projectRoot = path.join(tempRoot, "site");
+  const port = 3900 + testInfo.workerIndex;
+  const origin = `http://127.0.0.1:${port}`;
+  let child;
+
+  try {
+    await scaffoldSite(projectRoot);
+    await linkFrameworkDependencies(projectRoot);
+    let browserDeltaRequests = 0;
+    page.on("request", (request) => {
+      if (request.headers().accept?.includes("application/vnd.evolit.navigation+json")) {
+        browserDeltaRequests += 1;
+      }
+    });
+    child = spawn(process.execPath, [path.join(frameworkRoot, "src", "cli.js"), "dev", "--port", String(port)], {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    await waitForServer(origin);
+    await page.goto(origin, { waitUntil: "networkidle", timeout: 20_000 });
+    const initialScroll = await page.evaluate(() => {
+      window.__evolitDocumentIdentity = "initial-document";
+      window.scrollTo(0, 120);
+      return window.scrollY;
+    });
+
+    const pagePath = path.join(projectRoot, "app", "page.litsx");
+    const pageSource = await fs.readFile(pagePath, "utf8");
+    await fs.writeFile(
+      pagePath,
+      pageSource.replace("LitSX application framework", "Incrementally refreshed on the server"),
+      "utf8",
+    );
+
+    await expect(page.locator(".eyebrow")).toHaveText("Incrementally refreshed on the server", { timeout: 10_000 });
+    expect(await page.evaluate(() => window.__evolitDocumentIdentity)).toBe("initial-document");
+    expect(await page.evaluate(() => window.scrollY)).toBe(initialScroll);
+    expect(browserDeltaRequests).toBe(0);
+
+    const layoutPath = path.join(projectRoot, "app", "layout.litsx");
+    const layoutSource = await fs.readFile(layoutPath, "utf8");
+    await fs.writeFile(
+      layoutPath,
+      layoutSource.replace('<div class="wordmark">evolit</div>', '<div class="wordmark">evolit incremental</div>'),
+      "utf8",
+    );
+
+    await expect(page.locator(".wordmark")).toHaveText("evolit incremental", { timeout: 10_000 });
+    await expect(page.locator(".eyebrow")).toHaveText("Incrementally refreshed on the server");
+    expect(await page.evaluate(() => window.__evolitDocumentIdentity)).toBe("initial-document");
+
+    const globalStylePath = path.join(projectRoot, "app", "global.css");
+    const globalStyleSource = await fs.readFile(globalStylePath, "utf8");
+    await fs.writeFile(
+      globalStylePath,
+      globalStyleSource.replace("letter-spacing: 0.16em", "letter-spacing: 0.2em"),
+      "utf8",
+    );
+
+    await expect.poll(() => page.locator(".wordmark").evaluate((element) =>
+      getComputedStyle(element).letterSpacing,
+    ), { timeout: 10_000 }).toBe("2.4px");
+    expect(browserDeltaRequests).toBe(0);
+
+    const componentPath = path.join(projectRoot, "app", "components", "feature-card.litsx");
+    const componentSource = await fs.readFile(componentPath, "utf8");
+    await fs.writeFile(
+      componentPath,
+      componentSource.replace("padding: 24px", "padding: 25px"),
+      "utf8",
+    );
+
+    await expect.poll(() => page.locator("feature-card").first().evaluate((element) =>
+      getComputedStyle(element.shadowRoot.querySelector(".card")).padding,
+    ), { timeout: 10_000 }).toBe("25px");
+    expect(await page.evaluate(() => window.__evolitDocumentIdentity ?? null)).toBe("initial-document");
+    await expect(page.locator(".eyebrow")).toHaveText("Incrementally refreshed on the server");
+    expect(browserDeltaRequests).toBe(0);
+  } finally {
+    if (child?.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("browser navigation falls back to the SSR document for a route without a delta", async ({ page }, testInfo) => {
   const port = 3700 + testInfo.workerIndex;
   const origin = `http://127.0.0.1:${port}`;

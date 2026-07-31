@@ -65,7 +65,30 @@ function injectLiveReloadSnippet(response) {
 }
 
 function createLiveReloadSnippet() {
-  return `<script data-evolit-live-reload>const evolitProtocol=window.location.protocol==="https:"?"wss:":"ws:";const evolitSocket=new WebSocket(evolitProtocol+"//"+window.location.host+${JSON.stringify(LIVE_RELOAD_PATHNAME)});evolitSocket.addEventListener("message",({data})=>{if(data==="reload")window.location.reload()});</script>`;
+  return `<script data-evolit-live-reload>(()=>{const protocol=location.protocol==="https:"?"wss:":"ws:";let socket;let connected=false;const subscribe=()=>{if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:"subscribe",url:location.href}))};const connect=()=>{socket=new WebSocket(protocol+"//"+location.host+${JSON.stringify(LIVE_RELOAD_PATHNAME)});socket.addEventListener("open",()=>{if(connected){location.reload();return}connected=true;subscribe()});socket.addEventListener("message",({data})=>{let update;try{update=JSON.parse(data)}catch{location.reload();return}if(update?.type==="reload"){location.reload();return}if(update?.type!=="update"||update.url!==location.href){return}const detail={update,handled:false,result:null};dispatchEvent(new CustomEvent("evolit:development-refresh",{detail}));if(!detail.handled){location.reload();return}Promise.resolve(detail.result).then((applied)=>{if(!applied)location.reload()}).catch(()=>location.reload())});socket.addEventListener("close",()=>setTimeout(connect,250))};addEventListener("popstate",subscribe);addEventListener("evolit:navigation",subscribe);connect()})();</script>`;
+}
+
+function createDevelopmentNavigationRequest(subscription, origin) {
+  const headers = new Headers(subscription.headers);
+  headers.set("accept", "application/vnd.evolit.navigation+json");
+  for (const name of ["connection", "upgrade", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions"]) {
+    headers.delete(name);
+  }
+  return new Request(new URL(subscription.url, origin), { headers });
+}
+
+function annotateDevelopmentSegmentRevisions(delta, revisions) {
+  if (delta?.type !== "route" || !Array.isArray(delta.route?.segments)) return delta;
+  return {
+    ...delta,
+    route: {
+      ...delta.route,
+      segments: delta.route.segments.map((segment) => {
+        const revision = revisions.get(segment.modulePath);
+        return revision == null ? segment : { ...segment, revision };
+      }),
+    },
+  };
 }
 
 async function createRecursiveDirectoryWatcher(rootDirectory, onChange, options = {}) {
@@ -194,9 +217,22 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
   });
   const port = getPort(explicitPort);
   const liveReloadServer = mode === "development" ? new WebSocketServer({ noServer: true }) : null;
-  const liveReloadSockets = new Set();
-  liveReloadServer?.on("connection", (socket) => {
-    liveReloadSockets.add(socket);
+  const liveReloadSockets = new Map();
+  liveReloadServer?.on("connection", (socket, request) => {
+    const subscription = { url: null, headers: request.headers };
+    liveReloadSockets.set(socket, subscription);
+    socket.on("message", (message) => {
+      try {
+        const payload = JSON.parse(String(message));
+        if (payload?.type !== "subscribe" || typeof payload.url !== "string") return;
+        const origin = `http://${request.headers.host ?? `localhost:${port}`}`;
+        const url = new URL(payload.url, origin);
+        if (url.origin !== new URL(origin).origin) return;
+        subscription.url = url.href;
+      } catch {
+        // Ignore malformed development protocol messages.
+      }
+    });
     socket.on("close", () => {
       liveReloadSockets.delete(socket);
     });
@@ -206,6 +242,63 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
   let resolvePendingInvalidation = null;
   let invalidationPromise = Promise.resolve();
   const pendingChangedPaths = new Set();
+  let developmentVersion = 0;
+  const segmentRevisions = new Map();
+
+  async function pushDevelopmentUpdates(changedPaths, invalidationResult) {
+    developmentVersion += 1;
+    for (const modulePath of invalidationResult?.affectedRouteEntryPaths ?? []) {
+      segmentRevisions.set(modulePath, developmentVersion);
+    }
+    const strategy = (invalidationResult?.affectedClientEntryCount ?? 0) > 0 ? "hot" : "delta";
+    const renders = new Map();
+    await Promise.all([...liveReloadSockets].map(async ([socket, subscription]) => {
+      if (socket.readyState !== WebSocket.OPEN || !subscription.url) return;
+      const cacheKey = JSON.stringify([
+        subscription.url,
+        subscription.headers.cookie ?? "",
+        subscription.headers.authorization ?? "",
+        subscription.headers["accept-language"] ?? "",
+      ]);
+      let pending = renders.get(cacheKey);
+      if (!pending) {
+        pending = (async () => {
+          const origin = `http://${subscription.headers.host ?? `localhost:${port}`}`;
+          const response = await deploymentRuntime.handle(
+            createDevelopmentNavigationRequest(subscription, origin),
+          );
+          const navigationResponse = createNavigationResponseFromDocument(response);
+          if (!getResponseHeader(navigationResponse.headers, "content-type")
+            ?.includes("application/vnd.evolit.navigation+json")) return null;
+          const delta = JSON.parse(navigationResponse.body);
+          return annotateDevelopmentSegmentRevisions(delta, segmentRevisions);
+        })();
+        renders.set(cacheKey, pending);
+      }
+      try {
+        const delta = await pending;
+        if (!delta) {
+          socket.send(JSON.stringify({ type: "reload", version: developmentVersion }));
+          return;
+        }
+        socket.send(JSON.stringify({
+          type: "update",
+          strategy,
+          version: developmentVersion,
+          url: subscription.url,
+          delta,
+        }));
+      } catch {
+        socket.send(JSON.stringify({ type: "reload", version: developmentVersion }));
+      }
+    }));
+    reportDevelopmentEvent?.({
+      type: "live-update",
+      strategy,
+      affectedClientEntryCount: invalidationResult?.affectedClientEntryCount ?? null,
+      subscriberCount: liveReloadSockets.size,
+    });
+  }
 
   function scheduleDevelopmentInvalidation(changedPath = null) {
     if (changedPath) {
@@ -232,18 +325,12 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       resolvePendingInvalidation = null;
       invalidationPromise = invalidationPromise
         .catch(() => {})
-        .then(() => deploymentRuntime.invalidateDevelopmentState(changedPaths));
-      invalidationPromise.then(
-        () => {
-          for (const socket of liveReloadSockets) {
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send("reload");
-            }
-          }
-          resolve();
-        },
-        resolve,
-      );
+        .then(async () => {
+          const invalidationResult = await deploymentRuntime.invalidateDevelopmentState(changedPaths);
+          await pushDevelopmentUpdates(changedPaths, invalidationResult);
+          return invalidationResult;
+        });
+      invalidationPromise.then(resolve, resolve);
     }, 40);
   }
 
@@ -329,7 +416,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         clearTimeout(invalidationTimer);
       }
       for (const watcher of watchers) watcher.close();
-      for (const socket of liveReloadSockets) {
+      for (const socket of liveReloadSockets.keys()) {
         socket.close();
       }
       if (liveReloadServer) {

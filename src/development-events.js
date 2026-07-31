@@ -51,6 +51,11 @@ export function createDevelopmentEventReporter() {
           `${terminal.cyan("[evolit]")} ${terminal.yellow("△")} Source change detected${event.changedPathCount == null ? "" : ` (${event.changedPathCount} files)`}; invalidated ${event.affectedClientEntryCount} client entries.`,
         );
         break;
+      case "live-update":
+        console.log(
+          `${terminal.cyan("[evolit]")} ${event.strategy === "delta" ? terminal.green("↻") : terminal.magenta("↻")} ${event.strategy === "delta" ? "Pushed incremental route refresh." : "Pushed hot client refresh."}`,
+        );
+        break;
       case "unmanaged-import":
         console.warn(
           `${terminal.yellow("[evolit]")} ${terminal.yellow("⚠")} Unmanaged import ${terminal.cyan(JSON.stringify(event.resolvedImportPath))} from ${terminal.cyan(JSON.stringify(event.sourcePath))} is outside the project root. Evolit does not watch it; changes may not trigger a rebuild, and it may be unavailable in another checkout or deployment. It will be emitted under ${terminal.cyan("/_evolit/static/__unmanaged__/")}.`,

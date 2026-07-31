@@ -108,6 +108,51 @@ test("compiler reuses development graphs until they are invalidated", async () =
   }
 });
 
+test("development client modules export stable Evolit hot component proxies", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-hot-component-"));
+  const sourcePath = path.join(projectRoot, "src", "card.litsx");
+
+  try {
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(
+      sourcePath,
+      [
+        "export default function Card() { return <button>default</button>; }",
+        "export function Badge() { return <span>named</span>; }",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const development = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "development",
+      sourceMaps: false,
+      target: "client",
+    });
+    const developmentCode = await fs.readFile(development.entrypoint, "utf8");
+    assert.match(
+      developmentCode,
+      /import \{ hotComponent as __evolitHotComponent \} from "evolit\/internal\/development-hot"/,
+    );
+    assert.match(developmentCode, /__evolitHotComponent\("src\/card\.litsx", Card\)/);
+    assert.match(developmentCode, /export default __evolit_hot_Card_0/);
+    assert.match(developmentCode, /export \{ __evolit_hot_Badge_1 as Badge \}/);
+
+    const production = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: false,
+      target: "client",
+    });
+    const productionCode = await fs.readFile(production.entrypoint, "utf8");
+    assert.doesNotMatch(productionCode, /development-hot|__evolitHotComponent/);
+  } finally {
+    invalidateDevelopmentCompilationCache(projectRoot);
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("compiler rejects a client graph that reaches a LitSX Server Component", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-client-server-boundary-"));
   const clientPath = path.join(projectRoot, "src", "client-card.litsx");

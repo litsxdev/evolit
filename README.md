@@ -131,6 +131,18 @@ Both hooks update after client navigation. `useParams()` returns a read-only sna
 `URLSearchParams` from `useSearchParams()` is a local snapshot, so build a new href and navigate to
 it to update the URL.
 
+### Development refresh
+
+In development, each browser subscribes its active URL over the Evolit WebSocket. After source
+invalidation, the server renders the fresh SSR representation once per request context and pushes
+the resulting delta directly to its subscribers. No follow-up browser request is needed. Server-only
+module and static-asset changes update only the affected route segment while preserving the document,
+scroll position, and persistent layouts.
+Changes to a hydrated client boundary rebuild its browser artifact and update the stable Evolit
+development proxy registered for that tag. Existing instances receive the new implementation
+without redefining the Custom Element or replacing the document. Invalid deltas and failed hot
+updates still fall back to a document reload.
+
 ### Progressive links and forms
 
 Links work without JavaScript. With JavaScript, Evolit intercepts ordinary same-origin left-clicks.

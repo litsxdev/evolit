@@ -802,6 +802,56 @@ function getDevelopmentGraphCacheKey(entryPath, options) {
   ].join("::");
 }
 
+function wrapDevelopmentHydratableExports(code, moduleId, inputSourceMap = null) {
+  const sourcePath = moduleId;
+  const sourceFile = ts.createSourceFile(sourcePath, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const magicSource = new MagicString(code);
+  const exports = [];
+  let index = 0;
+  for (const statement of sourceFile.statements) {
+    if (!ts.isClassDeclaration(statement) || !statement.name) continue;
+    const isHydratable = statement.members.some((member) =>
+      member.name?.getText(sourceFile).includes('Symbol.for("litsx.hydratableTag")')
+    );
+    if (!isHydratable) continue;
+    const modifiers = statement.modifiers ?? [];
+    const isExported = modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+    if (!isExported) continue;
+    const isDefault = modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword);
+    for (const modifier of modifiers) {
+      if (modifier.kind === ts.SyntaxKind.ExportKeyword || modifier.kind === ts.SyntaxKind.DefaultKeyword) {
+        magicSource.remove(modifier.getStart(sourceFile), modifier.end);
+      }
+    }
+    const className = statement.name.text;
+    const proxyName = `__evolit_hot_${className}_${index++}`;
+    exports.push(
+      `const ${proxyName} = __evolitHotComponent(${JSON.stringify(moduleId)}, ${className});`,
+      isDefault ? `export default ${proxyName};` : `export { ${proxyName} as ${className} };`,
+    );
+  }
+  if (exports.length === 0) return { code, map: inputSourceMap };
+  magicSource.append(
+    '\nimport { hotComponent as __evolitHotComponent } from "evolit/internal/development-hot";\n'
+      + `${exports.join("\n")}\n`,
+  );
+  const hotTransformSource = `${moduleId}#evolit-hot`;
+  const hotTransformMap = magicSource.generateMap({
+    hires: true,
+    includeContent: false,
+    source: hotTransformSource,
+    file: moduleId,
+  });
+  return {
+    code: magicSource.toString(),
+    map: inputSourceMap
+      ? remapping(hotTransformMap.toString(), (source) => (
+        source.endsWith("#evolit-hot") ? inputSourceMap : null
+      ))
+      : null,
+  };
+}
+
 export function invalidateDevelopmentCompilationCache(projectRoot, changedPaths = null) {
   const resolvedProjectRoot = path.resolve(projectRoot);
   const prefix = `${resolvedProjectRoot}::`;
@@ -904,14 +954,24 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
         clientImportParents,
       );
     }
-    const targetCode = target === "client" && isMixedComponentModule
+    const projectedCode = target === "client" && isMixedComponentModule
       ? createMixedModuleClientProjection(transformed.code, sourcePath)
       : transformed.code;
+    const targetTransform = target === "client" && mode === "development"
+      ? wrapDevelopmentHydratableExports(
+        projectedCode,
+        path.relative(projectRoot, sourcePath).split(path.sep).join("/"),
+        projectedCode === transformed.code ? transformed.map ?? null : null,
+      )
+      : {
+        code: projectedCode,
+        map: projectedCode === transformed.code ? transformed.map ?? null : null,
+      };
     const rewritten = await rewriteRelativeSpecifiers({
       projectRoot,
       outputRoot,
       sourcePath,
-      code: targetCode,
+      code: targetTransform.code,
       compileModule: (resolvedImportPath) => compileModule(resolvedImportPath, sourcePath),
       moduleMetadata,
       mode,
@@ -920,7 +980,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
       serverImportQuery,
       sourceMaps,
       outputPath,
-      inputSourceMap: targetCode === transformed.code ? transformed.map ?? null : null,
+      inputSourceMap: targetTransform.map,
       onDevelopmentEvent,
       staticAssetFiles,
       managedSourceRoots,

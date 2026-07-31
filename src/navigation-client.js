@@ -10,6 +10,7 @@ export { createHref } from "./navigation-url.js";
 
 let browserNavigation = null;
 let nextHistoryEntryId = 0;
+const DEVELOPMENT_REFRESH_EVENT = "evolit:development-refresh";
 const historySessionId = globalThis.crypto?.randomUUID?.()
   ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
@@ -174,7 +175,16 @@ function syncDocumentState(nextState, documentRef) {
   if (script) script.textContent = JSON.stringify(nextState);
 }
 
-async function applyRouteDelta(delta, documentRef = document, signal) {
+function versionClientImport(specifier, version) {
+  if (!version || typeof specifier !== "string") return specifier;
+  const url = new URL(specifier, globalThis.location?.href ?? "http://evolit.local/");
+  url.searchParams.set("__evolit_hot", String(version));
+  return url.origin === globalThis.location?.origin
+    ? `${url.pathname}${url.search}${url.hash}`
+    : url.href;
+}
+
+async function applyRouteDelta(delta, documentRef = document, signal, options = {}) {
   throwIfAborted(signal);
   const current = readRoute(documentRef);
   const nextSegments = delta.route?.segments ?? [];
@@ -185,17 +195,42 @@ async function applyRouteDelta(delta, documentRef = document, signal) {
       (segment, offset) => segment.inputKey !== currentSegments[offset]?.inputKey,
     );
   }
+  if (index < 0) {
+    index = nextSegments.findIndex(
+      (segment, offset) => segment.revision !== currentSegments[offset]?.revision,
+    );
+  }
   if (index < 0) index = Math.max(0, nextSegments.length - 1);
-  const next = nextSegments[index];
-  const previous = currentSegments[index] ?? currentSegments.at(-1);
-  if (!next || !previous) return;
-  const targets = findMarkers(documentRef, previous.id);
-  // A projection is positional: reusing projection zero for a second target
-  // duplicates DOM (and hydration roots) when a layout changes its children
-  // cardinality. A full document navigation is the only safe recovery when
-  // the live tree and delta disagree.
-  if (targets.length !== next.projections.length) return false;
+  let next;
+  let previous;
+  let targets;
+  // A leaf rendered as plain text can have no physical segment markers: Lit
+  // escapes those markers inside its parent template. Walk outward to the
+  // nearest replaceable ancestor rather than treating a zero/zero match as a
+  // successful update. This also recovers safely from stale child cardinality.
+  for (let candidate = index; candidate >= 0; candidate -= 1) {
+    const candidateNext = nextSegments[candidate];
+    const candidatePrevious = currentSegments[candidate] ?? currentSegments.at(-1);
+    if (!candidateNext || !candidatePrevious) continue;
+    const candidateTargets = findMarkers(documentRef, candidatePrevious.id);
+    if (
+      candidateTargets.length > 0
+      && candidateTargets.length === candidateNext.projections.length
+    ) {
+      next = candidateNext;
+      previous = candidatePrevious;
+      targets = candidateTargets;
+      break;
+    }
+  }
+  if (!next || !previous || !targets) return false;
   await syncRouteHeadAssets(delta.headAssets, documentRef);
+  throwIfAborted(signal);
+  const clientImports = (delta.hydrationData?.clientImports ?? [])
+    .map((specifier) => versionClientImport(specifier, options.moduleVersion));
+  await registerHydrationModules(
+    await Promise.all(clientImports.map((specifier) => import(specifier))),
+  );
   throwIfAborted(signal);
   syncRouteHeadMarkup(delta.head, documentRef);
   syncDocumentState(delta.document, documentRef);
@@ -232,16 +267,12 @@ async function applyRouteDelta(delta, documentRef = document, signal) {
   const script = documentRef.getElementById("__EVOLIT_ROUTE__");
   if (script) script.textContent = JSON.stringify(delta.route);
   if (delta.title) documentRef.title = delta.title;
-  throwIfAborted(signal);
-  await registerHydrationModules(
-    await Promise.all((delta.hydrationData?.clientImports ?? []).map((specifier) => import(specifier))),
-  );
   for (const { root, element } of insertedRoots) {
     throwIfAborted(signal);
     await hydrateRoot(element, {
       rootId: root.id,
       hydrationData: delta.hydrationData,
-      clientImports: delta.hydrationData.clientImports,
+      clientImports,
     });
   }
   return true;
@@ -354,8 +385,19 @@ export function createBrowserNavigation(options = {}) {
   let navigationSequence = 0;
   let state = { status: "idle", url: windowRef.location.href, pendingUrl: null, error: null };
   const emit = () => listeners.forEach((listener) => listener(state));
+  const notifyLocationChange = () => {
+    const EventConstructor = windowRef.CustomEvent ?? globalThis.CustomEvent;
+    if (typeof windowRef.dispatchEvent === "function" && typeof EventConstructor === "function") {
+      windowRef.dispatchEvent(new EventConstructor("evolit:navigation", { detail: state }));
+    }
+  };
   const applyDelta = options.applyDelta
-    ?? ((delta, { signal } = {}) => applyRouteDelta(delta, windowRef.document, signal));
+    ?? ((delta, context = {}) => applyRouteDelta(
+      delta,
+      windowRef.document,
+      context.signal,
+      context,
+    ));
 
   function navigateDocument(href, mode) {
     // This is deliberately a fallback, not the normal navigation path. It
@@ -482,7 +524,11 @@ export function createBrowserNavigation(options = {}) {
         })();
       if (!delta || !isCurrent()) return null;
       if (delta.type === "redirect") return navigate(delta.location, "replace", false);
-      const applied = await applyDelta(delta, { signal: navigationController.signal });
+      const applied = await applyDelta(delta, {
+        signal: navigationController.signal,
+        moduleVersion: options.moduleVersion,
+        hot: options.hot,
+      });
       if (applied === false) {
         navigateDocument(href, mode);
         return null;
@@ -509,6 +555,7 @@ export function createBrowserNavigation(options = {}) {
       );
       state = { status: "idle", url: canonicalHref, pendingUrl: null, error: null };
       emit();
+      notifyLocationChange();
       return delta;
     } catch (error) {
       if (error?.name === "AbortError" || !isCurrent()) return null;
@@ -522,6 +569,36 @@ export function createBrowserNavigation(options = {}) {
     void navigate(windowRef.location.href, "replace", true, {
       historyEntryId: event.state?.__evolitNavigationEntry,
       scrollPosition: event.state?.__evolitScroll ?? null,
+    });
+  });
+  windowRef.addEventListener(DEVELOPMENT_REFRESH_EVENT, (event) => {
+    const detail = event.detail;
+    if (!detail || typeof detail !== "object") return;
+    detail.handled = true;
+    if (detail.update?.type !== "update" || detail.update?.strategy === "reload") {
+      detail.result = Promise.resolve(false);
+      return;
+    }
+    controller?.abort();
+    const refreshController = new AbortController();
+    controller = refreshController;
+    state = { ...state, status: "pending", pendingUrl: windowRef.location.href, error: null };
+    emit();
+    detail.result = applyDelta(detail.update.delta, {
+      signal: refreshController.signal,
+      hot: detail.update.strategy === "hot",
+      moduleVersion: detail.update.version,
+    }).then((applied) => {
+      if (applied === false || refreshController.signal.aborted) return false;
+      state = { status: "idle", url: windowRef.location.href, pendingUrl: null, error: null };
+      emit();
+      return true;
+    }).catch((error) => {
+      if (error?.name !== "AbortError") {
+        state = { ...state, status: "error", pendingUrl: null, error };
+        emit();
+      }
+      throw error;
     });
   });
   windowRef.document.addEventListener("click", (event) => {

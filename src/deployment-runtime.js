@@ -250,6 +250,7 @@ export async function createRequestRenderer({
   const devBundledEntries = new Set();
   const devPreparedClientModules = new Set();
   const devClientModuleDependencies = new Map();
+  const devKnownClientBoundarySources = new Set();
   const devInventoryByEntry = new Map();
   const devServerAssetImportsByEntry = {};
   const devClientBoundariesByEntry = {};
@@ -412,8 +413,9 @@ export async function createRequestRenderer({
     ].filter((moduleId) => typeof moduleId === "string" && moduleId.length > 0))];
     const unresolvedModules = [];
     for (const moduleId of renderedModules) {
-      if (hasClientArtifact(moduleId)) continue;
       const sourcePath = await resolveRenderedClientSource(moduleId, routeResult);
+      if (sourcePath) devKnownClientBoundarySources.add(path.resolve(sourcePath));
+      if (hasClientArtifact(moduleId)) continue;
       const publicUrl = sourcePath ? currentAssetResolver(sourcePath) : null;
       if (typeof publicUrl === "string") {
         for (const root of result.hydrationData?.roots ?? []) {
@@ -453,6 +455,7 @@ export async function createRequestRenderer({
           );
         }
         await compileDevelopmentClientBoundary(sourcePath);
+        devKnownClientBoundarySources.add(path.resolve(sourcePath));
         compiledModules.push(getCompiledClientModule(projectRoot, sourcePath));
       }
 
@@ -588,12 +591,17 @@ export async function createRequestRenderer({
             /^(?:tsconfig|jsconfig)(?:\..+)?\.json$/.test(path.basename(changedPath))
             || path.basename(changedPath) === "package.json"
           );
+        const affectedRouteEntries = new Set();
         if (normalizedChangedPaths == null || moduleResolutionChanged) {
+          for (const entryPath of devInventoryByEntry.keys()) {
+            affectedRouteEntries.add(path.resolve(entryPath));
+          }
           devInventoryByEntry.clear();
         } else {
           for (const [entryPath, pendingInventory] of devInventoryByEntry) {
             const inventory = await pendingInventory;
             if (inventory.sourceFiles.some((sourcePath) => normalizedChangedPaths.has(path.resolve(sourcePath)))) {
+              affectedRouteEntries.add(path.resolve(entryPath));
               devInventoryByEntry.delete(entryPath);
             }
           }
@@ -607,6 +615,22 @@ export async function createRequestRenderer({
               )
               .map(([clientModule]) => clientModule),
           );
+        if (normalizedChangedPaths) {
+          for (const clientModule of new Set([
+            ...devPreparedClientModules,
+            ...devKnownClientBoundarySources,
+          ])) {
+            if (normalizedChangedPaths.has(path.resolve(clientModule))) {
+              affectedClientModules.add(clientModule);
+            }
+          }
+        }
+        const affectedExecutableClientEntryCount = [...affectedClientModules]
+          .filter((clientModule) =>
+            devPreparedClientModules.has(clientModule)
+            || devKnownClientBoundarySources.has(path.resolve(clientModule))
+          )
+          .length;
 
         if (affectedClientModules.size > 0 || normalizedChangedPaths == null) {
           developmentMetrics.selectivelyInvalidatedClientEntries += affectedClientModules.size;
@@ -637,6 +661,8 @@ export async function createRequestRenderer({
           type: "invalidated",
           changedPathCount: normalizedChangedPaths?.size ?? null,
           affectedClientEntryCount: affectedClientModules.size,
+          affectedExecutableClientEntryCount,
+          knownClientBoundaryCount: devKnownClientBoundarySources.size,
         });
 
         if (usesFrameworkRouteResolver) {
@@ -644,6 +670,13 @@ export async function createRequestRenderer({
           reportDevelopmentEvent({ type: "segment-cache-invalidated", entryCount: segmentEntryCount });
           effectiveRouteResolver = await createFrameworkRouteResolver();
         }
+
+        return {
+          affectedClientEntryCount: affectedExecutableClientEntryCount,
+          affectedRouteEntryPaths: [...affectedRouteEntries]
+            .map((entryPath) => path.relative(projectRoot, entryPath).split(path.sep).join("/"))
+            .sort(),
+        };
       });
     },
     async prepareRouteClientArtifacts(routeResult) {
@@ -663,6 +696,9 @@ export async function createRequestRenderer({
         sourceFiles: [...new Set([...inventoriesByEntry.values()].flatMap((entry) => entry.sourceFiles))].sort(),
       };
       const clientBoundaries = inventory.clientBoundaries;
+      for (const clientBoundary of clientBoundaries) {
+        devKnownClientBoundarySources.add(path.resolve(clientBoundary));
+      }
       const toProjectRelative = (filePath) => path.relative(projectRoot, filePath).split(path.sep).join("/");
       const serverAssetImports = {
         styles: inventory.styles.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
@@ -836,11 +872,12 @@ export async function createDeploymentRuntime({
         return;
       }
 
-      await renderer.invalidateDevelopmentState(changedPaths);
+      const invalidationResult = await renderer.invalidateDevelopmentState(changedPaths);
       if (typeof effectiveResponseCacheRuntime.store.clear === "function") {
         await effectiveResponseCacheRuntime.store.clear();
       }
       runtimeState.assetManifest = null;
+      return invalidationResult;
     },
     async handle(request) {
       const revalidationTasks = this.revalidationTasks ??= new Map();

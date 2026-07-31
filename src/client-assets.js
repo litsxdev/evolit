@@ -27,12 +27,16 @@ const MODULE_SPECIFIER_PATTERN =
 
 const requireFromHere = createRequire(import.meta.url);
 const EVOLIT_NAVIGATION_BROWSER_ENTRY = fileURLToPath(new URL("./navigation-client.js", import.meta.url));
+const EVOLIT_DEVELOPMENT_HOT_ENTRY = fileURLToPath(new URL("./development-hot-client.js", import.meta.url));
 const SHARED_VENDOR_SPECIFIERS = [
   "@litsx/core",
   "@litsx/core/elements",
   "@litsx/ssr/hydration",
   "evolit/navigation",
   "lit",
+];
+const DEVELOPMENT_SHARED_VENDOR_SPECIFIERS = [
+  "evolit/internal/development-hot",
 ];
 const browserSpecifierFilePathCache = new Map();
 const packageRootCache = new Map();
@@ -303,6 +307,9 @@ export async function collectSharedVendorSpecifiers(
 ) {
   return [...new Set([
     ...(options.includeBase === false ? [] : SHARED_VENDOR_SPECIFIERS),
+    ...(options.includeBase === false || options.mode !== "development"
+      ? []
+      : DEVELOPMENT_SHARED_VENDOR_SPECIFIERS),
     ...additionalEntrySpecifiers.filter((specifier) => isBareSpecifier(specifier)),
   ])].sort();
 }
@@ -322,7 +329,9 @@ async function createSharedRuntimeInputEntries(projectRoot, entriesRoot, specifi
     }
     inputEntries[entryName] = specifier === "evolit/navigation"
       ? EVOLIT_NAVIGATION_BROWSER_ENTRY
-      : await resolveBrowserSpecifierFilePath(specifier, { projectRoot });
+      : specifier === "evolit/internal/development-hot"
+        ? EVOLIT_DEVELOPMENT_HOT_ENTRY
+        : await resolveBrowserSpecifierFilePath(specifier, { projectRoot });
   }
 
   return inputEntries;
@@ -512,7 +521,10 @@ export async function buildSharedVendorRuntime(
     });
     const additionalRuntimes = await Promise.all(
       additionalEntrySpecifiers
-        .filter((specifier) => !SHARED_VENDOR_SPECIFIERS.includes(specifier))
+        .filter((specifier) => ![
+          ...SHARED_VENDOR_SPECIFIERS,
+          ...DEVELOPMENT_SHARED_VENDOR_SPECIFIERS,
+        ].includes(specifier))
         .map((specifier) => buildSharedVendorRuntime(projectRoot, mode, {
           ...options,
           additionalEntrySpecifiers: [specifier],
@@ -548,6 +560,7 @@ export async function buildSharedVendorRuntime(
     );
     const specifiers = await collectSharedVendorSpecifiers(additionalEntrySpecifiers, {
       includeBase: options.includeBase !== false,
+      mode,
     });
     const inputEntries = await createSharedRuntimeInputEntries(projectRoot, entriesRoot, specifiers);
 
@@ -1161,7 +1174,8 @@ export function createHydrationBootstrap({
       : []).filter((moduleUrl) => typeof moduleUrl === "string" && moduleUrl.length > 0),
   )];
 
-  if (rootModuleUrls.length === 0 && clientImports.length === 0) {
+  const hasHydrationWork = rootModuleUrls.length > 0 || clientImports.length > 0;
+  if (!hasHydrationWork && !navigationModuleUrl) {
     return "";
   }
 
@@ -1169,9 +1183,8 @@ export function createHydrationBootstrap({
     .map((moduleUrl) => `  () => import(${JSON.stringify(moduleUrl)})`)
     .join(",\n");
 
-  const source = `
+  const hydrationSource = hasHydrationWork ? `
 import { hydratePage, registerHydrationModules } from ${JSON.stringify(hydrationModuleUrl)};
-${navigationModuleUrl ? `import { getNavigation } from ${JSON.stringify(navigationModuleUrl)};` : ""}
 
 await hydratePage({
   clientImports: ${JSON.stringify(clientImports)},
@@ -1179,10 +1192,13 @@ await hydratePage({
 ${moduleLoaders}
   ])
 });
-${navigationModuleUrl ? "getNavigation();" : ""}
-`;
+` : "";
+  const navigationSource = navigationModuleUrl ? `
+import { getNavigation } from ${JSON.stringify(navigationModuleUrl)};
+getNavigation();
+` : "";
 
-  return escapeInlineScriptText(source);
+  return escapeInlineScriptText(`${hydrationSource}${navigationSource}`);
 }
 
 export function normalizeHydrationDataForClient(

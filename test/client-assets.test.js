@@ -4,6 +4,7 @@ import os from "node:os";
 import {
   buildSharedVendorRuntime,
   collectClientVendorSpecifiers,
+  collectSharedVendorSpecifiers,
   createBrowserSpecifierPublicUrl,
   createBrowserPackageBaseUrl,
   createAssetResolver,
@@ -26,6 +27,17 @@ import { pathToFileURL } from "node:url";
 import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
 import { compileModuleGraph } from "../src/compiler.js";
 import { scaffoldSite } from "../src/scaffold.js";
+
+test("the hot component runtime is a development-only shared vendor", async () => {
+  assert.ok(
+    (await collectSharedVendorSpecifiers([], { mode: "development" }))
+      .includes("evolit/internal/development-hot"),
+  );
+  assert.ok(
+    !(await collectSharedVendorSpecifiers([], { mode: "production" }))
+      .includes("evolit/internal/development-hot"),
+  );
+});
 
 test("collectClientVendorSpecifiers follows compiled relative imports without metadata", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-client-vendors-"));
@@ -209,6 +221,17 @@ test("createHydrationBootstrap returns an empty string when no hydratable roots 
   });
 
   assert.equal(bootstrap, "");
+});
+
+test("createHydrationBootstrap initializes development navigation without hydration roots", () => {
+  const bootstrap = createHydrationBootstrap({
+    hydrationData: { roots: [] },
+    navigationModuleUrl: "/_evolit/shared/evolit__navigation.mjs",
+  });
+
+  assert.match(bootstrap, /import \{ getNavigation \}/);
+  assert.match(bootstrap, /getNavigation\(\)/);
+  assert.doesNotMatch(bootstrap, /hydratePage/);
 });
 
 test("createHydrationBootstrap deduplicates module imports by moduleId", () => {

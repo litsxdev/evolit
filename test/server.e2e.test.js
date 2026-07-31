@@ -121,10 +121,13 @@ async function waitForResponse(request, predicate, timeoutMs = 2_000) {
   throw new Error(`Timed out waiting for development watcher update: ${lastResponse?.response.status ?? "no response"}`);
 }
 
-async function openLiveReloadSocket() {
+async function openLiveReloadSocket(url = baseUrl) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(`${baseUrl.replace(/^http/, "ws")}/_evolit/live-reload`);
-    socket.once("open", () => resolve(socket));
+    socket.once("open", () => {
+      socket.send(JSON.stringify({ type: "subscribe", url }));
+      resolve(socket);
+    });
     socket.once("error", reject);
   });
 }
@@ -143,12 +146,15 @@ async function waitForLiveReload(socket, timeoutMs = 2_000) {
     }
 
     function onMessage(message) {
-      if (String(message) !== "reload") {
-        return;
+      const source = String(message);
+      try {
+        const update = JSON.parse(source);
+        if (update?.type !== "update" && update?.type !== "reload") return;
+        cleanup();
+        resolve(update);
+      } catch {
+        // Ignore unrelated development socket messages.
       }
-
-      cleanup();
-      resolve();
     }
 
     function onError(error) {
@@ -948,7 +954,7 @@ test("dev server revalidates dynamic routes in the background per pathname", asy
 test("dev server discovers new routes and invalidates cached route responses", async () => {
   const routeDirectory = path.join(fixtureRoot, "app", "watcher-route");
   const routePath = path.join(routeDirectory, "page.litsx");
-  const liveReloadSocket = await openLiveReloadSocket();
+  const liveReloadSocket = await openLiveReloadSocket(`${baseUrl}/watcher-route`);
   const liveReloadEvent = waitForLiveReload(liveReloadSocket);
 
   const initialResponse = await fetch(`${baseUrl}/watcher-route`);
@@ -972,7 +978,9 @@ test("dev server discovers new routes and invalidates cached route responses", a
     () => fetch(`${baseUrl}/watcher-route`),
     ({ response, body }) => response.status === 200 && body.includes("watcher version one"),
   );
-  assert.equal(createdRoute.response.headers.get("x-evolit-cache"), "MISS");
+  // Rendering the subscribed update warms the route before this explicit
+  // request reaches it; the browser itself does not need that second fetch.
+  assert.equal(createdRoute.response.headers.get("x-evolit-cache"), "HIT");
   await liveReloadEvent;
   liveReloadSocket.close();
 
@@ -1025,7 +1033,7 @@ test("dev server invalidates routes when an app source changes", async () => {
 test("dev server invalidates routes when an imported project src module changes", async () => {
   const sharedPath = path.join(fixtureRoot, "src", "shared.litsx");
   const invalidationCount = developmentEvents.filter((event) => event.type === "invalidated").length;
-  const liveReloadSocket = await openLiveReloadSocket();
+  const liveReloadSocket = await openLiveReloadSocket(`${baseUrl}/watcher-source`);
   const liveReloadEvent = waitForLiveReload(liveReloadSocket);
 
   const initialResponse = await fetch(`${baseUrl}/watcher-source`);
@@ -1033,13 +1041,45 @@ test("dev server invalidates routes when an imported project src module changes"
 
   await fs.writeFile(sharedPath, 'export const sharedMessage = "shared source version two";\n', "utf8");
 
-  await waitForResponse(
-    () => fetch(`${baseUrl}/watcher-source`),
-    ({ response, body }) => response.status === 200 && body.includes("shared source version two"),
-  );
-  await liveReloadEvent;
+  const liveUpdate = await liveReloadEvent;
   liveReloadSocket.close();
+  assert.equal(liveUpdate.type, "update");
+  assert.equal(liveUpdate.strategy, "delta");
+  assert.equal(typeof liveUpdate.version, "number");
+  assert.equal(liveUpdate.delta.type, "route");
+  assert.equal(liveUpdate.url, `${baseUrl}/watcher-source`);
+  assert.ok(liveUpdate.delta.route.segments.some((segment) =>
+    segment.modulePath === "app/watcher-source/page.litsx"
+    && typeof segment.revision === "number"
+  ));
+  assert.ok(liveUpdate.delta.route.segments.some((segment) =>
+    segment.projections.some((projection) => projection.html.includes("shared source version two"))
+  ));
   assert.ok(developmentEvents.filter((event) => event.type === "invalidated").length > invalidationCount);
+  assert.ok(developmentEvents.some((event) => event.type === "live-update" && event.strategy === "delta"));
+});
+
+test("dev server requests a hot refresh when a hydratable client boundary changes", async () => {
+  const componentPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
+  const componentSource = await fs.readFile(componentPath, "utf8");
+  const initialResponse = await fetch(`${baseUrl}/`);
+  assert.equal(initialResponse.status, 200);
+  await initialResponse.text();
+  const liveReloadSocket = await openLiveReloadSocket(`${baseUrl}/`);
+  const liveReloadEvent = waitForLiveReload(liveReloadSocket);
+
+  await fs.writeFile(
+    componentPath,
+    componentSource.replace("padding: 24px", "padding: 25px"),
+    "utf8",
+  );
+
+  const liveUpdate = await liveReloadEvent;
+  liveReloadSocket.close();
+  assert.equal(liveUpdate.type, "update");
+  assert.equal(liveUpdate.strategy, "hot", JSON.stringify(developmentEvents.slice(-5)));
+  assert.equal(typeof liveUpdate.version, "number");
+  assert.equal(liveUpdate.delta.type, "route");
 });
 
 test("dev server ignores generated Evolit output changes", async () => {

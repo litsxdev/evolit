@@ -277,3 +277,59 @@ test("a history entry reuses its delta on popstate without a second request", as
   assert.equal(requests, 1);
   assert.equal(applied, 2);
 });
+
+test("a pushed development update applies its route delta without fetching or changing history", async () => {
+  const requested = [];
+  const windowRef = createBrowserWindow(async (href, options) => {
+    requested.push({ href, options });
+    return {
+      headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+      json: async () => ({ type: "route", url: "/", route: {} }),
+    };
+  });
+  let applied = 0;
+  createBrowserNavigation({
+    window: windowRef,
+    applyDelta: async () => { applied += 1; },
+  });
+  const delta = { type: "route", url: "/", route: {} };
+  const detail = {
+    update: { type: "update", strategy: "delta", delta },
+    handled: false,
+    result: null,
+  };
+
+  windowRef.dispatch("evolit:development-refresh", { detail });
+  assert.equal(detail.handled, true);
+  assert.equal(await detail.result, true);
+
+  assert.equal(applied, 1);
+  assert.equal(requested.length, 0);
+  assert.deepEqual(windowRef.lastScroll, undefined);
+  assert.equal(windowRef.history.lastPush, undefined);
+});
+
+test("a development hot refresh cache-busts and applies changed client code", async () => {
+  const contexts = [];
+  const windowRef = createBrowserWindow(async () => ({
+    headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+    json: async () => ({ type: "route", url: "/", route: {} }),
+  }));
+  createBrowserNavigation({
+    window: windowRef,
+    applyDelta: async (_delta, context) => { contexts.push(context); },
+  });
+  const detail = {
+    update: { type: "update", strategy: "hot", version: 7, delta: { type: "route", route: {} } },
+    handled: false,
+    result: null,
+  };
+
+  windowRef.dispatch("evolit:development-refresh", { detail });
+
+  assert.equal(detail.handled, true);
+  assert.equal(await detail.result, true);
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].hot, true);
+  assert.equal(contexts[0].moduleVersion, 7);
+});
