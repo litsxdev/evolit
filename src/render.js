@@ -199,9 +199,9 @@ function createSegmentChildrenMarker(segment) {
   return `<!--evolit:children:${segment.id}-->`;
 }
 
-function combineSegmentSsrArtifacts(results) {
+export function combineSegmentSsrArtifacts(results) {
   const roots = [];
-  const payload = { roots: {}, instances: {} };
+  const payload = { roots: {}, instances: {}, resources: {} };
   const clientImports = new Set();
   const headTags = new Set();
 
@@ -218,12 +218,15 @@ function combineSegmentSsrArtifacts(results) {
     })));
     Object.assign(payload.roots, result.hydrationData.payload?.roots ?? {});
     Object.assign(payload.instances, result.hydrationData.payload?.instances ?? {});
+    Object.assign(payload.resources, result.hydrationData.payload?.resources ?? {});
   }
+
+  const hasResources = Object.keys(payload.resources).length > 0;
 
   return {
     clientImports: [...clientImports],
     headTags: [...headTags],
-    hydrationData: roots.length > 0
+    hydrationData: roots.length > 0 || hasResources
       ? { version: 1, roots, payload, clientImports: [...clientImports] }
       : null,
   };

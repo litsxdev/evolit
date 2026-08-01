@@ -341,16 +341,35 @@ test("incremental navigation preserves scoped hydrated shadow roots with the reg
     await fs.writeFile(
       path.join(projectRoot, "app", "components", "payload-card.litsx"),
       [
-        'import { useHost, useOnConnect } from "@litsx/core";',
+        'import { useHost, useOnConnect, useSsrResourceSnapshot } from "@litsx/core";',
         'import PayloadLeaf from "./payload-leaf.litsx";',
+        "",
+        "const payloadResources = new Map();",
+        "function readPayloadResource(payload) {",
+        '  if (typeof process !== "undefined" && process.versions?.node) payloadResources.set("current", payload.label);',
+        "  useSsrResourceSnapshot({",
+        '    key: "test:payload-resource",',
+        "    capture: () => Object.fromEntries(payloadResources),",
+        "    restore(snapshot) {",
+        "      payloadResources.clear();",
+        "      for (const [key, value] of Object.entries(snapshot)) payloadResources.set(key, value);",
+        '      window.__payloadResourceEvents ??= [];',
+        '      window.__payloadResourceEvents.push(`restore:${payloadResources.get("current")}`);',
+        "    },",
+        "  });",
+        '  return payloadResources.get("current") ?? "missing";',
+        "}",
         "",
         "export default function PayloadCard({ payload, showDetails }) {",
         '  static elements = { "payload-leaf": PayloadLeaf };',
         "  const host = useHost();",
+        "  const resource = readPayloadResource(payload);",
         "  useOnConnect(() => {",
         '    host.setAttribute("data-connected", "true");',
-        "  }, []);",
-        '  return <section>{showDetails ? <PayloadLeaf .payload={payload} /> : ""}<slot name="actions"></slot></section>;',
+        '    window.__payloadResourceEvents ??= [];',
+        '    window.__payloadResourceEvents.push(`connect:${resource}`);',
+        "  }, [resource]);",
+        '  return <section data-resource={resource}>{showDetails ? <PayloadLeaf .payload={payload} /> : ""}<slot name="actions"></slot></section>;',
         "}",
         "",
       ].join("\n"),
@@ -395,6 +414,7 @@ test("incremental navigation preserves scoped hydrated shadow roots with the reg
       { cards: 0, actions: 1 },
       { cards: 0, actions: 1 },
     ]);
+    await page.evaluate(() => { window.__payloadResourceEvents = []; });
     await navigate(page, "/payload/beta");
     await expect(page).toHaveURL(/\/payload\/beta$/);
     await expect.poll(() => payloadCard.evaluate((element) => ({
@@ -421,6 +441,11 @@ test("incremental navigation preserves scoped hydrated shadow roots with the reg
     expect(await payloadCards.evaluateAll((elements) => new Set(
       elements.map((element) => element.getAttribute("data-litsx-root")),
     ).size)).toBe(2);
+    await expect.poll(() => page.evaluate(() => window.__payloadResourceEvents ?? [])).toEqual([
+      "restore:beta-second",
+      "connect:beta-second",
+      "connect:beta-second",
+    ]);
     expect(pageErrors).toEqual([]);
   } finally {
     if (child?.exitCode === null) {

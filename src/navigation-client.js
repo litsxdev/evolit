@@ -2,6 +2,7 @@ import { useHost, useOnConnect, useState } from "@litsx/core";
 import {
   applyHydrationPayload,
   hydrateRoot,
+  prepareHydrationResources,
   registerHydrationModules,
 } from "@litsx/ssr/hydration";
 import { createHref } from "./navigation-url.js";
@@ -186,6 +187,7 @@ function versionClientImport(specifier, version) {
 
 async function applyRouteDelta(delta, documentRef = document, signal, options = {}) {
   throwIfAborted(signal);
+  prepareHydrationResources(delta.hydrationData);
   const current = readRoute(documentRef);
   const nextSegments = delta.route?.segments ?? [];
   const currentSegments = current?.segments ?? [];

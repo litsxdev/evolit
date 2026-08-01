@@ -1174,7 +1174,12 @@ export function createHydrationBootstrap({
       : []).filter((moduleUrl) => typeof moduleUrl === "string" && moduleUrl.length > 0),
   )];
 
-  const hasHydrationWork = rootModuleUrls.length > 0 || clientImports.length > 0;
+  const hasResourceSnapshots = normalizedHydrationData?.payload?.resources
+    && typeof normalizedHydrationData.payload.resources === "object"
+    && Object.keys(normalizedHydrationData.payload.resources).length > 0;
+  const hasHydrationWork = rootModuleUrls.length > 0
+    || clientImports.length > 0
+    || hasResourceSnapshots;
   if (!hasHydrationWork && !navigationModuleUrl) {
     return "";
   }

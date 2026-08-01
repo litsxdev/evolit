@@ -223,6 +223,23 @@ test("createHydrationBootstrap returns an empty string when no hydratable roots 
   assert.equal(bootstrap, "");
 });
 
+test("createHydrationBootstrap delegates resource-only document hydration to hydratePage", () => {
+  const hydrationData = {
+    version: 1,
+    roots: [],
+    payload: {
+      roots: {},
+      instances: {},
+      resources: { "library:i18n": { locale: "es" } },
+    },
+    clientImports: [],
+  };
+  const bootstrap = createHydrationBootstrap({ hydrationData });
+
+  assert.match(bootstrap, /hydratePage/);
+  assert.match(bootstrap, /registerHydrationModules/);
+});
+
 test("createHydrationBootstrap initializes development navigation without hydration roots", () => {
   const bootstrap = createHydrationBootstrap({
     hydrationData: { roots: [] },
@@ -397,6 +414,9 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
       value: {
         roots: { "root-0": { props: { title: "Feature" } } },
         instances: {},
+        resources: {
+          "library:i18n": { locale: "es", messages: { title: "Inicio" } },
+        },
       },
     },
     clientImports: {
@@ -421,6 +441,10 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
     "/Users/example/site",
   );
 
+  assert.strictEqual(
+    normalizedHydrationData.payload.resources,
+    hydrationData.payload.resources,
+  );
   assert.deepEqual(normalizedHydrationData.roots, [
     {
       id: "root-0",
@@ -454,6 +478,9 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
     payload: {
       roots: { "root-0": { props: { title: "Feature" } } },
       instances: {},
+      resources: {
+        "library:i18n": { locale: "es", messages: { title: "Inicio" } },
+      },
     },
     clientImports: ["/_evolit/static/app/components/feature-card.hash.mjs"],
   });
