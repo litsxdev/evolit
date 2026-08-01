@@ -1,6 +1,6 @@
 {
   "name": "evolit",
-  "version": "0.1.0-alpha.27",
+  "version": "0.1.0-alpha.28",
   "description": "A convention-driven application framework for LitSX and web components.",
   "type": "module",
   "packageManager": "yarn@4.10.3",
@@ -55,9 +55,9 @@
   },
   "dependencies": {
     "@jridgewell/remapping": "^2.3.5",
-    "@litsx/compiler": "0.10.0-canary-feat-ssr-20260731112627",
-    "@litsx/core": "0.17.0-canary-feat-ssr-20260731112627",
-    "@litsx/ssr": "0.2.0-canary-feat-ssr-20260731112627",
+    "@litsx/compiler": "0.10.0-canary-feat-ssr-20260731234459",
+    "@litsx/core": "0.17.0-canary-feat-ssr-20260731234459",
+    "@litsx/ssr": "0.2.0-canary-feat-ssr-20260731234459",
     "@litsx/typescript": "^0.9.0",
     "@rollup/plugin-commonjs": "^29.0.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
