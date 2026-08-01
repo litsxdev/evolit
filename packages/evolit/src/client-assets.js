@@ -1155,6 +1155,7 @@ export function createHydrationBootstrap({
   assetResolver,
   hydrationModuleUrl = "@litsx/ssr/hydration",
   navigationModuleUrl = null,
+  navigationExtensions = [],
 }) {
   const normalizedHydrationData = normalizeHydrationDataForClient(hydrationData);
   const rootModuleUrls = [...new Set([
@@ -1198,8 +1199,17 @@ ${moduleLoaders}
   ])
 });
 ` : "";
+  const navigationExtensionSource = navigationExtensions
+    .filter((descriptor) => typeof descriptor?.module === "string" && descriptor.module.length > 0)
+    .map((descriptor) => ({
+      name: descriptor.name,
+      module: descriptor.module,
+      options: descriptor.options ?? null,
+    }));
   const navigationSource = navigationModuleUrl ? `
 import { getNavigation } from ${JSON.stringify(navigationModuleUrl)};
+import { registerNavigationExtensions } from ${JSON.stringify(navigationModuleUrl)};
+await registerNavigationExtensions(${JSON.stringify(navigationExtensionSource)});
 getNavigation();
 ` : "";
 

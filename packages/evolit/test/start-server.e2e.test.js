@@ -10,6 +10,7 @@ import { createStartServer } from "../src/server.js";
 import { scaffoldSite } from "../src/scaffold.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const frameworkNodeModules = path.resolve(frameworkRoot, "..", "..", "node_modules");
 
 let fixtureRoot;
 let server;
@@ -147,7 +148,7 @@ before(async () => {
 
   await scaffoldSite(fixtureRoot);
   await fs.symlink(
-    path.join(frameworkRoot, "node_modules"),
+    frameworkNodeModules,
     path.join(fixtureRoot, "node_modules"),
     "dir",
   );

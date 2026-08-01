@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { scaffoldSite } from "../src/scaffold.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const frameworkNodeModules = path.resolve(frameworkRoot, "..", "..", "node_modules");
 
 async function waitForServer(url) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -34,9 +35,9 @@ async function runCli(projectRoot, ...args) {
 async function linkFrameworkDependencies(projectRoot) {
   const targetRoot = path.join(projectRoot, "node_modules");
   await fs.mkdir(targetRoot, { recursive: true });
-  for (const entry of await fs.readdir(path.join(frameworkRoot, "node_modules"), { withFileTypes: true })) {
+  for (const entry of await fs.readdir(frameworkNodeModules, { withFileTypes: true })) {
     if (entry.name.startsWith(".")) continue;
-    const sourcePath = path.join(frameworkRoot, "node_modules", entry.name);
+    const sourcePath = path.join(frameworkNodeModules, entry.name);
     const targetPath = path.join(targetRoot, entry.name);
     if (entry.name.startsWith("@")) {
       await fs.mkdir(targetPath, { recursive: true });
@@ -314,15 +315,14 @@ test("incremental navigation preserves scoped hydrated shadow roots with the reg
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.addInitScript({
       path: path.join(
-        frameworkRoot,
-        "node_modules",
+        frameworkNodeModules,
         "@webcomponents",
         "scoped-custom-element-registry",
         "scoped-custom-element-registry.min.js",
       ),
     });
     await scaffoldSite(projectRoot);
-    await fs.symlink(path.join(frameworkRoot, "node_modules"), path.join(projectRoot, "node_modules"), "dir");
+    await fs.symlink(frameworkNodeModules, path.join(projectRoot, "node_modules"), "dir");
     await fs.mkdir(path.join(projectRoot, "app", "components"), { recursive: true });
     await fs.writeFile(
       path.join(projectRoot, "app", "components", "payload-leaf.litsx"),
@@ -465,7 +465,7 @@ test("incremental navigation never reuses a segment projection when its cardinal
 
   try {
     await scaffoldSite(projectRoot);
-    await fs.symlink(path.join(frameworkRoot, "node_modules"), path.join(projectRoot, "node_modules"), "dir");
+    await fs.symlink(frameworkNodeModules, path.join(projectRoot, "node_modules"), "dir");
     const routeRoot = path.join(projectRoot, "app", "shape", "[mode]");
     await fs.mkdir(routeRoot, { recursive: true });
     await fs.writeFile(
@@ -527,7 +527,7 @@ test("incremental navigation preserves unaffected nested layouts", async ({ page
 
   try {
     await scaffoldSite(projectRoot);
-    await fs.symlink(path.join(frameworkRoot, "node_modules"), path.join(projectRoot, "node_modules"), "dir");
+    await fs.symlink(frameworkNodeModules, path.join(projectRoot, "node_modules"), "dir");
     const routeRoot = path.join(projectRoot, "app", "nested", "[outer]", "[inner]");
     await fs.mkdir(routeRoot, { recursive: true });
     await fs.writeFile(path.join(projectRoot, "app", "nested", "[outer]", "layout.litsx"), [
@@ -585,7 +585,7 @@ test("browser navigation works with production build assets", async ({ page }, t
   let child;
   try {
     await scaffoldSite(projectRoot);
-    await fs.symlink(path.join(frameworkRoot, "node_modules"), path.join(projectRoot, "node_modules"), "dir");
+    await fs.symlink(frameworkNodeModules, path.join(projectRoot, "node_modules"), "dir");
     await runCli(projectRoot, "build");
     child = spawn(process.execPath, [path.join(frameworkRoot, "src", "cli.js"), "start", "--port", String(port)], {
       cwd: projectRoot,

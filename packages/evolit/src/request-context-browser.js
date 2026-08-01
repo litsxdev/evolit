@@ -9,3 +9,4 @@ export function permanentRedirect() { return throwServerOnlyApi("permanentRedire
 export function redirect() { return throwServerOnlyApi("redirect"); }
 export function requestUrl() { return throwServerOnlyApi("requestUrl"); }
 export function responseHeaders() { return throwServerOnlyApi("responseHeaders"); }
+export function getRequestContext() { return throwServerOnlyApi("getRequestContext"); }

@@ -102,14 +102,21 @@ function createRouteRequest(context) {
   });
 }
 
-export function createRequestContext({ request, params = {}, searchParams = {} }) {
+export function createRequestContext({
+  request,
+  params = {},
+  searchParams = {},
+  extensionValues = {},
+  didUseDynamicRequestData = false,
+}) {
   const context = {
     request,
     params: Object.freeze({ ...params }),
     searchParams: Object.freeze({ ...searchParams }),
     responseHeaders: new Headers(),
     responseCookies: [],
-    didUseDynamicRequestData: false,
+    didUseDynamicRequestData: didUseDynamicRequestData === true,
+    extensionValues: Object.freeze({ ...extensionValues }),
   };
   context.cookieStore = createCookieStore(context);
   context.routeRequest = createRouteRequest(context);
@@ -118,6 +125,15 @@ export function createRequestContext({ request, params = {}, searchParams = {} }
 
 export function runWithRequestContext(context, callback) {
   return requestContextStorage.run(context, callback);
+}
+
+/**
+ * Returns serializable values supplied by configured server extensions for
+ * the active request. The object is isolated through AsyncLocalStorage and is
+ * available only while a route or handler is executing.
+ */
+export function getRequestContext() {
+  return getActiveContext().extensionValues;
 }
 
 /**

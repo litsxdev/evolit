@@ -116,6 +116,15 @@ export { permanentRedirect } from "./request-context.js";
 export { redirect } from "./request-context.js";
 
 /**
+ * Returns serializable values supplied by configured request extensions.
+ * Only available while rendering a server route or handler.
+ */
+export { getRequestContext } from "./request-context.js";
+
+/** Defines an Evolit extension for use in evolit.config.js. */
+export { defineEvolitPlugin } from "./extensions.js";
+
+/**
  * Returns the incoming request URL. Reading it makes the current route dynamic.
  *
  * @returns {URL} The incoming request URL.

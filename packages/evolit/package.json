@@ -1,0 +1,87 @@
+{
+  "name": "evolit",
+  "version": "0.1.0-alpha.30",
+  "description": "A convention-driven application framework for LitSX and web components.",
+  "type": "module",
+  "packageManager": "yarn@4.10.3",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/litsxdev/nextsx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/litsxdev/nextsx/issues"
+  },
+  "homepage": "https://github.com/litsxdev/nextsx#readme",
+  "files": [
+    "src",
+    "templates/default/app/**",
+    "templates/default/jsconfig.json",
+    "templates/default/yarnrc.yml.template"
+  ],
+  "bin": "./src/cli.js",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./navigation": {
+      "browser": "./src/navigation-client.js",
+      "default": "./src/navigation-server.js"
+    },
+    "./server": {
+      "browser": "./src/request-context-browser.js",
+      "default": "./src/server-api.js"
+    },
+    "./extensions": {
+      "browser": "./src/extensions-client.js",
+      "default": "./src/extensions.js"
+    },
+    "./internal/development-hot": "./src/development-hot-client.js"
+  },
+  "scripts": {
+    "dev": "node ./src/cli.js dev",
+    "build": "node ./src/cli.js build",
+    "start": "node ./src/cli.js start",
+    "test": "node --test test/*.test.js",
+    "test:browser": "playwright test",
+    "typecheck": "litsx-tsc -p jsconfig.json --noEmit",
+    "release:check": "yarn test && yarn typecheck && yarn pack --dry-run"
+  },
+  "keywords": [
+    "evolit",
+    "litsx",
+    "lit",
+    "ssr",
+    "routing"
+  ],
+  "author": "LitSX Team",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.19.5"
+  },
+  "dependencies": {
+    "@jridgewell/remapping": "^2.3.5",
+    "@litsx/compiler": "0.10.0-canary-feat-ssr-20260801095541",
+    "@litsx/core": "0.17.0-canary-feat-ssr-20260801101748",
+    "@litsx/ssr": "0.2.0-canary-feat-ssr-20260801095541",
+    "@litsx/typescript": "^0.9.0",
+    "@rollup/plugin-commonjs": "^29.0.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "lit": "^3.3.3",
+    "magic-string": "^1.1.0",
+    "rollup": "^4.46.1",
+    "typescript": "^6.0.0",
+    "ws": "^8.18.3"
+  },
+  "peerDependencies": {
+    "@litsx/urql": "^0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@litsx/urql": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "@webcomponents/scoped-custom-element-registry": "^0.0.10",
+    "vite": "^8.1.5"
+  }
+}

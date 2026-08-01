@@ -41,6 +41,11 @@ import {
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 import { createNavigationResponseFromDocument } from "./route-segments.js";
 import { appendSsrUrqlData, runWithOptionalSsrUrqlScope } from "./urql-ssr.js";
+import {
+  getExtensionClientDescriptors,
+  resolveEvolitExtensions,
+  runRequestExtensions,
+} from "./extensions.js";
 const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".css", "text/css; charset=utf-8"],
   [".svg", "image/svg+xml"],
@@ -232,21 +237,31 @@ export async function createRequestRenderer({
   responseCacheRuntime,
   onDevelopmentEvent,
   managedSourceRoots,
+  extensions = [],
 }) {
   let currentAssetManifest = normalizeClientAssetManifest(assetManifest);
   let currentAssetResolver = createAssetResolver(projectRoot, {
     assetManifest: currentAssetManifest,
   });
+  const extensionClientDescriptors = getExtensionClientDescriptors(extensions);
+  const extensionClientSpecifiers = extensionClientDescriptors.map((descriptor) => descriptor.module);
+  const sharedVendorOptions = { additionalEntrySpecifiers: extensionClientSpecifiers };
   let currentHydrationModuleUrl = await resolveSharedVendorModuleUrl(
     projectRoot,
     mode,
     "@litsx/ssr/hydration",
+    sharedVendorOptions,
   );
   let currentNavigationModuleUrl = await resolveSharedVendorModuleUrl(
     projectRoot,
     mode,
     "evolit/navigation",
+    sharedVendorOptions,
   );
+  let currentNavigationExtensions = await Promise.all(extensionClientDescriptors.map(async (descriptor) => ({
+    ...descriptor,
+    module: await resolveSharedVendorModuleUrl(projectRoot, mode, descriptor.module, sharedVendorOptions),
+  })));
   const devBundledEntries = new Set();
   const devPreparedClientModules = new Set();
   const devClientModuleDependencies = new Map();
@@ -357,8 +372,27 @@ export async function createRequestRenderer({
       {
         assetManifest: currentAssetManifest,
         entryClientModules: [...devBundledEntries],
+        additionalEntrySpecifiers: extensionClientSpecifiers,
       },
     ) ?? currentHydrationModuleUrl;
+    currentNavigationModuleUrl = await resolveSharedVendorModuleUrl(
+      projectRoot,
+      "development",
+      "evolit/navigation",
+      {
+        assetManifest: currentAssetManifest,
+        entryClientModules: [...devBundledEntries],
+        additionalEntrySpecifiers: extensionClientSpecifiers,
+      },
+    ) ?? currentNavigationModuleUrl;
+    currentNavigationExtensions = await Promise.all(extensionClientDescriptors.map(async (descriptor) => ({
+      ...descriptor,
+      module: await resolveSharedVendorModuleUrl(projectRoot, "development", descriptor.module, {
+        assetManifest: currentAssetManifest,
+        entryClientModules: [...devBundledEntries],
+        additionalEntrySpecifiers: extensionClientSpecifiers,
+      }),
+    })));
     devRollupCache = bundledClientAssets.rollupCache;
     reportDevelopmentEvent({
       type: "client-assets-ready",
@@ -547,6 +581,7 @@ export async function createRequestRenderer({
         },
         hydrationModuleUrl: currentHydrationModuleUrl,
         navigationModuleUrl: currentNavigationModuleUrl,
+        navigationExtensions: currentNavigationExtensions.filter((descriptor) => typeof descriptor.module === "string"),
       });
     },
     transformDocument({ routeResult, result, document }) {
@@ -762,19 +797,19 @@ export async function createRequestRenderer({
         await emitDevelopmentClientAssetManifest();
       });
     },
-    async resolveRoutePolicy(request) {
-      return effectiveRouteResolver.resolveRoutePolicy(request);
+    async resolveRoutePolicy(request, options = {}) {
+      return effectiveRouteResolver.resolveRoutePolicy(request, options);
     },
-    async renderRoute(request, routePolicyResult = null) {
+    async renderRoute(request, routePolicyResult = null, options = {}) {
       return runWithOptionalSsrUrqlScope(async (urqlAdapter) => {
         const shouldPrepareBeforeResolve = mode === "development" && !currentAssetManifest;
         let resolvedRoutePolicyResult = routePolicyResult;
         if (shouldPrepareBeforeResolve) {
-          resolvedRoutePolicyResult ??= await effectiveRouteResolver.resolveRoutePolicy(request);
+          resolvedRoutePolicyResult ??= await effectiveRouteResolver.resolveRoutePolicy(request, options);
           await this.prepareRouteClientArtifacts(resolvedRoutePolicyResult);
         }
 
-        const routeResult = await effectiveRouteResolver.resolveRequest(request, resolvedRoutePolicyResult);
+        const routeResult = await effectiveRouteResolver.resolveRequest(request, resolvedRoutePolicyResult, options);
         if (!shouldPrepareBeforeResolve || routeResult.boundaryModule) {
           await this.prepareRouteClientArtifacts(routeResult);
         }
@@ -807,6 +842,8 @@ export async function createDeploymentRuntime({
   managedSourceRoots,
 } = {}) {
   const evolitConfig = await loadEvolitConfig(projectRoot);
+  const extensions = resolveEvolitExtensions(evolitConfig);
+  const extensionClientSpecifiers = getExtensionClientDescriptors(extensions).map((descriptor) => descriptor.module);
   const effectiveManagedSourceRoots = managedSourceRoots
     ?? resolveManagedSourceRoots(projectRoot, evolitConfig);
   function reportDevelopmentEvent(event) {
@@ -822,7 +859,7 @@ export async function createDeploymentRuntime({
     invalidateDevelopmentCompilationCache(projectRoot);
     resetDevelopmentAssetCaches(projectRoot);
     await buildSharedVendorRuntime(projectRoot, "development", {
-      additionalEntrySpecifiers: [],
+      additionalEntrySpecifiers: extensionClientSpecifiers,
     });
     reportDevelopmentEvent({ type: "vendor-runtime-ready" });
   }
@@ -861,6 +898,7 @@ export async function createDeploymentRuntime({
     routeResolver,
     onDevelopmentEvent,
     managedSourceRoots: effectiveManagedSourceRoots,
+    extensions,
   });
 
   return {
@@ -887,8 +925,27 @@ export async function createDeploymentRuntime({
         return assetResponse;
       }
 
-      const routePolicyResult = await renderer.resolveRoutePolicy(request);
-      const cachedResponse = await renderer.responseCacheController.read(request, routePolicyResult);
+      const extensionResult = await runRequestExtensions(extensions, request);
+      if (extensionResult.response) {
+        return formatResponseForRequest(request, {
+          status: extensionResult.response.status,
+          headers: Object.fromEntries(extensionResult.response.headers.entries()),
+          body: extensionResult.response.body,
+        });
+      }
+      if (extensionResult.redirect) {
+        return formatResponseForRequest(request, {
+          status: extensionResult.status ?? 307,
+          headers: { location: extensionResult.redirect, "content-type": "text/html; charset=utf-8" },
+          body: "<!DOCTYPE html><html><body><p>Redirecting...</p></body></html>",
+        });
+      }
+
+      const resolvedRequest = extensionResult.request;
+      const routePolicyResult = await renderer.resolveRoutePolicy(resolvedRequest, {
+        extensionState: extensionResult,
+      });
+      const cachedResponse = await renderer.responseCacheController.read(resolvedRequest, routePolicyResult);
       if (cachedResponse) {
         if (cachedResponse.fresh) {
           return formatResponseForRequest(request, cachedResponse.response);
@@ -900,9 +957,11 @@ export async function createDeploymentRuntime({
           && !revalidationTasks.has(cachedResponse.cacheKey)
         ) {
           const revalidationTask = (async () => {
-            const { routeResult, response } = await renderer.renderRoute(request, routePolicyResult);
+            const { routeResult, response } = await renderer.renderRoute(resolvedRequest, routePolicyResult, {
+              extensionState: extensionResult,
+            });
             await renderer.responseCacheController.store(
-              request,
+              resolvedRequest,
               routeResult,
               response,
               cachedResponse.cacheKey,
@@ -918,11 +977,13 @@ export async function createDeploymentRuntime({
         return formatResponseForRequest(request, cachedResponse.response);
       }
 
-      const { routeResult, response } = await renderer.renderRoute(request, routePolicyResult);
+      const { routeResult, response } = await renderer.renderRoute(resolvedRequest, routePolicyResult, {
+        extensionState: extensionResult,
+      });
       runtimeState.assetManifest = normalizeClientAssetManifest(renderer.assetManifest);
       return formatResponseForRequest(
         request,
-        await renderer.responseCacheController.write(request, routeResult, response),
+        await renderer.responseCacheController.write(resolvedRequest, routeResult, response),
       );
     },
     async close() {

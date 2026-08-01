@@ -49,3 +49,6 @@ export { requestUrl } from "./request-context.js";
  * @returns {Headers} Headers merged into the outgoing response.
  */
 export { responseHeaders } from "./request-context.js";
+
+/** Returns the active request's extension-provided serializable values. */
+export { getRequestContext } from "./request-context.js";

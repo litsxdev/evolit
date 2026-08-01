@@ -31,6 +31,7 @@ import {
   resolveProjectModuleSpecifier,
 } from "./compiler.js";
 import { loadEvolitConfig } from "./config.js";
+import { getExtensionClientDescriptors, resolveEvolitExtensions } from "./extensions.js";
 import {
   BUILD_DIRECTORY,
   DEPLOY_ASSETS_MANIFEST_FILENAME,
@@ -129,6 +130,11 @@ async function writeDeploymentRuntimeEntry(buildRoot) {
 
 export async function buildProject(projectRoot) {
   const evolitConfig = await loadEvolitConfig(projectRoot);
+  const extensions = resolveEvolitExtensions(evolitConfig);
+  const extensionClientDescriptors = getExtensionClientDescriptors(extensions);
+  const sharedVendorOptions = {
+    additionalEntrySpecifiers: extensionClientDescriptors.map((descriptor) => descriptor.module),
+  };
   const routes = await discoverAppRoutes(projectRoot);
   const routeHandlers = await discoverAppRouteHandlers(projectRoot);
   const buildRoot = path.join(projectRoot, INTERNAL_DIRECTORY, BUILD_DIRECTORY);
@@ -307,7 +313,23 @@ export async function buildProject(projectRoot) {
     projectRoot,
     "production",
     "@litsx/ssr/hydration",
+    sharedVendorOptions,
   );
+  const navigationModuleUrl = await resolveSharedVendorModuleUrl(
+    projectRoot,
+    "production",
+    "evolit/navigation",
+    sharedVendorOptions,
+  );
+  const navigationExtensions = await Promise.all(extensionClientDescriptors.map(async (descriptor) => ({
+    ...descriptor,
+    module: await resolveSharedVendorModuleUrl(
+      projectRoot,
+      "production",
+      descriptor.module,
+      sharedVendorOptions,
+    ),
+  })));
   const ssrAdapter = createSsrAdapter({
     assetResolver,
     async onSsrResult({ routeResult, result }) {
@@ -387,6 +409,8 @@ export async function buildProject(projectRoot) {
         ),
         assetResolver,
         hydrationModuleUrl,
+        navigationModuleUrl,
+        navigationExtensions,
       });
     },
     transformDocument({ routeResult, result, document }) {

@@ -5,9 +5,21 @@ import {
   prepareHydrationResources,
   registerHydrationModules,
 } from "@litsx/ssr/hydration";
-import { createHref } from "./navigation-url.js";
+import { createHref as createBaseHref } from "./navigation-url.js";
+import {
+  getNavigationExtensions,
+  registerNavigationExtensions,
+  runAfterNavigation,
+  runBeforeNavigation,
+  transformNavigationUrl,
+} from "./extensions-client.js";
 
-export { createHref } from "./navigation-url.js";
+export { registerNavigationExtensions } from "./extensions-client.js";
+
+/** Builds an internal href and applies configured URL transforms. */
+export function createHref(pathname, searchParams) {
+  return transformNavigationUrl(createBaseHref(pathname, searchParams), { type: "href" });
+}
 
 let browserNavigation = null;
 let nextHistoryEntryId = 0;
@@ -469,7 +481,19 @@ export function createBrowserNavigation(options = {}) {
   }
 
   async function navigate(target, mode = "push", fromPopState = false, options = {}) {
-    const href = toHref(target, windowRef.location);
+    const previousHref = windowRef.location.href;
+    const requestedHref = toHref(target, windowRef.location);
+    const initialHref = toHref(transformNavigationUrl(requestedHref, { type: "navigation" }), windowRef.location);
+    const navigationExtensions = getNavigationExtensions();
+    const beforeNavigation = navigationExtensions.length > 0
+      ? await runBeforeNavigation(initialHref, {
+        type: fromPopState ? "popstate" : "navigate",
+        mode,
+        from: previousHref,
+      })
+      : { url: initialHref, cancelled: false };
+    if (beforeNavigation.cancelled) return null;
+    const href = toHref(beforeNavigation.url, windowRef.location);
     const cacheKey = toCacheKey(href);
     const scrollPosition = options.scroll === false
       ? currentScrollPosition(windowRef)
@@ -559,6 +583,15 @@ export function createBrowserNavigation(options = {}) {
       state = { status: "idle", url: canonicalHref, pendingUrl: null, error: null };
       emit();
       notifyLocationChange();
+      if (navigationExtensions.length > 0) {
+        await runAfterNavigation({
+          type: fromPopState ? "popstate" : "navigate",
+          mode,
+          from: previousHref,
+          url: canonicalHref,
+          delta,
+        });
+      }
       return delta;
     } catch (error) {
       if (error?.name === "AbortError" || !isCurrent()) return null;

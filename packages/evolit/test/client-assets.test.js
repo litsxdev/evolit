@@ -247,6 +247,7 @@ test("createHydrationBootstrap initializes development navigation without hydrat
   });
 
   assert.match(bootstrap, /import \{ getNavigation \}/);
+  assert.match(bootstrap, /import \{ registerNavigationExtensions \}/);
   assert.match(bootstrap, /getNavigation\(\)/);
   assert.doesNotMatch(bootstrap, /hydratePage/);
 });

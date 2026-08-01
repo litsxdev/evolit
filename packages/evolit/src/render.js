@@ -543,6 +543,8 @@ export async function createRouteResolver(projectRoot, mode = "development", res
       request,
       params: options.params ?? {},
       searchParams: options.searchParams ?? collectSearchParams(new URL(request.url)),
+      extensionValues: options.extensionState?.values,
+      didUseDynamicRequestData: options.extensionState?.didUseDynamicRequestData,
     });
     const boundaryPath = getNearestBoundary(route, "notFoundBoundaries") ?? rootNotFoundPath;
 
@@ -641,6 +643,8 @@ export async function createRouteResolver(projectRoot, mode = "development", res
       request,
       params: match.params,
       searchParams: collectSearchParams(url),
+      extensionValues: options.extensionState?.values,
+      didUseDynamicRequestData: options.extensionState?.didUseDynamicRequestData,
     });
     const response = applyRequestContextToResponse(
       await runWithRequestContext(requestContext, () => handler(requestContext.routeRequest, {
@@ -680,7 +684,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         };
       }
 
-      return renderNotFound(request);
+      return renderNotFound(request, { extensionState: options.extensionState });
     }
 
     const preloadedModules = options.routePolicyResult?.route === match.route
@@ -703,7 +707,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
         params: match.params,
         searchParams: collectSearchParams(url),
         routeConfig,
-        cachePolicy,
+        cachePolicy: options.extensionState?.didUseDynamicRequestData ? { mode: "dynamic" } : cachePolicy,
         cacheKey: createRequestCacheKey(url),
       };
       Object.defineProperty(routePolicyResult, "__evolitLoadedModules", {
@@ -728,6 +732,8 @@ export async function createRouteResolver(projectRoot, mode = "development", res
       request,
       params: match.params,
       searchParams: collectSearchParams(url),
+      extensionValues: options.extensionState?.values,
+      didUseDynamicRequestData: options.extensionState?.didUseDynamicRequestData,
     });
 
     try {
@@ -743,7 +749,7 @@ export async function createRouteResolver(projectRoot, mode = "development", res
           {
             assetResolver: resolverOptions.assetResolver,
             segmentCache: segmentRenderCache,
-            cachePolicy,
+            cachePolicy: options.extensionState?.didUseDynamicRequestData ? { mode: "dynamic" } : cachePolicy,
           },
         ),
       );
@@ -846,11 +852,11 @@ export async function createRouteResolver(projectRoot, mode = "development", res
   return {
     routes,
     routeHandlers,
-    async resolveRoutePolicy(request) {
-      return resolveMatchedRequest(request, { renderTree: false });
+    async resolveRoutePolicy(request, options = {}) {
+      return resolveMatchedRequest(request, { ...options, renderTree: false });
     },
-    async resolveRequest(request, routePolicyResult = null) {
-      return resolveMatchedRequest(request, { renderTree: true, routePolicyResult });
+    async resolveRequest(request, routePolicyResult = null, options = {}) {
+      return resolveMatchedRequest(request, { ...options, renderTree: true, routePolicyResult });
     },
     invalidateSegmentCache(changedPaths = null) {
       return segmentRenderCache.invalidate(changedPaths);

@@ -10,6 +10,7 @@ import { createDeploymentRuntime, createPublicAssetOrigin } from "../src/deploym
 import { scaffoldSite } from "../src/scaffold.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const frameworkNodeModules = path.resolve(frameworkRoot, "..", "..", "node_modules");
 
 test("createDeploymentRuntime resolves assets, cache hits, and render misses through the same runtime contract", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-runtime-"));
@@ -18,7 +19,7 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
   try {
     await scaffoldSite(fixtureRoot);
     await fs.symlink(
-      path.join(frameworkRoot, "node_modules"),
+      frameworkNodeModules,
       path.join(fixtureRoot, "node_modules"),
       "dir",
     );
@@ -97,7 +98,7 @@ test("development requests reuse hot client assets until development state is in
   try {
     await scaffoldSite(fixtureRoot);
     await fs.symlink(
-      path.join(frameworkRoot, "node_modules"),
+      frameworkNodeModules,
       path.join(fixtureRoot, "node_modules"),
       "dir",
     );
@@ -206,7 +207,7 @@ test("development rebuilds retain a catch-all route's previous CSS generation fo
   try {
     await scaffoldSite(fixtureRoot);
     await fs.symlink(
-      path.join(frameworkRoot, "node_modules"),
+      frameworkNodeModules,
       path.join(fixtureRoot, "node_modules"),
       "dir",
     );

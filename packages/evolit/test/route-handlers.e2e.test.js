@@ -10,6 +10,7 @@ import { discoverAppRouteHandlers } from "../src/app-discovery.js";
 import { scaffoldSite } from "../src/scaffold.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const frameworkNodeModules = path.resolve(frameworkRoot, "..", "..", "node_modules");
 const requestContextUrl = pathToFileURL(
   path.join(frameworkRoot, "src", "request-context.js"),
 ).href;
@@ -39,7 +40,7 @@ test("route handlers expose Web Request and Response semantics", async () => {
   try {
     await scaffoldSite(fixtureRoot);
     await fs.symlink(
-      path.join(frameworkRoot, "node_modules"),
+      frameworkNodeModules,
       path.join(fixtureRoot, "node_modules"),
       "dir",
     );

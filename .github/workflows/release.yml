@@ -1,28 +1,99 @@
 name: Release
 
 on:
+  workflow_run:
+    workflows: [Test, Release Validate]
+    types: [completed]
   workflow_dispatch:
-    inputs:
-      dist_tag:
-        description: npm distribution tag for this release
-        required: true
-        default: alpha
-        type: choice
-        options:
-          - alpha
-          - latest
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: release-${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  plan:
+    name: Detect ready release
+    if: |
+      github.event_name == 'workflow_run' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.gate.outputs.ready }}
+      has_changesets: ${{ steps.pending.outputs.has_changesets }}
+      release_kind: ${{ steps.gate.outputs.release_kind }}
+      snapshot_tag: ${{ steps.snapshot_tag.outputs.snapshot_tag }}
+    steps:
+      - name: Wait for required workflows
+        id: gate
+        uses: actions/github-script@v8
+        with:
+          script: |
+            if (context.eventName === "workflow_dispatch") {
+              core.setOutput("ready", context.ref === "refs/heads/main" ? "true" : "false");
+              core.setOutput("release_kind", "stable");
+              return;
+            }
+            const branch = context.payload.workflow_run.head_branch;
+            const headSha = context.payload.workflow_run.head_sha;
+            if (!branch || context.payload.workflow_run.event !== "push") {
+              core.setOutput("ready", "false");
+              return;
+            }
+            for (const workflowName of ["Test", "Release Validate"]) {
+              const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                ...context.repo, branch, event: "push", status: "completed", per_page: 100,
+              });
+              const run = data.workflow_runs.find((candidate) => candidate.name === workflowName && candidate.head_sha === headSha);
+              if (!run || run.conclusion !== "success") {
+                core.setOutput("ready", "false");
+                return;
+              }
+            }
+            core.setOutput("ready", "true");
+            core.setOutput("release_kind", branch === "main" ? "stable" : "snapshot");
+      - name: Compute snapshot tag
+        id: snapshot_tag
+        if: steps.gate.outputs.ready == 'true' && steps.gate.outputs.release_kind == 'snapshot'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const branch = context.payload.workflow_run.head_branch;
+            const normalized = branch.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").replace(/-+/g, "-").slice(0, 80) || "branch";
+            core.setOutput("snapshot_tag", `canary-${normalized}`);
+      - uses: actions/checkout@v6
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          node-version: 20
+          package-manager-cache: false
+      - name: Enable Yarn
+        if: steps.gate.outputs.ready == 'true'
+        run: corepack enable
+      - name: Install dependencies
+        if: steps.gate.outputs.ready == 'true'
+        run: corepack yarn install --immutable
+      - name: Detect pending changesets
+        id: pending
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          if find .changeset -maxdepth 1 -name '*.md' ! -name 'README.md' -print -quit | grep -q .; then
+            echo "has_changesets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changesets=false" >> "$GITHUB_OUTPUT"
+          fi
+
   publish:
-    name: Publish Evolit
-    if: github.ref == 'refs/heads/main'
+    name: Publish packages
+    needs: plan
+    if: needs.plan.outputs.ready == 'true' && needs.plan.outputs.has_changesets == 'true'
     runs-on: ubuntu-latest
     environment: npm-release
     permissions:
@@ -30,6 +101,7 @@ jobs:
       id-token: write
     steps:
       - name: Create release app token
+        if: needs.plan.outputs.release_kind == 'stable'
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
@@ -37,70 +109,66 @@ jobs:
           private-key: ${{ secrets.LITSX_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           permission-contents: write
-
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
           fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
-
       - name: Enable Yarn
-        run: |
-          corepack enable
-          corepack prepare yarn@4.10.3 --activate
-
+        run: corepack enable
       - name: Install dependencies
         run: corepack yarn install --immutable
-
-      - name: Validate release channel
+      - name: Materialize stable versions
+        if: needs.plan.outputs.release_kind == 'stable'
+        run: corepack yarn changeset:version
+      - name: Materialize snapshot versions
+        if: needs.plan.outputs.release_kind == 'snapshot'
         env:
-          DIST_TAG: ${{ inputs.dist_tag }}
-        run: |
-          node --input-type=module -e '
-            import packageJson from "./package.json" with { type: "json" };
-            const isPrerelease = packageJson.version.includes("-");
-            if (process.env.DIST_TAG === "alpha" && !isPrerelease) throw new Error("The alpha tag requires a prerelease version.");
-            if (process.env.DIST_TAG === "latest" && isPrerelease) throw new Error("The latest tag requires a stable version.");
-          '
-
-      - name: Validate package
+          EVOLIT_SNAPSHOT_TAG: ${{ needs.plan.outputs.snapshot_tag }}
+        run: corepack yarn changeset:version:snapshot
+      - name: Refresh lockfile after versioning
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
+        run: corepack yarn install
+      - name: Validate packages
         run: corepack yarn release:check
-
-      - name: Publish package
+      - name: Publish packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          DIST_TAG: ${{ inputs.dist_tag }}
-        run: corepack yarn npm publish --tag "$DIST_TAG"
-
-      - name: Resolve release app bot user
-        id: app-bot-user
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: corepack yarn changeset publish --tag ${{ needs.plan.outputs.release_kind == 'stable' && 'latest' || needs.plan.outputs.snapshot_tag }}
+      - name: Collect stable package tags
+        if: needs.plan.outputs.release_kind == 'stable'
         run: |
-          echo "user_id=$(gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
-
-      - name: Create Git tag
+          git diff --name-only HEAD -- 'packages/*/package.json' | while read file; do
+            node --input-type=module -e 'import fs from "node:fs"; const pkg = JSON.parse(fs.readFileSync(process.argv[1])); if (!pkg.private) console.log(`${pkg.name}@${pkg.version}`);' "$file"
+          done > "$RUNNER_TEMP/release-tags"
+          test -s "$RUNNER_TEMP/release-tags"
+      - name: Commit stable version updates
+        if: needs.plan.outputs.release_kind == 'stable'
+        id: version_commit
         env:
           RELEASE_PUSH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          version="$(node --input-type=module -e 'import packageJson from "./package.json" with { type: "json" }; process.stdout.write(packageJson.version);')"
           git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
-          git config user.email "${{ steps.app-bot-user.outputs.user_id }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+          git config user.email "${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${RELEASE_PUSH_TOKEN}@github.com/${{ github.repository }}.git"
-          git tag "evolit@${version}"
-          git push origin "evolit@${version}"
-
-      - name: Create GitHub release
+          git add -A
+          if git diff --cached --quiet; then echo "created_commit=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git commit -m "chore(release): version packages [skip ci]"
+          git push origin HEAD:main
+          echo "created_commit=true" >> "$GITHUB_OUTPUT"
+      - name: Create stable package tags
+        if: needs.plan.outputs.release_kind == 'stable' && steps.version_commit.outputs.created_commit == 'true'
+        run: |
+          while read tag; do git tag "$tag"; done < "$RUNNER_TEMP/release-tags"
+          git push origin --tags
+      - name: Create stable GitHub releases
+        if: needs.plan.outputs.release_kind == 'stable' && steps.version_commit.outputs.created_commit == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          DIST_TAG: ${{ inputs.dist_tag }}
         run: |
-          version="$(node --input-type=module -e 'import packageJson from "./package.json" with { type: "json" }; process.stdout.write(packageJson.version);')"
-          gh release create "evolit@${version}" --title "Evolit ${version}" --generate-notes ${{ inputs.dist_tag == 'alpha' && '--prerelease' || '' }}
+          while read tag; do gh release create "$tag" --title "$tag" --generate-notes; done < "$RUNNER_TEMP/release-tags"
