@@ -521,7 +521,20 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@litsx/core@npm:0.17.0-canary-feat-ssr-20260801095541, @litsx/core@npm:^0.17.0-canary-feat-ssr-20260801095541":
+"@litsx/core@npm:0.17.0-canary-feat-ssr-20260801101748":
+  version: 0.17.0-canary-feat-ssr-20260801101748
+  resolution: "@litsx/core@npm:0.17.0-canary-feat-ssr-20260801101748"
+  dependencies:
+    "@lit/context": "npm:^1.1.6"
+    "@lit/reactive-element": "npm:^2.1.2"
+    "@litsx/scoped-registry-shim": "npm:^0.2.6"
+  peerDependencies:
+    lit: ">=3"
+  checksum: 10c0/029445cce564342ebe0c65dc3182cf13f23dcb33206b421c71c37da05d9e830a937082d96602ca98c3433ee4378ad1493bfe35aa0ba68d9aa8e2ea13422aebdf
+  languageName: node
+  linkType: hard
+
+"@litsx/core@npm:^0.17.0-canary-feat-ssr-20260801095541":
   version: 0.17.0-canary-feat-ssr-20260801095541
   resolution: "@litsx/core@npm:0.17.0-canary-feat-ssr-20260801095541"
   dependencies:
@@ -1175,7 +1188,7 @@ __metadata:
   dependencies:
     "@jridgewell/remapping": "npm:^2.3.5"
     "@litsx/compiler": "npm:0.10.0-canary-feat-ssr-20260801095541"
-    "@litsx/core": "npm:0.17.0-canary-feat-ssr-20260801095541"
+    "@litsx/core": "npm:0.17.0-canary-feat-ssr-20260801101748"
     "@litsx/ssr": "npm:0.2.0-canary-feat-ssr-20260801095541"
     "@litsx/typescript": "npm:^0.9.0"
     "@playwright/test": "npm:^1.62.0"
