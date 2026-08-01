@@ -200,6 +200,7 @@ async function applyRouteDelta(delta, documentRef = document, signal, options = 
       (segment, offset) => segment.revision !== currentSegments[offset]?.revision,
     );
   }
+  if (index < 0 && options.requireSegmentChange === true) return true;
   if (index < 0) index = Math.max(0, nextSegments.length - 1);
   let next;
   let previous;
@@ -588,6 +589,7 @@ export function createBrowserNavigation(options = {}) {
       signal: refreshController.signal,
       hot: detail.update.strategy === "hot",
       moduleVersion: detail.update.version,
+      requireSegmentChange: true,
     }).then((applied) => {
       if (applied === false || refreshController.signal.aborted) return false;
       state = { status: "idle", url: windowRef.location.href, pendingUrl: null, error: null };

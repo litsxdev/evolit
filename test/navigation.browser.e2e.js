@@ -182,6 +182,37 @@ test("development refresh applies server deltas and hot-swaps changed client cod
       window.scrollTo(0, 120);
       return window.scrollY;
     });
+    await page.evaluate(() => {
+      const card = document.querySelector("feature-card");
+      window.__evolitUnrelatedRefreshCount = 0;
+      window.__evolitInitialCard = card;
+      window.__evolitInitialTitle = card?.shadowRoot?.querySelector(".title");
+      addEventListener("evolit:development-refresh", () => {
+        window.__evolitUnrelatedRefreshCount += 1;
+      });
+    });
+    const unrelatedRouteDirectory = path.join(projectRoot, "app", "unrelated");
+    await fs.mkdir(unrelatedRouteDirectory, { recursive: true });
+    await fs.writeFile(
+      path.join(unrelatedRouteDirectory, "page.litsx"),
+      'export default async function UnrelatedPage() { return <main>Unrelated route</main>; }\n',
+      "utf8",
+    );
+    await expect.poll(() => page.evaluate(() => window.__evolitUnrelatedRefreshCount), {
+      timeout: 10_000,
+    }).toBeGreaterThan(0);
+    expect(await page.evaluate(() => {
+      const card = document.querySelector("feature-card");
+      return {
+        sameCard: card === window.__evolitInitialCard,
+        sameTitle: card?.shadowRoot?.querySelector(".title") === window.__evolitInitialTitle,
+        title: card?.shadowRoot?.querySelector(".title")?.textContent?.trim(),
+      };
+    })).toEqual({
+      sameCard: true,
+      sameTitle: true,
+      title: "File Routing",
+    });
 
     const pagePath = path.join(projectRoot, "app", "page.litsx");
     const pageSource = await fs.readFile(pagePath, "utf8");

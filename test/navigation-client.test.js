@@ -288,9 +288,13 @@ test("a pushed development update applies its route delta without fetching or ch
     };
   });
   let applied = 0;
+  let applyContext = null;
   createBrowserNavigation({
     window: windowRef,
-    applyDelta: async () => { applied += 1; },
+    applyDelta: async (_delta, context) => {
+      applied += 1;
+      applyContext = context;
+    },
   });
   const delta = { type: "route", url: "/", route: {} };
   const detail = {
@@ -304,6 +308,7 @@ test("a pushed development update applies its route delta without fetching or ch
   assert.equal(await detail.result, true);
 
   assert.equal(applied, 1);
+  assert.equal(applyContext.requireSegmentChange, true);
   assert.equal(requested.length, 0);
   assert.deepEqual(windowRef.lastScroll, undefined);
   assert.equal(windowRef.history.lastPush, undefined);
