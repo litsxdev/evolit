@@ -22,6 +22,8 @@ import {
   LITSX_SERVER_COMPONENT,
 } from "@litsx/core/elements";
 
+const LITSX_FORWARDED_REF = Symbol.for("litsx.forwardedRef");
+
 function collectSearchParams(url) {
   const values = {};
 
@@ -165,6 +167,31 @@ function getNearestBoundary(route, boundaryName) {
   return (route?.[boundaryName] ?? []).at(-1)?.module ?? null;
 }
 
+function createForwardedChildRef(segment, projectionPath) {
+  const path = projectionPath.length > 0 ? projectionPath.join("-") : "0";
+  return {
+    [LITSX_FORWARDED_REF]: `evolit-ref:${segment?.id ?? "route"}:p${path}`,
+    current: null,
+  };
+}
+
+function withForwardedChildRef(children, ref) {
+  // TemplateResults are the existing children transport between route
+  // segments. Keep their normal renderability and attach only non-enumerable
+  // SSR metadata for the compiler-recognized `children.ref` expression.
+  const renderable = children && (typeof children === "object" || typeof children === "function")
+    ? children
+    // Preserve the coercion behaviour of string-returning layouts while
+    // making the value extensible enough to carry the internal ref marker.
+    : new String(children == null ? "" : String(children));
+  Object.defineProperty(renderable, "ref", {
+    configurable: true,
+    enumerable: false,
+    value: ref,
+  });
+  return renderable;
+}
+
 async function renderComponentTree(
   component,
   layoutComponents,
@@ -173,26 +200,34 @@ async function renderComponentTree(
   extraProps = {},
   segments = [],
 ) {
-  let renderedTree = wrapRouteSegment(
-    segments.at(-1),
-    await component({
-      params: requestContext.params,
-      searchParams: requestContext.searchParams,
-      request,
-      ...extraProps,
-    }),
-  );
+  async function renderAt(index, projectionPath, incomingRef = null) {
+    if (index === layoutComponents.length) {
+      return wrapRouteSegment(
+        segments.at(-1),
+        await component({
+          params: requestContext.params,
+          searchParams: requestContext.searchParams,
+          request,
+          ...extraProps,
+        }, incomingRef),
+      );
+    }
 
-  for (let index = layoutComponents.length - 1; index >= 0; index -= 1) {
-    renderedTree = wrapRouteSegment(segments[index], await layoutComponents[index]({
+    const segment = segments[index];
+    const childRef = createForwardedChildRef(segment, projectionPath);
+    const children = withForwardedChildRef(
+      await renderAt(index + 1, projectionPath, childRef),
+      childRef,
+    );
+    return wrapRouteSegment(segment, await layoutComponents[index]({
       params: requestContext.params,
       searchParams: requestContext.searchParams,
       request,
-      children: renderedTree,
-    }));
+      children,
+    }, incomingRef));
   }
 
-  return renderedTree;
+  return renderAt(0, []);
 }
 
 function createSegmentChildrenMarker(segment) {
@@ -383,7 +418,7 @@ async function renderSegmentedComponentTree(
   if (segments.length !== layoutComponents.length + 1) return null;
   const results = [];
 
-  async function renderSegmentAt(index, projectionPath) {
+  async function renderSegmentAt(index, projectionPath, incomingRef = null) {
     const segment = segments[index];
     const idPrefix = `${segment.id}-p${projectionPath.join("-") || "0"}`;
 
@@ -393,7 +428,7 @@ async function renderSegmentedComponentTree(
         searchParams: requestContext.searchParams,
         request,
         ...extraProps,
-      });
+      }, incomingRef);
       const pageResult = await renderToString(wrapRouteSegment(segment, pageValue), {
         assetResolver: options.assetResolver,
         context: { idPrefix },
@@ -404,6 +439,7 @@ async function renderSegmentedComponentTree(
     }
 
     const childrenMarker = createSegmentChildrenMarker(segment);
+    const childRef = createForwardedChildRef(segment, projectionPath);
     let profile = options.segmentCache?.getProfile(segment) ?? null;
     let layoutResult = options.segmentCache?.get(
       segment,
@@ -419,8 +455,8 @@ async function renderSegmentedComponentTree(
         params: trackedParams.value,
         searchParams: trackedSearchParams.value,
         request,
-        children: html`${unsafeHTML(childrenMarker)}`,
-      });
+        children: withForwardedChildRef(html`${unsafeHTML(childrenMarker)}`, childRef),
+      }, incomingRef);
       layoutResult = await renderToString(wrapRouteSegment(segment, layoutValue), {
         assetResolver: options.assetResolver,
         context: { idPrefix },
@@ -458,7 +494,11 @@ async function renderSegmentedComponentTree(
 
     const childHtml = [];
     for (let projection = 0; projection < projectionCount; projection += 1) {
-      const renderedChild = await renderSegmentAt(index + 1, [...projectionPath, projection]);
+      const renderedChild = await renderSegmentAt(
+        index + 1,
+        [...projectionPath, projection],
+        childRef,
+      );
       if (renderedChild == null) return null;
       childHtml.push(renderedChild);
     }

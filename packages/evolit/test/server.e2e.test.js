@@ -251,6 +251,7 @@ before(async () => {
   await fs.mkdir(path.join(fixtureRoot, "app", "optional", "[[...slug]]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "lit"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "multi"), { recursive: true });
+  await fs.mkdir(path.join(fixtureRoot, "app", "forwarded-ref"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-layout", "a"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "cached-layout", "b"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "request-layout", "a"), { recursive: true });
@@ -379,6 +380,40 @@ before(async () => {
       "",
       "export default async function MultiPage() {",
       '  return <FeatureCard title="Repeated projection" body="Rendered twice by the layout." />;',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "components", "forwarded-ref-host.litsx"),
+    [
+      "export default function ForwardedRefHost({ label = '' }) {",
+      "  return <span data-forwarded-ref-host>{label}</span>;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "forwarded-ref", "layout.litsx"),
+    [
+      'import ForwardedRefHost from "../components/forwarded-ref-host.litsx";',
+      "",
+      "export default async function ForwardedRefLayout({ children }) {",
+      "  return <section><ForwardedRefHost .contextRef={children.ref} />{children}</section>;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(fixtureRoot, "app", "forwarded-ref", "page.litsx"),
+    [
+      'import ForwardedRefHost from "../components/forwarded-ref-host.litsx";',
+      "",
+      "export default async function ForwardedRefPage(_props, ref) {",
+      '  return <ForwardedRefHost ref={ref} label="ref target" />;',
       "}",
       "",
     ].join("\n"),
@@ -603,6 +638,17 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   assert.match(html, /data-litsx-root="page-[A-Za-z0-9_-]+-p0-root-0"/);
   assert.doesNotMatch(html, /__evolit\/hydration/);
   assert.doesNotMatch(html, /customElements\.define/);
+});
+
+test("SSR composition exposes a forwarded page ref to the layout and its target", async () => {
+  const response = await fetch(`${baseUrl}/forwarded-ref`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /data-litsx-forwarded-ref-target="evolit-ref:[^"]+"/);
+  assert.match(html, /data-litsx-forwarded-ref-props="[^"]*contextRef[^"]*"/);
+  assert.match(html, /data-forwarded-ref-host/);
+  assert.match(html, /ref target/);
 });
 
 test("dev server returns route segment deltas from the canonical SSR document", async () => {

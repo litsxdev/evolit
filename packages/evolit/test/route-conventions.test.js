@@ -100,3 +100,41 @@ test("route conventions render the nearest not-found boundary and server error b
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("route composition forwards the same opaque child ref from a layout to its page", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-forwarded-route-ref-"));
+  const observationsKey = "__EVOLIT_FORWARDED_ROUTE_REF__";
+
+  try {
+    await writeAppFile(root, "layout.litsx", [
+      "export default async function Layout({ children }) {",
+      `  globalThis[${JSON.stringify(observationsKey)}] = { ...globalThis[${JSON.stringify(observationsKey)}], layout: children.ref };`,
+      '  return `<main>${children}</main>`;',
+      "}",
+      "",
+    ].join("\n"));
+    await writeAppFile(root, "page.litsx", [
+      "export default async function Page(_props, ref) {",
+      `  globalThis[${JSON.stringify(observationsKey)}].page = ref;`,
+      '  return "<p>ready</p>";',
+      "}",
+      "",
+    ].join("\n"));
+
+    const resolver = await createRouteResolver(root);
+    const result = await resolver.resolveRequest(new Request("http://evolit.local/"));
+    const observations = globalThis[observationsKey];
+
+    assert.match(result.tree, /<p>ready<\/p>/);
+    assert.ok(observations.layout);
+    assert.strictEqual(observations.layout, observations.page);
+    assert.equal(observations.layout.current, null);
+    assert.equal(
+      typeof observations.layout[Symbol.for("litsx.forwardedRef")],
+      "string",
+    );
+  } finally {
+    delete globalThis[observationsKey];
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

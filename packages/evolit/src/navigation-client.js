@@ -2,6 +2,7 @@ import { useHost, useOnConnect, useState } from "@litsx/core";
 import {
   applyHydrationPayload,
   hydrateRoot,
+  prepareForwardedRefs,
   prepareHydrationResources,
   registerHydrationModules,
 } from "@litsx/ssr/hydration";
@@ -258,6 +259,9 @@ async function applyRouteDelta(delta, documentRef = document, signal, options = 
     template.innerHTML = projection.html;
     const fragment = template.content;
     materializeDeclarativeShadowDom(fragment);
+    // Restore opaque SSR forwarded refs while the fragment is detached, before
+    // its custom elements upgrade on insertion.
+    prepareForwardedRefs(fragment);
     const roots = (delta.hydrationData?.roots ?? []).map((root) => ({
       root,
       element: findHydrationElement(fragment, root.id),
@@ -279,6 +283,10 @@ async function applyRouteDelta(delta, documentRef = document, signal, options = 
     target.start.data = `evolit:segment:start:${next.id}`;
     target.end.data = `evolit:segment:end:${next.id}`;
   }
+  // The page fragment was prepared detached above. Re-scan the committed
+  // document to point persistent layout refs at the new target, or clear them
+  // when the replacement page no longer exposes one.
+  prepareForwardedRefs(documentRef);
   const script = documentRef.getElementById("__EVOLIT_ROUTE__");
   if (script) script.textContent = JSON.stringify(delta.route);
   if (delta.title) documentRef.title = delta.title;
