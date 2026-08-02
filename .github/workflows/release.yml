@@ -136,10 +136,11 @@ jobs:
         run: corepack yarn install
       - name: Validate packages
         run: corepack yarn release:check
-      - name: Publish packages
+      - name: Publish Evolit
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: corepack yarn changeset publish --tag ${{ needs.plan.outputs.release_kind == 'stable' && 'latest' || needs.plan.outputs.snapshot_tag }}
+          YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: corepack yarn workspace evolit npm publish --tag ${{ needs.plan.outputs.release_kind == 'stable' && 'latest' || needs.plan.outputs.snapshot_tag }}
       - name: Collect stable package tags
         if: needs.plan.outputs.release_kind == 'stable'
         run: |
