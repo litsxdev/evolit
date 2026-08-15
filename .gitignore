@@ -142,6 +142,7 @@ dist
 **/.nextsx/
 **/.nexel/
 **/.evolit/
+.release-artifacts/
 
 # Vite files
 vite.config.js.timestamp-*

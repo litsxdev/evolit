@@ -166,9 +166,85 @@ jobs:
         run: |
           while read tag; do git tag "$tag"; done < "$RUNNER_TEMP/release-tags"
           git push origin --tags
-      - name: Create stable GitHub releases
+      - name: Build GitHub release payload
         if: needs.plan.outputs.release_kind == 'stable' && steps.version_commit.outputs.created_commit == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          while read tag; do gh release create "$tag" --title "$tag" --generate-notes; done < "$RUNNER_TEMP/release-tags"
+          mkdir -p .release-artifacts
+          node scripts/release/build-github-release.js > .release-artifacts/github-release.json
+      - name: Create stable GitHub release
+        if: needs.plan.outputs.release_kind == 'stable' && steps.version_commit.outputs.created_commit == 'true'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require("node:fs");
+            const release = JSON.parse(
+              fs.readFileSync(".release-artifacts/github-release.json", "utf8"),
+            );
+
+            if (!Array.isArray(release.packages) || release.packages.length === 0) {
+              core.info("No public package version changes detected for this release commit");
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            let existingRelease = null;
+            try {
+              const result = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: release.tagName,
+              });
+              existingRelease = result.data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            const releaseDate = release.releaseDate || new Date().toISOString().slice(0, 10);
+            const escapedDate = releaseDate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const dailyPattern = new RegExp(`^Evolit release ${escapedDate} #(\\d+)$`);
+            let releaseName = existingRelease?.name || null;
+
+            if (!releaseName) {
+              const releases = await github.paginate(github.rest.repos.listReleases, {
+                owner,
+                repo,
+                per_page: 100,
+              });
+              let maxDailyNumber = 0;
+              for (const candidate of releases) {
+                const match = candidate.name?.match(dailyPattern);
+                if (match) maxDailyNumber = Math.max(maxDailyNumber, Number(match[1]));
+              }
+              releaseName = `Evolit release ${releaseDate} #${maxDailyNumber + 1}`;
+            }
+
+            const payload = {
+              owner,
+              repo,
+              tag_name: release.tagName,
+              target_commitish: release.targetCommitish,
+              name: releaseName,
+              body: release.body,
+              draft: false,
+              prerelease: false,
+              make_latest: "true",
+            };
+
+            if (existingRelease) {
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: existingRelease.id,
+                name: payload.name,
+                body: payload.body,
+                draft: payload.draft,
+                prerelease: payload.prerelease,
+                make_latest: payload.make_latest,
+              });
+              core.info(`Updated GitHub release ${release.tagName}`);
+              return;
+            }
+
+            await github.rest.repos.createRelease(payload);
+            core.info(`Created GitHub release ${release.tagName}`);

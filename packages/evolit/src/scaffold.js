@@ -23,7 +23,7 @@ async function writeSitePackageJson(targetDirectory, siteName) {
       typecheck: "litsx-tsc -p jsconfig.json --noEmit",
     },
     dependencies: {
-      "@litsx/core": "0.17.0-canary-feat-ssr-20260726130435",
+      "@litsx/core": "0.17.0-canary-feat-ssr-20260804063402",
       evolit: frameworkVersion,
     },
     devDependencies: {

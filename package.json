@@ -12,14 +12,16 @@
   },
   "scripts": {
     "build": "yarn workspaces foreach -A --topological-dev run build",
-    "test": "yarn workspace evolit test",
+    "test": "yarn workspace evolit test && yarn test:release",
     "test:browser": "yarn workspace evolit test:browser",
+    "test:release": "node --test test/*.test.js",
     "typecheck": "yarn workspace evolit typecheck",
     "changeset": "changeset",
     "changeset:status": "changeset status",
     "changeset:version": "changeset version",
     "changeset:version:snapshot": "changeset version --snapshot ${EVOLIT_SNAPSHOT_TAG:-canary}",
-    "release:check": "yarn test && yarn typecheck && yarn workspace evolit release:check",
+    "release:check": "yarn test:release && yarn workspace evolit release:check",
+    "release:github": "node scripts/release/build-github-release.js",
     "release:preflight": "yarn install --immutable && yarn changeset:status && yarn release:check",
     "release:publish": "yarn release:check && changeset publish"
   }
