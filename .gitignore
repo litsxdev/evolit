@@ -139,7 +139,6 @@ dist
 **/.yarn/install-state.gz
 
 # Framework generated output
-**/.nextsx/
 **/.nexel/
 **/.evolit/
 .release-artifacts/

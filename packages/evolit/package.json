@@ -6,12 +6,12 @@
   "packageManager": "yarn@4.10.3",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/litsxdev/nextsx.git"
+    "url": "git+https://github.com/litsxdev/evolit.git"
   },
   "bugs": {
-    "url": "https://github.com/litsxdev/nextsx/issues"
+    "url": "https://github.com/litsxdev/evolit/issues"
   },
-  "homepage": "https://github.com/litsxdev/nextsx#readme",
+  "homepage": "https://github.com/litsxdev/evolit#readme",
   "files": [
     "src",
     "templates/default/app/**",
