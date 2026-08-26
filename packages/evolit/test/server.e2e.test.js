@@ -197,7 +197,7 @@ before(async () => {
     Buffer.from(cardBadgePngBase64, "base64"),
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
+    path.join(fixtureRoot, "app", "components", "card-accent.jsx"),
     [
       'import "./card-accent.css";',
       'import accentIcon from "./card-accent.svg";',
@@ -258,7 +258,7 @@ before(async () => {
   await fs.mkdir(path.join(fixtureRoot, "app", "request-layout", "b"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "param-layout", "[slug]"), { recursive: true });
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-static", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-static", "page.jsx"),
     createCounterPageSource(
       'export const routeConfig = { cache: "static" };',
       "static",
@@ -267,7 +267,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-dynamic", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-dynamic", "page.jsx"),
     createCounterPageSource(
       'export const routeConfig = { cache: "dynamic" };',
       "dynamic",
@@ -276,7 +276,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-revalidate", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-revalidate", "page.jsx"),
     createCounterPageSource(
       "export const routeConfig = { cache: { revalidate: 1 } };",
       "revalidate",
@@ -285,24 +285,24 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-revalidate", "[slug]", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-revalidate", "[slug]", "page.jsx"),
     createRevalidateParamsPageSource("dynamic-revalidate", "dynamicRevalidate", "slug"),
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "blog", "[slug]", "page.litsx"),
+    path.join(fixtureRoot, "app", "blog", "[slug]", "page.jsx"),
     createParamsPageSource("blog", "slug"),
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "docs", "[...slug]", "page.litsx"),
+    path.join(fixtureRoot, "app", "docs", "[...slug]", "page.jsx"),
     createParamsPageSource("docs", "slug"),
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "explore", "[...slug]", "page.litsx"),
+    path.join(fixtureRoot, "app", "explore", "[...slug]", "page.jsx"),
     [
-      'import FeatureCard from "../../components/feature-card.litsx";',
+      'import FeatureCard from "../../components/feature-card.jsx";',
       "",
       "export default async function ExplorePage({ params }) {",
       "  return <FeatureCard title=\"Explore\" body={JSON.stringify(params.slug ?? [])} />;",
@@ -312,7 +312,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "optional", "[[...slug]]", "page.litsx"),
+    path.join(fixtureRoot, "app", "optional", "[[...slug]]", "page.jsx"),
     createParamsPageSource("optional", "slug"),
     "utf8",
   );
@@ -364,7 +364,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "multi", "layout.litsx"),
+    path.join(fixtureRoot, "app", "multi", "layout.jsx"),
     [
       "export default async function MultiLayout({ children }) {",
       "  return <section data-route-layout=\"multi\"><aside>{children}</aside><main>{children}</main></section>;",
@@ -374,9 +374,9 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "multi", "page.litsx"),
+    path.join(fixtureRoot, "app", "multi", "page.jsx"),
     [
-      'import FeatureCard from "../components/feature-card.litsx";',
+      'import FeatureCard from "../components/feature-card.jsx";',
       "",
       "export default async function MultiPage() {",
       '  return <FeatureCard title="Repeated projection" body="Rendered twice by the layout." />;',
@@ -386,7 +386,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "components", "forwarded-ref-host.litsx"),
+    path.join(fixtureRoot, "app", "components", "forwarded-ref-host.jsx"),
     [
       "export default function ForwardedRefHost({ label = '' }) {",
       "  return <span data-forwarded-ref-host>{label}</span>;",
@@ -396,21 +396,21 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "forwarded-ref", "layout.litsx"),
+    path.join(fixtureRoot, "app", "forwarded-ref", "layout.jsx"),
     [
-      'import ForwardedRefHost from "../components/forwarded-ref-host.litsx";',
+      'import ForwardedRefHost from "../components/forwarded-ref-host.jsx";',
       "",
       "export default async function ForwardedRefLayout({ children }) {",
-      "  return <section><ForwardedRefHost .contextRef={children.ref} />{children}</section>;",
+      "  return <section><ForwardedRefHost contextRef={children.ref} />{children}</section>;",
       "}",
       "",
     ].join("\n"),
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "forwarded-ref", "page.litsx"),
+    path.join(fixtureRoot, "app", "forwarded-ref", "page.jsx"),
     [
-      'import ForwardedRefHost from "../components/forwarded-ref-host.litsx";',
+      'import ForwardedRefHost from "../components/forwarded-ref-host.jsx";',
       "",
       "export default async function ForwardedRefPage(_props, ref) {",
       '  return <ForwardedRefHost ref={ref} label="ref target" />;',
@@ -420,7 +420,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-layout", "layout.litsx"),
+    path.join(fixtureRoot, "app", "cached-layout", "layout.jsx"),
     [
       "globalThis.__EVOLIT_LAYOUT_RENDER_COUNT ??= 0;",
       "",
@@ -433,7 +433,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-layout", "a", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-layout", "a", "page.jsx"),
     [
       "export default async function CachedLayoutPageA() {",
       '  return <main data-cached-layout-page="a">A</main>; ',
@@ -443,7 +443,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-layout", "b", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-layout", "b", "page.jsx"),
     [
       "export default async function CachedLayoutPageB() {",
       '  return <main data-cached-layout-page="b">B</main>; ',
@@ -453,7 +453,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "request-layout", "layout.litsx"),
+    path.join(fixtureRoot, "app", "request-layout", "layout.jsx"),
     [
       "globalThis.__EVOLIT_REQUEST_LAYOUT_RENDER_COUNT ??= 0;",
       "",
@@ -467,7 +467,7 @@ before(async () => {
   );
   for (const page of ["a", "b"]) {
     await fs.writeFile(
-      path.join(fixtureRoot, "app", "request-layout", page, "page.litsx"),
+      path.join(fixtureRoot, "app", "request-layout", page, "page.jsx"),
       [
         `export default async function RequestLayoutPage${page.toUpperCase()}() {`,
         `  return <main data-request-layout-page="${page}">${page.toUpperCase()}</main>;`,
@@ -478,7 +478,7 @@ before(async () => {
     );
   }
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "param-layout", "[slug]", "layout.litsx"),
+    path.join(fixtureRoot, "app", "param-layout", "[slug]", "layout.jsx"),
     [
       "globalThis.__EVOLIT_PARAM_LAYOUT_RENDER_COUNT ??= 0;",
       "",
@@ -491,7 +491,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "param-layout", "[slug]", "page.litsx"),
+    path.join(fixtureRoot, "app", "param-layout", "[slug]", "page.jsx"),
     [
       "export default async function ParamLayoutPage({ params }) {",
       "  return <main data-param-layout-page={String(params.slug)}>{params.slug}</main>;",
@@ -500,13 +500,13 @@ before(async () => {
     ].join("\n"),
     "utf8",
   );
-  const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
+  const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.jsx");
   const featureCardSource = await fs.readFile(featureCardPath, "utf8");
   await fs.writeFile(
     featureCardPath,
     [
       'import { nanoid } from "nanoid";',
-      'import CardAccent from "./card-accent.litsx";',
+      'import CardAccent from "./card-accent.jsx";',
       "",
       featureCardSource.replace(
         '      <h2 class="title">{title}</h2>',
@@ -522,13 +522,13 @@ before(async () => {
 
   await fs.mkdir(path.join(fixtureRoot, "src"), { recursive: true });
   await fs.writeFile(
-    path.join(fixtureRoot, "src", "shared.litsx"),
+    path.join(fixtureRoot, "src", "shared.jsx"),
     'export const sharedMessage = "shared source version one";\n',
     "utf8",
   );
   await fs.mkdir(path.join(fixtureRoot, "app", "watcher-app"), { recursive: true });
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "watcher-app", "page.litsx"),
+    path.join(fixtureRoot, "app", "watcher-app", "page.jsx"),
     [
       'export const routeConfig = { cache: "static" };',
       "",
@@ -541,9 +541,9 @@ before(async () => {
   );
   await fs.mkdir(path.join(fixtureRoot, "app", "watcher-source"), { recursive: true });
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "watcher-source", "page.litsx"),
+    path.join(fixtureRoot, "app", "watcher-source", "page.jsx"),
     [
-      'import { sharedMessage } from "../../src/shared.litsx";',
+      'import { sharedMessage } from "../../src/shared.jsx";',
       'export const routeConfig = { cache: "static" };',
       "",
       "export default function WatcherSourcePage() {",
@@ -553,13 +553,13 @@ before(async () => {
     ].join("\n"),
     "utf8",
   );
-  unmanagedSharedPath = path.join(path.dirname(fixtureRoot), "unmanaged-shared.litsx");
+  unmanagedSharedPath = path.join(path.dirname(fixtureRoot), "unmanaged-shared.jsx");
   await fs.writeFile(unmanagedSharedPath, 'export const unmanagedMessage = "unmanaged version one";\n', "utf8");
   await fs.mkdir(path.join(fixtureRoot, "app", "watcher-unmanaged"), { recursive: true });
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "watcher-unmanaged", "page.litsx"),
+    path.join(fixtureRoot, "app", "watcher-unmanaged", "page.jsx"),
     [
-      'import { unmanagedMessage } from "../../../unmanaged-shared.litsx";',
+      'import { unmanagedMessage } from "../../../unmanaged-shared.jsx";',
       'export const routeConfig = { cache: "static" };',
       "",
       "export default function WatcherUnmanagedPage() {",
@@ -569,14 +569,14 @@ before(async () => {
     ].join("\n"),
     "utf8",
   );
-  managedSharedPath = path.join(path.dirname(fixtureRoot), "managed-source", "shared.litsx");
+  managedSharedPath = path.join(path.dirname(fixtureRoot), "managed-source", "shared.jsx");
   await fs.mkdir(path.dirname(managedSharedPath), { recursive: true });
   await fs.writeFile(managedSharedPath, 'export const managedMessage = "managed version one";\n', "utf8");
   await fs.mkdir(path.join(fixtureRoot, "app", "watcher-managed"), { recursive: true });
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "watcher-managed", "page.litsx"),
+    path.join(fixtureRoot, "app", "watcher-managed", "page.jsx"),
     [
-      'import { managedMessage } from "../../../managed-source/shared.litsx";',
+      'import { managedMessage } from "../../../managed-source/shared.jsx";',
       'export const routeConfig = { cache: "static" };',
       "export default function WatcherManagedPage() {",
       '  return `<main>${managedMessage}</main>`;',
@@ -618,7 +618,7 @@ test("home route emits LitSX hydration bootstrap for hydratable roots", async ()
   const html = await response.text();
   const globalCssUrl = await getDevAssetPublicUrl("app/global.css");
 
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, html);
   assert.doesNotMatch(html, /<script type="importmap">/);
   assert.match(html, /import \{ hydratePage, registerHydrationModules \} from "\/_evolit\/shared\/(?:base\/)?litsx__ssr__hydration(?:-[A-Za-z0-9_-]+)?\.mjs"/);
   assert.match(html, /registerHydrationModules/);
@@ -644,7 +644,7 @@ test("SSR composition exposes a forwarded page ref to the layout and its target"
   const response = await fetch(`${baseUrl}/forwarded-ref`);
   const html = await response.text();
 
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, html);
   assert.match(html, /data-litsx-forwarded-ref-target="evolit-ref:[^"]+"/);
   assert.match(html, /data-litsx-forwarded-ref-props="[^"]*contextRef[^"]*"/);
   assert.match(html, /data-forwarded-ref-host/);
@@ -728,7 +728,7 @@ test("dev server reuses a layout shell across cacheable sibling pages", async ()
 });
 
 test("dev invalidation preserves unaffected cached layout shells", async () => {
-  const pagePath = path.join(fixtureRoot, "app", "cached-layout", "a", "page.litsx");
+  const pagePath = path.join(fixtureRoot, "app", "cached-layout", "a", "page.jsx");
   const originalSource = await fs.readFile(pagePath, "utf8");
   const eventCount = developmentEvents.length;
   await fs.writeFile(pagePath, originalSource.replace(">A</main>", ">A changed</main>"), "utf8");
@@ -1000,7 +1000,7 @@ test("dev server revalidates dynamic routes in the background per pathname", asy
 
 test("dev server discovers new routes and invalidates cached route responses", async () => {
   const routeDirectory = path.join(fixtureRoot, "app", "watcher-route");
-  const routePath = path.join(routeDirectory, "page.litsx");
+  const routePath = path.join(routeDirectory, "page.jsx");
   const liveReloadSocket = await openLiveReloadSocket(`${baseUrl}/watcher-route`);
   const liveReloadEvent = waitForLiveReload(liveReloadSocket);
 
@@ -1051,7 +1051,7 @@ test("dev server discovers new routes and invalidates cached route responses", a
 });
 
 test("dev server invalidates routes when an app source changes", async () => {
-  const pagePath = path.join(fixtureRoot, "app", "watcher-app", "page.litsx");
+  const pagePath = path.join(fixtureRoot, "app", "watcher-app", "page.jsx");
   const invalidationCount = developmentEvents.filter((event) => event.type === "invalidated").length;
 
   const initialResponse = await fetch(`${baseUrl}/watcher-app`);
@@ -1078,7 +1078,7 @@ test("dev server invalidates routes when an app source changes", async () => {
 });
 
 test("dev server invalidates routes when an imported project src module changes", async () => {
-  const sharedPath = path.join(fixtureRoot, "src", "shared.litsx");
+  const sharedPath = path.join(fixtureRoot, "src", "shared.jsx");
   const invalidationCount = developmentEvents.filter((event) => event.type === "invalidated").length;
   const liveReloadSocket = await openLiveReloadSocket(`${baseUrl}/watcher-source`);
   const liveReloadEvent = waitForLiveReload(liveReloadSocket);
@@ -1096,7 +1096,7 @@ test("dev server invalidates routes when an imported project src module changes"
   assert.equal(liveUpdate.delta.type, "route");
   assert.equal(liveUpdate.url, `${baseUrl}/watcher-source`);
   assert.ok(liveUpdate.delta.route.segments.some((segment) =>
-    segment.modulePath === "app/watcher-source/page.litsx"
+    segment.modulePath === "app/watcher-source/page.jsx"
     && typeof segment.revision === "number"
   ));
   assert.ok(liveUpdate.delta.route.segments.some((segment) =>
@@ -1107,7 +1107,7 @@ test("dev server invalidates routes when an imported project src module changes"
 });
 
 test("dev server requests a hot refresh when a hydratable client boundary changes", async () => {
-  const componentPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
+  const componentPath = path.join(fixtureRoot, "app", "components", "feature-card.jsx");
   const componentSource = await fs.readFile(componentPath, "utf8");
   const initialResponse = await fetch(`${baseUrl}/`);
   assert.equal(initialResponse.status, 200);

@@ -1,8 +1,7 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { html } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import { renderToString } from "@litsx/ssr";
+import { html, renderToString } from "@litsx/ssr";
 import { discoverAppRouteHandlers, discoverAppRoutes, matchRoute } from "./app-discovery.js";
 import { importCompiledModule } from "./compiler.js";
 import { APP_DIRECTORY, MODULE_EXTENSIONS } from "./constants.js";

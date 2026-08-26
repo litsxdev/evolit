@@ -201,7 +201,7 @@ export function permanentRedirect(location) {
 }
 
 /**
- * Stops route execution with a 404 signal for the nearest `not-found.litsx` boundary.
+ * Stops route execution with a 404 signal for the nearest `not-found.jsx` boundary.
  *
  * @returns {never}
  */

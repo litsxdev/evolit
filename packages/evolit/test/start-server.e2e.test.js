@@ -173,7 +173,7 @@ before(async () => {
       "utf8",
     ),
   ]);
-  const rootLayoutPath = path.join(fixtureRoot, "app", "layout.litsx");
+  const rootLayoutPath = path.join(fixtureRoot, "app", "layout.jsx");
   const rootLayoutSource = await fs.readFile(rootLayoutPath, "utf8");
   await fs.writeFile(
     rootLayoutPath,
@@ -185,7 +185,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "src", "server", "catalog-fragment.litsx"),
+    path.join(fixtureRoot, "src", "server", "catalog-fragment.jsx"),
     [
       'import { createHash } from "node:crypto";',
       'import FeatureCard from "@components/feature-card";',
@@ -200,9 +200,9 @@ before(async () => {
   );
   await fs.mkdir(path.join(fixtureRoot, "app", "server-graph"), { recursive: true });
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "server-graph", "page.litsx"),
+    path.join(fixtureRoot, "app", "server-graph", "page.jsx"),
     [
-      'import CatalogFragment from "../../src/server/catalog-fragment.litsx";',
+      'import CatalogFragment from "../../src/server/catalog-fragment.jsx";',
       "",
       "export default async function ServerGraphPage() {",
       "  return <CatalogFragment />;",
@@ -230,7 +230,7 @@ before(async () => {
     Buffer.from(cardBadgePngBase64, "base64"),
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "components", "card-accent.litsx"),
+    path.join(fixtureRoot, "app", "components", "card-accent.jsx"),
     [
       'import "./card-accent.css";',
       'import accentIcon from "./card-accent.svg";',
@@ -288,7 +288,7 @@ before(async () => {
   await fs.mkdir(path.join(fixtureRoot, "app", "docs", "[...slug]"), { recursive: true });
   await fs.mkdir(path.join(fixtureRoot, "app", "optional", "[[...slug]]"), { recursive: true });
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-static", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-static", "page.jsx"),
     createCounterPageSource(
       'export const routeConfig = { cache: "static" };',
       "static",
@@ -297,7 +297,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-dynamic", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-dynamic", "page.jsx"),
     createCounterPageSource(
       'export const routeConfig = { cache: "dynamic" };',
       "dynamic",
@@ -306,7 +306,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-revalidate", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-revalidate", "page.jsx"),
     createCounterPageSource(
       "export const routeConfig = { cache: { revalidate: 1 } };",
       "revalidate",
@@ -315,17 +315,17 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "cached-revalidate", "[slug]", "page.litsx"),
+    path.join(fixtureRoot, "app", "cached-revalidate", "[slug]", "page.jsx"),
     createRevalidateParamsPageSource("dynamic-revalidate", "dynamicRevalidate", "slug"),
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "blog", "[slug]", "page.litsx"),
+    path.join(fixtureRoot, "app", "blog", "[slug]", "page.jsx"),
     createParamsPageSource("blog", "slug"),
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "catalog", "[category]", "layout.litsx"),
+    path.join(fixtureRoot, "app", "catalog", "[category]", "layout.jsx"),
     createStaticParamsLayoutSource([
       { category: "books" },
       { category: "games" },
@@ -333,7 +333,7 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "catalog", "[category]", "[slug]", "page.litsx"),
+    path.join(fixtureRoot, "app", "catalog", "[category]", "[slug]", "page.jsx"),
     createStaticParamsPageSource("catalog", {
       books: ["guide"],
       games: ["chess"],
@@ -341,12 +341,12 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "docs", "[...slug]", "page.litsx"),
+    path.join(fixtureRoot, "app", "docs", "[...slug]", "page.jsx"),
     createParamsPageSource("docs", "slug"),
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "app", "optional", "[[...slug]]", "page.litsx"),
+    path.join(fixtureRoot, "app", "optional", "[[...slug]]", "page.jsx"),
     createParamsPageSource("optional", "slug"),
     "utf8",
   );
@@ -360,13 +360,13 @@ before(async () => {
     ].join("\n"),
     "utf8",
   );
-  const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.litsx");
+  const featureCardPath = path.join(fixtureRoot, "app", "components", "feature-card.jsx");
   const featureCardSource = await fs.readFile(featureCardPath, "utf8");
   await fs.writeFile(
     featureCardPath,
     [
       'import { nanoid } from "nanoid";',
-      'import CardAccent from "./card-accent.litsx";',
+      'import CardAccent from "./card-accent.jsx";',
       "",
       featureCardSource.replace(
         '      <h2 class="title">{title}</h2>',
@@ -380,13 +380,13 @@ before(async () => {
     "utf8",
   );
   await fs.writeFile(
-    path.join(fixtureRoot, "src", "dynamic-card.litsx"),
+    path.join(fixtureRoot, "src", "dynamic-card.jsx"),
     'export default function DynamicCard() { return <aside>Dynamic card</aside>; }\n',
     "utf8",
   );
   await fs.writeFile(
     path.join(fixtureRoot, "evolit.config.js"),
-    'export default { clientBoundaries: ["./src/dynamic-card.litsx"] };\n',
+    'export default { clientBoundaries: ["./src/dynamic-card.jsx"] };\n',
     "utf8",
   );
   await buildProject(fixtureRoot);
@@ -468,10 +468,10 @@ test("build materializes configured dynamic client boundaries without preloading
 test("arbitrary Server Components and Node dependencies stay out of the client graph", async () => {
   const response = await fetch(`${baseUrl}/server-graph`);
   const html = await response.text();
-  const serverEntry = "app/server-graph/page.litsx";
+  const serverEntry = "app/server-graph/page.jsx";
   const boundaries = buildManifest.clientAssets.clientBoundariesByEntry[serverEntry];
 
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, html);
   assert.match(html, /Server graph/);
   assert.deepEqual(boundaries, ["app/components/feature-card.mjs"]);
   assert.equal(
@@ -483,8 +483,8 @@ test("arbitrary Server Components and Node dependencies stay out of the client g
   );
   assert.equal(JSON.stringify(buildManifest.clientAssets).includes("node:crypto"), false);
   assert.doesNotMatch(html, /catalog-fragment|node:crypto/);
-  assert.ok(Array.isArray(buildManifest.clientAssets.clientBoundariesByEntry["app/layout.litsx"]));
-  assert.ok(Array.isArray(buildManifest.clientAssets.clientBoundariesByEntry["app/server-graph/page.litsx"]));
+  assert.ok(Array.isArray(buildManifest.clientAssets.clientBoundariesByEntry["app/layout.jsx"]));
+  assert.ok(Array.isArray(buildManifest.clientAssets.clientBoundariesByEntry["app/server-graph/page.jsx"]));
 });
 
 test("build manifest classifies entry and chunk client assets with structured metadata", () => {
@@ -580,7 +580,7 @@ test("client compilation metadata captures module and vendor imports", async () 
   assert.deepEqual(featureCardMetadata.moduleImports, ["app/components/card-accent.mjs"]);
   assert.equal(featureCardMetadata.vendorImports.includes("nanoid"), true);
   assert.equal(featureCardMetadata.vendorImports.includes("@litsx/core"), true);
-  assert.equal(featureCardMetadata.vendorImports.includes("@litsx/core/elements"), true);
+  assert.equal(featureCardMetadata.vendorImports.includes("@litsx/core/elements"), false);
   assert.equal(featureCardMetadata.vendorImports.includes("lit"), true);
   assert.deepEqual(featureCardMetadata.styleImports, []);
   assert.deepEqual(featureCardMetadata.assetImports, []);
@@ -891,13 +891,13 @@ test("start server emits every stylesheet imported by the root layout", async ()
   assert.ok(tokensStyleAsset);
   assert.ok(composableStyleAsset);
   assert.ok(globalStyleAsset);
-  assert.deepEqual(buildManifest.clientAssets.serverAssetImportsByEntry["app/layout.litsx"].styles, [
+  assert.deepEqual(buildManifest.clientAssets.serverAssetImportsByEntry["app/layout.jsx"].styles, [
     "app/global.css",
     "src/styles/tokens.css",
     "src/themes/composable.css",
   ]);
   assert.deepEqual(
-    buildManifest.clientAssets.serverAssetImportsByEntry["app/layout.litsx"].styles
+    buildManifest.clientAssets.serverAssetImportsByEntry["app/layout.jsx"].styles
       .map((clientModule) => buildManifest.clientAssets.byClientModule[clientModule]),
     [
     globalStyleAsset.publicUrl,

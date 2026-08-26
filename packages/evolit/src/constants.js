@@ -13,8 +13,6 @@ export const DEPLOY_ASSETS_MANIFEST_FILENAME = "deploy-assets.json";
 export const DEPLOY_SERVER_MANIFEST_FILENAME = "deploy-server.json";
 
 export const MODULE_EXTENSIONS = [
-  ".litsx",
-  ".litsx.jsx",
   ".tsx",
   ".ts",
   ".jsx",

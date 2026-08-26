@@ -423,7 +423,7 @@ export async function createRequestRenderer({
 
     const importerPath = routeResult?.boundaryModule
       ?? routeResult?.route?.page
-      ?? path.join(projectRoot, "app", "page.litsx");
+      ?? path.join(projectRoot, "app", "page.jsx");
     if (moduleId.startsWith("/")) {
       const projectSpecifier = `.${moduleId}`;
       return resolveProjectModuleSpecifier(projectRoot, importerPath, projectSpecifier);

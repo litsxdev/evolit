@@ -2,4 +2,4 @@
 "evolit": patch
 ---
 
-Update Evolit, generated applications, and the showcase to the latest LitSX SSR snapshot.
+Migrate Evolit, generated applications, and the showcase to LitSX 1.0 standard JSX authoring and the latest `next` compiler, core, and SSR runtimes.

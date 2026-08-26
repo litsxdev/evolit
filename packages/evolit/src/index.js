@@ -92,7 +92,7 @@ export { cookies } from "./request-context.js";
 export { headers } from "./request-context.js";
 
 /**
- * Signals a 404 response and renders the nearest `not-found.litsx` boundary when available.
+ * Signals a 404 response and renders the nearest `not-found.jsx` boundary when available.
  *
  * @returns {never}
  */

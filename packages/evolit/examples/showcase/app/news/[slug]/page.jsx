@@ -1,5 +1,5 @@
 // @ts-nocheck
-import PageFrame from "../../components/page-frame.litsx";
+import PageFrame from "../../components/page-frame.jsx";
 
 const showcaseRuntimeState = /** @type {{ __EVOLIT_SHOWCASE_NEWS_COUNTER?: number }} */ (globalThis);
 

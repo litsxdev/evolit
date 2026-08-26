@@ -1,4 +1,4 @@
-import FeatureCard from "./components/feature-card.litsx";
+import FeatureCard from "./components/feature-card.jsx";
 
 export default async function HomePage() {
   return (
@@ -20,7 +20,7 @@ export default async function HomePage() {
       <div class="features">
         <FeatureCard
           title="File Routing"
-          body="Every app/page.litsx becomes an addressable route, with dynamic segments reserved for the next iteration."
+          body="Every app/page.jsx becomes an addressable route, with dynamic segments reserved for the next iteration."
         />
         <FeatureCard
           title="SSR Boundary"
@@ -28,7 +28,7 @@ export default async function HomePage() {
         />
         <FeatureCard
           title="Compiler Reuse"
-          body="Authored .litsx source is compiled through the public @litsx/compiler facade instead of a parallel transform path."
+          body="Authored .jsx source is compiled through the public @litsx/compiler facade instead of a parallel transform path."
         />
       </div>
     </section>

@@ -1,0 +1,52 @@
+// @ts-nocheck
+import { css } from "lit";
+
+/**
+ * @param {{
+ *   eyebrow: string,
+ *   title: string,
+ *   children?: unknown,
+ * }} props
+ */
+export default function PageFrame(props) {
+  const { eyebrow, title } = props;
+
+  return (
+    <section class="page">
+      <p class="eyebrow">{eyebrow}</p>
+      <h1 class="title">{title}</h1>
+      <div class="copy">{props.children}</div>
+    </section>
+  );
+}
+
+PageFrame.styles = css`
+  :host {
+    display: block;
+    max-width: 760px;
+  }
+
+  .page {
+    display: grid;
+    gap: 18px;
+  }
+
+  .eyebrow {
+    margin: 0;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-size: 12px;
+    color: rgba(243, 240, 232, 0.56);
+  }
+
+  .title {
+    margin: 0;
+    font-size: clamp(2.5rem, 7vw, 4.4rem);
+  }
+
+  .copy {
+    margin: 0;
+    line-height: 1.8;
+    color: rgba(243, 240, 232, 0.76);
+  }
+`;

@@ -5,9 +5,9 @@ This app is the first manual validation target for `evolit` as a standalone cons
 It intentionally exercises:
 
 - a static home route
-- a dynamic route at `app/blog/[slug]/page.litsx`
-- a route with `generateStaticParams()` at `app/library/[category]/[slug]/page.litsx`
-- a route with `{ revalidate: 60 }` at `app/news/[slug]/page.litsx`
+- a dynamic route at `app/blog/[slug]/page.jsx`
+- a route with `generateStaticParams()` at `app/library/[category]/[slug]/page.jsx`
+- a route with `{ revalidate: 60 }` at `app/news/[slug]/page.jsx`
 - imported CSS and image assets
 - a hydratable LitSX-authored component on the home page
 

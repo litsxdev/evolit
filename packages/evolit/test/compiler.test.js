@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   compileModuleGraph,
   collectClientBoundaryModules,
@@ -74,6 +75,89 @@ for (const mode of ["development", "production"]) {
   });
 }
 
+test("compiler preserves plain route-handler exports outside the LitSX authoring pipeline", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-plain-route-handler-"));
+  const sourcePath = path.join(projectRoot, "route.js");
+
+  try {
+    await fs.writeFile(
+      sourcePath,
+      'export async function GET() { return new Response("ok"); }\n',
+      "utf8",
+    );
+    const { entrypoint } = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: true,
+      target: "server",
+    });
+
+    assert.match(await fs.readFile(entrypoint, "utf8"), /export async function GET/);
+    assert.equal((await import(`${pathToFileURL(entrypoint).href}?test=${Date.now()}`)).GET instanceof Function, true);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("compiler preserves LitSX side-effect imports for asset discovery", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-side-effect-imports-"));
+  const sourcePath = path.join(projectRoot, "feature-card.jsx");
+  const stylePath = path.join(projectRoot, "feature-card.css");
+
+  try {
+    await fs.writeFile(stylePath, ":host { display: block; }\n", "utf8");
+    await fs.writeFile(
+      sourcePath,
+      'import "./feature-card.css"; export default function FeatureCard() { return <article />; }\n',
+      "utf8",
+    );
+    const { entrypoint } = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: true,
+      target: "client",
+    });
+
+    assert.match(await fs.readFile(entrypoint, "utf8"), /import "\.\/feature-card\.css\.mjs"/);
+    await assert.doesNotReject(fs.access(path.join(projectRoot, ".evolit", "build", "client", "feature-card.css")));
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("compiler composes imported .jsx Server Components during SSR", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-server-composition-"));
+  const childPath = path.join(projectRoot, "catalog-fragment.jsx");
+  const pagePath = path.join(projectRoot, "page.jsx");
+
+  try {
+    await fs.writeFile(
+      childPath,
+      "export default async function CatalogFragment() { return <main>catalog</main>; }\n",
+      "utf8",
+    );
+    await fs.writeFile(
+      pagePath,
+      'import CatalogFragment from "./catalog-fragment.jsx"; export default async function CatalogPage() { return <CatalogFragment />; }\n',
+      "utf8",
+    );
+    const { entrypoint } = await compileModuleGraph(pagePath, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: false,
+      ssr: true,
+      target: "server",
+    });
+    const output = await fs.readFile(entrypoint, "utf8");
+
+    assert.match(output, /__litsxServerComponentCall\(CatalogFragment, \{\}\)/);
+    assert.match(output, /CatalogPage\[LITSX_SERVER_COMPONENT\] = true/);
+    assert.doesNotMatch(output, /annotateHydratableCustomElement\(CatalogFragment/);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("compiler reuses development graphs until they are invalidated", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-cache-"));
   const sourcePath = path.join(projectRoot, "entry.js");
@@ -110,15 +194,15 @@ test("compiler reuses development graphs until they are invalidated", async () =
 
 test("development client modules export stable Evolit hot component proxies", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-hot-component-"));
-  const sourcePath = path.join(projectRoot, "src", "card.litsx");
+  const sourcePath = path.join(projectRoot, "src", "card.jsx");
 
   try {
     await fs.mkdir(path.dirname(sourcePath), { recursive: true });
     await fs.writeFile(
       sourcePath,
       [
-        "export default function Card() { return <button>default</button>; }",
-        "export function Badge() { return <span>named</span>; }",
+        "export default function FeatureCard() { return <button>default</button>; }",
+        "export function StatusBadge() { return <span>named</span>; }",
         "",
       ].join("\n"),
       "utf8",
@@ -135,9 +219,9 @@ test("development client modules export stable Evolit hot component proxies", as
       developmentCode,
       /import \{ hotComponent as __evolitHotComponent \} from "evolit\/internal\/development-hot"/,
     );
-    assert.match(developmentCode, /__evolitHotComponent\("src\/card\.litsx", Card\)/);
-    assert.match(developmentCode, /export default __evolit_hot_Card_0/);
-    assert.match(developmentCode, /export \{ __evolit_hot_Badge_1 as Badge \}/);
+    assert.match(developmentCode, /__evolitHotComponent\("src\/card\.jsx", FeatureCard\)/);
+    assert.match(developmentCode, /export default __evolit_hot_FeatureCard_0/);
+    assert.match(developmentCode, /export \{ __evolit_hot_StatusBadge_1 as StatusBadge \}/);
 
     const production = await compileModuleGraph(sourcePath, {
       projectRoot,
@@ -155,8 +239,8 @@ test("development client modules export stable Evolit hot component proxies", as
 
 test("compiler rejects a client graph that reaches a LitSX Server Component", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-client-server-boundary-"));
-  const clientPath = path.join(projectRoot, "src", "client-card.litsx");
-  const serverPath = path.join(projectRoot, "src", "server-fragment.litsx");
+  const clientPath = path.join(projectRoot, "src", "client-card.jsx");
+  const serverPath = path.join(projectRoot, "src", "server-fragment.jsx");
 
   try {
     await fs.mkdir(path.dirname(clientPath), { recursive: true });
@@ -169,7 +253,7 @@ test("compiler rejects a client graph that reaches a LitSX Server Component", as
       fs.writeFile(
         clientPath,
         [
-          'import ServerFragment from "./server-fragment.litsx";',
+          'import ServerFragment from "./server-fragment.jsx";',
           "export function ClientCard() { return <section><ServerFragment /></section>; }",
           "",
         ].join("\n"),
@@ -186,7 +270,7 @@ test("compiler rejects a client graph that reaches a LitSX Server Component", as
       }),
       (error) => {
         assert.match(error.message, /client\/hydratable module cannot import a LitSX Server Component/);
-        assert.match(error.message, /client-card\.litsx.*server-fragment\.litsx/);
+        assert.match(error.message, /client-card\.jsx.*server-fragment\.jsx/);
         assert.match(error.message, /LITSX_SERVER_COMPONENT/);
         return true;
       },
@@ -201,7 +285,7 @@ test("compiler emits the client projection of a mixed Server Component module", 
   try {
     await fs.mkdir(path.join(projectRoot, "src"), { recursive: true });
     const serverDependency = path.join(projectRoot, "src", "server-data.js");
-    const mixedModule = path.join(projectRoot, "src", "mixed.litsx");
+    const mixedModule = path.join(projectRoot, "src", "mixed.jsx");
     await fs.writeFile(serverDependency, 'import "node:fs"; export const message = "server";\n');
     await fs.writeFile(
       mixedModule,
@@ -225,10 +309,10 @@ test("compiler emits the client projection of a mixed Server Component module", 
     assert.doesNotMatch(clientCode, /ServerFragment|server-data|LITSX_SERVER_COMPONENT/);
     assert.match(clientCode, /class ClientCard extends LitElement/);
 
-    const clientConsumer = path.join(projectRoot, "src", "client-consumer.litsx");
+    const clientConsumer = path.join(projectRoot, "src", "client-consumer.jsx");
     await fs.writeFile(
       clientConsumer,
-      'import { ClientCard } from "./mixed.litsx"; export function Consumer() { return <ClientCard />; }\n',
+      'import { ClientCard } from "./mixed.jsx"; export function ClientConsumer() { return <ClientCard />; }\n',
     );
     await compileModuleGraph(clientConsumer, {
       projectRoot,
@@ -237,10 +321,10 @@ test("compiler emits the client projection of a mixed Server Component module", 
       target: "client",
     });
 
-    const invalidConsumer = path.join(projectRoot, "src", "invalid-consumer.litsx");
+    const invalidConsumer = path.join(projectRoot, "src", "invalid-consumer.jsx");
     await fs.writeFile(
       invalidConsumer,
-      'import ServerFragment from "./mixed.litsx"; export function Consumer() { return <ServerFragment />; }\n',
+      'import ServerFragment from "./mixed.jsx"; export function ClientConsumer() { return <ServerFragment />; }\n',
     );
     await assert.rejects(
       compileModuleGraph(invalidConsumer, {
@@ -260,11 +344,11 @@ test("collects client boundaries through arbitrary Server Component modules", as
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-server-boundaries-"));
   try {
     await fs.mkdir(path.join(projectRoot, "src"), { recursive: true });
-    await fs.writeFile(path.join(projectRoot, "src", "card.litsx"), "export function Card() { return <button>client</button>; }\n");
-    await fs.writeFile(path.join(projectRoot, "src", "fragment.litsx"), 'import { Card } from "./card.litsx"; export async function Fragment() { return <Card />; }\n');
-    const entry = path.join(projectRoot, "entry.litsx");
-    await fs.writeFile(entry, 'import { Fragment } from "./src/fragment.litsx"; export default async function Page() { return <Fragment />; }\n');
-    assert.deepEqual(await collectClientBoundaryModules([entry], { projectRoot }), [path.join(projectRoot, "src", "card.litsx")]);
+    await fs.writeFile(path.join(projectRoot, "src", "card.jsx"), "export function FeatureCard() { return <button>client</button>; }\n");
+    await fs.writeFile(path.join(projectRoot, "src", "fragment.jsx"), 'import { FeatureCard } from "./card.jsx"; export async function ServerFragment() { return <FeatureCard />; }\n');
+    const entry = path.join(projectRoot, "entry.jsx");
+    await fs.writeFile(entry, 'import { ServerFragment } from "./src/fragment.jsx"; export default async function RoutePage() { return <ServerFragment />; }\n');
+    assert.deepEqual(await collectClientBoundaryModules([entry], { projectRoot }), [path.join(projectRoot, "src", "card.jsx")]);
   } finally { await fs.rm(projectRoot, { recursive: true, force: true }); }
 });
 
@@ -273,11 +357,11 @@ test("keeps Server Component assets public without emitting the server module as
   try {
     await fs.mkdir(path.join(projectRoot, "src", "styles"), { recursive: true });
     await fs.mkdir(path.join(projectRoot, "src", "images"), { recursive: true });
-    const page = path.join(projectRoot, "src", "catalog.litsx");
+    const page = path.join(projectRoot, "src", "catalog.jsx");
     const theme = path.join(projectRoot, "src", "styles", "theme.css");
     const tokens = path.join(projectRoot, "src", "styles", "tokens.css");
     const image = path.join(projectRoot, "src", "images", "mark.svg");
-    await fs.writeFile(page, 'import "./styles/theme.css"; export async function Catalog() { return <main>catalog</main>; }\n');
+    await fs.writeFile(page, 'import "./styles/theme.css"; export async function CatalogPage() { return <main>catalog</main>; }\n');
     await fs.writeFile(theme, '@import "./tokens.css"; main { background: url("../images/mark.svg"); }\n');
     await fs.writeFile(tokens, ":root { --brand: red; }\n");
     await fs.writeFile(image, "<svg></svg>\n");
@@ -310,12 +394,12 @@ test("resolves path aliases to client boundaries and rewrites aliases in the ser
       path.join(projectRoot, "jsconfig.json"),
       JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@ui/*": ["src/ui/*"] } } }),
     );
-    const card = path.join(projectRoot, "src", "ui", "card.litsx");
-    const entry = path.join(projectRoot, "entry.litsx");
-    await fs.writeFile(card, "export default function Card() { return <button>aliased</button>; }\n");
+    const card = path.join(projectRoot, "src", "ui", "card.jsx");
+    const entry = path.join(projectRoot, "entry.jsx");
+    await fs.writeFile(card, "export default function FeatureCard() { return <button>aliased</button>; }\n");
     await fs.writeFile(
       entry,
-      'import Card from "@ui/card"; export default async function Page() { return <Card />; }\n',
+      'import FeatureCard from "@ui/card"; export default async function RoutePage() { return <FeatureCard />; }\n',
     );
 
     const inventory = await collectClientGraphInventory([entry], { projectRoot });
@@ -328,7 +412,7 @@ test("resolves path aliases to client boundaries and rewrites aliases in the ser
       target: "server",
     });
     const output = await fs.readFile(serverBuild.entrypoint, "utf8");
-    assert.doesNotMatch(output, /import Card from "@ui\/card"/);
+    assert.doesNotMatch(output, /import FeatureCard from "@ui\/card"/);
     assert.match(output, /\.\/src\/ui\/card\.mjs/);
   } finally {
     await fs.rm(projectRoot, { recursive: true, force: true });
@@ -361,14 +445,14 @@ test("treats a component package entry as a client boundary without pulling serv
       path.join(serverOnlyPackageRoot, "index.js"),
       'export default function sanitize(value) { return value; }\n',
     );
-    const entry = path.join(projectRoot, "entry.litsx");
+    const entry = path.join(projectRoot, "entry.jsx");
     await fs.writeFile(
       entry,
       [
         'import PackageCard from "@fixture/card";',
         'import sanitize from "@fixture/server-only";',
         'import { createHash } from "node:crypto";',
-        "export default async function Page() {",
+        "export default async function RoutePage() {",
         '  createHash("sha1");',
         '  sanitize("server-only");',
         "  return <PackageCard />;",
@@ -403,11 +487,11 @@ test("resolves inherited TypeScript path aliases", async () => {
       path.join(projectRoot, "tsconfig.json"),
       JSON.stringify({ extends: "../tsconfig.base.json" }),
     );
-    const componentPath = path.join(projectRoot, "src", "ui", "card.litsx");
-    const importerPath = path.join(projectRoot, "app", "page.litsx");
+    const componentPath = path.join(projectRoot, "src", "ui", "card.jsx");
+    const importerPath = path.join(projectRoot, "app", "page.jsx");
     await fs.mkdir(path.dirname(importerPath), { recursive: true });
-    await fs.writeFile(componentPath, "export function Card() { return <span />; }\n");
-    await fs.writeFile(importerPath, "export default async function Page() { return <main />; }\n");
+    await fs.writeFile(componentPath, "export function FeatureCard() { return <span />; }\n");
+    await fs.writeFile(importerPath, "export default async function RoutePage() { return <main />; }\n");
 
     assert.equal(
       await fs.realpath(await resolveProjectModuleSpecifier(projectRoot, importerPath, "@workspace/ui/card")),
@@ -425,12 +509,12 @@ test("resolves package import maps and browser object mappings", async () => {
     await fs.mkdir(path.join(projectRoot, "node_modules", "mapped-package"), { recursive: true });
     await fs.writeFile(
       path.join(projectRoot, "package.json"),
-      JSON.stringify({ type: "module", imports: { "#ui/*": "./src/*.litsx" } }),
+      JSON.stringify({ type: "module", imports: { "#ui/*": "./src/*.jsx" } }),
     );
-    const importerPath = path.join(projectRoot, "src", "entry.litsx");
-    const mappedPath = path.join(projectRoot, "src", "card.litsx");
+    const importerPath = path.join(projectRoot, "src", "entry.jsx");
+    const mappedPath = path.join(projectRoot, "src", "card.jsx");
     await fs.writeFile(importerPath, "export {};\n");
-    await fs.writeFile(mappedPath, "export default function Card() { return <span />; }\n");
+    await fs.writeFile(mappedPath, "export default function FeatureCard() { return <span />; }\n");
     const packageRoot = path.join(projectRoot, "node_modules", "mapped-package");
     await fs.writeFile(
       path.join(packageRoot, "package.json"),
@@ -445,7 +529,7 @@ test("resolves package import maps and browser object mappings", async () => {
     );
     await fs.writeFile(
       importerPath,
-      'import Card from "#ui/card"; export default async function Page() { return <Card />; }\n',
+      'import FeatureCard from "#ui/card"; export default async function RoutePage() { return <FeatureCard />; }\n',
     );
     const inventory = await collectClientGraphInventory([importerPath], { projectRoot });
     assert.deepEqual(inventory.clientBoundaries, [mappedPath]);
@@ -456,7 +540,7 @@ test("resolves package import maps and browser object mappings", async () => {
       ssr: true,
       target: "server",
     });
-    assert.doesNotMatch(await fs.readFile(serverBuild.entrypoint, "utf8"), /import Card from "#ui\/card"/);
+    assert.doesNotMatch(await fs.readFile(serverBuild.entrypoint, "utf8"), /import FeatureCard from "#ui\/card"/);
     assert.equal(
       await fs.realpath(await resolveProjectModuleSpecifier(projectRoot, importerPath, "mapped-package")),
       await fs.realpath(path.join(packageRoot, "browser.js")),

@@ -195,7 +195,7 @@ test("development refresh applies server deltas and hot-swaps changed client cod
     const unrelatedRouteDirectory = path.join(projectRoot, "app", "unrelated");
     await fs.mkdir(unrelatedRouteDirectory, { recursive: true });
     await fs.writeFile(
-      path.join(unrelatedRouteDirectory, "page.litsx"),
+      path.join(unrelatedRouteDirectory, "page.jsx"),
       'export default async function UnrelatedPage() { return <main>Unrelated route</main>; }\n',
       "utf8",
     );
@@ -215,7 +215,7 @@ test("development refresh applies server deltas and hot-swaps changed client cod
       title: "File Routing",
     });
 
-    const pagePath = path.join(projectRoot, "app", "page.litsx");
+    const pagePath = path.join(projectRoot, "app", "page.jsx");
     const pageSource = await fs.readFile(pagePath, "utf8");
     await fs.writeFile(
       pagePath,
@@ -228,7 +228,7 @@ test("development refresh applies server deltas and hot-swaps changed client cod
     expect(await page.evaluate(() => window.scrollY)).toBe(initialScroll);
     expect(browserDeltaRequests).toBe(0);
 
-    const layoutPath = path.join(projectRoot, "app", "layout.litsx");
+    const layoutPath = path.join(projectRoot, "app", "layout.jsx");
     const layoutSource = await fs.readFile(layoutPath, "utf8");
     await fs.writeFile(
       layoutPath,
@@ -253,7 +253,7 @@ test("development refresh applies server deltas and hot-swaps changed client cod
     ), { timeout: 10_000 }).toBe("2.4px");
     expect(browserDeltaRequests).toBe(0);
 
-    const componentPath = path.join(projectRoot, "app", "components", "feature-card.litsx");
+    const componentPath = path.join(projectRoot, "app", "components", "feature-card.jsx");
     const componentSource = await fs.readFile(componentPath, "utf8");
     await fs.writeFile(
       componentPath,
@@ -325,27 +325,28 @@ test("incremental navigation preserves scoped hydrated shadow roots with the reg
     await fs.symlink(frameworkNodeModules, path.join(projectRoot, "node_modules"), "dir");
     await fs.mkdir(path.join(projectRoot, "app", "components"), { recursive: true });
     await fs.writeFile(
-      path.join(projectRoot, "app", "components", "payload-leaf.litsx"),
+      path.join(projectRoot, "app", "components", "payload-leaf.jsx"),
       [
         'import { useHost } from "@litsx/core";',
+        'import { css } from "lit";',
         "",
         "export default function PayloadLeaf({ payload }) {",
         "  useHost();",
-        '  static styles = `:host { display: block; }`;',
         '  return <article class=\"payload-card\">{payload?.label ?? "missing"}</article>;',
         "}",
+        "PayloadLeaf.styles = css`:host { display: block; }`;",
         "",
       ].join("\n"),
       "utf8",
     );
     await fs.writeFile(
-      path.join(projectRoot, "app", "components", "payload-card.litsx"),
+      path.join(projectRoot, "app", "components", "payload-card.jsx"),
       [
         'import { useHost, useOnConnect, useSsrResourceSnapshot } from "@litsx/core";',
-        'import PayloadLeaf from "./payload-leaf.litsx";',
+        'import PayloadLeaf from "./payload-leaf.jsx";',
         "",
         "const payloadResources = new Map();",
-        "function readPayloadResource(payload) {",
+        "function usePayloadResource(payload) {",
         '  if (typeof process !== "undefined" && process.versions?.node) payloadResources.set("current", payload.label);',
         "  useSsrResourceSnapshot({",
         '    key: "test:payload-resource",',
@@ -361,16 +362,16 @@ test("incremental navigation preserves scoped hydrated shadow roots with the reg
         "}",
         "",
         "export default function PayloadCard({ payload, showDetails }) {",
-        '  static elements = { "payload-leaf": PayloadLeaf };',
         "  const host = useHost();",
-        "  const resource = readPayloadResource(payload);",
+        "  const resource = usePayloadResource(payload);",
         "  useOnConnect(() => {",
         '    host.setAttribute("data-connected", "true");',
         '    window.__payloadResourceEvents ??= [];',
         '    window.__payloadResourceEvents.push(`connect:${resource}`);',
         "  }, [resource]);",
-        '  return <section data-resource={resource}>{showDetails ? <PayloadLeaf .payload={payload} /> : ""}<slot name="actions"></slot></section>;',
+        '  return <section data-resource={resource}>{showDetails ? <PayloadLeaf payload={payload} /> : ""}<slot name="actions"></slot></section>;',
         "}",
+        'PayloadCard.elements = { "payload-leaf": PayloadLeaf };',
         "",
       ].join("\n"),
       "utf8",
@@ -378,12 +379,12 @@ test("incremental navigation preserves scoped hydrated shadow roots with the reg
     const payloadRoute = path.join(projectRoot, "app", "payload", "[name]");
     await fs.mkdir(payloadRoute, { recursive: true });
     await fs.writeFile(
-      path.join(payloadRoute, "page.litsx"),
+      path.join(payloadRoute, "page.jsx"),
       [
-        'import PayloadCard from "../../components/payload-card.litsx";',
+        'import PayloadCard from "../../components/payload-card.jsx";',
         "",
         "export default async function PayloadPage({ params }) {",
-        '  return <main><PayloadCard .payload={{ label: params.name }} .showDetails={params.name !== "hidden"}><span slot="actions" data-payload-action>{params.name}</span></PayloadCard><PayloadCard .payload={{ label: params.name + "-second" }} .showDetails={params.name !== "hidden"}><span slot="actions" data-payload-action>{params.name}-second</span></PayloadCard></main>;',
+        '  return <main><PayloadCard payload={{ label: params.name }} showDetails={params.name !== "hidden"}><span slot="actions" data-payload-action>{params.name}</span></PayloadCard><PayloadCard payload={{ label: params.name + "-second" }} showDetails={params.name !== "hidden"}><span slot="actions" data-payload-action>{params.name}-second</span></PayloadCard></main>;',
         "}",
         "",
       ].join("\n"),
@@ -393,7 +394,14 @@ test("incremental navigation preserves scoped hydrated shadow roots with the reg
       cwd: projectRoot,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    await waitForServer(`${origin}/payload/alpha`);
+    let serverOutput = "";
+    child.stdout.on("data", (chunk) => { serverOutput += String(chunk); });
+    child.stderr.on("data", (chunk) => { serverOutput += String(chunk); });
+    try {
+      await waitForServer(`${origin}/payload/alpha`);
+    } catch (error) {
+      throw new Error(`${error.message}\n${serverOutput.slice(-8_000)}`, { cause: error });
+    }
     await page.goto(`${origin}/payload/alpha`, { waitUntil: "networkidle", timeout: 20_000 });
     const payloadCards = page.locator("payload-card");
     await expect(payloadCards).toHaveCount(2);
@@ -469,7 +477,7 @@ test("incremental navigation never reuses a segment projection when its cardinal
     const routeRoot = path.join(projectRoot, "app", "shape", "[mode]");
     await fs.mkdir(routeRoot, { recursive: true });
     await fs.writeFile(
-      path.join(routeRoot, "layout.litsx"),
+      path.join(routeRoot, "layout.jsx"),
       [
         "export default async function ShapeLayout({ children, params }) {",
         '  return params.mode === "many"',
@@ -481,7 +489,7 @@ test("incremental navigation never reuses a segment projection when its cardinal
       "utf8",
     );
     await fs.writeFile(
-      path.join(routeRoot, "page.litsx"),
+      path.join(routeRoot, "page.jsx"),
       [
         "export default async function ShapePage({ params }) {",
         '  return <article data-shape-page>{params.mode}</article>;',
@@ -530,19 +538,19 @@ test("incremental navigation preserves unaffected nested layouts", async ({ page
     await fs.symlink(frameworkNodeModules, path.join(projectRoot, "node_modules"), "dir");
     const routeRoot = path.join(projectRoot, "app", "nested", "[outer]", "[inner]");
     await fs.mkdir(routeRoot, { recursive: true });
-    await fs.writeFile(path.join(projectRoot, "app", "nested", "[outer]", "layout.litsx"), [
+    await fs.writeFile(path.join(projectRoot, "app", "nested", "[outer]", "layout.jsx"), [
       "export default async function OuterLayout({ children, params, searchParams }) {",
       '  return <section data-outer={params.outer} data-view={searchParams.view ?? "default"}>{children}</section>;',
       "}",
       "",
     ].join("\n"));
-    await fs.writeFile(path.join(routeRoot, "layout.litsx"), [
+    await fs.writeFile(path.join(routeRoot, "layout.jsx"), [
       "export default async function InnerLayout({ children, params }) {",
       '  return <section data-inner={params.inner}>{children}</section>;',
       "}",
       "",
     ].join("\n"));
-    await fs.writeFile(path.join(routeRoot, "page.litsx"), [
+    await fs.writeFile(path.join(routeRoot, "page.jsx"), [
       "export default async function NestedPage({ params, searchParams }) {",
       '  return <article data-page>{params.outer}:{params.inner}:{searchParams.page ?? "1"}</article>;',
       "}",
@@ -677,7 +685,7 @@ test("browser navigation preserves catch-all params and repeated query params", 
     await fs.writeFile(jsconfigPath, `${JSON.stringify(jsconfig, null, 2)}\n`, "utf8");
     await fs.mkdir(path.join(projectRoot, "src", "ui"), { recursive: true });
     await fs.writeFile(
-      path.join(projectRoot, "src", "ui", "alias-card.litsx"),
+      path.join(projectRoot, "src", "ui", "alias-card.jsx"),
       [
         'import format from "@fixture/client-format";',
         'export default function AliasCard() { return <article data-alias-card="hydrated">{format("Alias card")}</article>; }',
@@ -686,7 +694,7 @@ test("browser navigation preserves catch-all params and repeated query params", 
       "utf8",
     );
     await fs.writeFile(
-      path.join(projectRoot, "src", "ui", "mixed-card.litsx"),
+      path.join(projectRoot, "src", "ui", "mixed-card.jsx"),
       [
         'import { createHash } from "node:crypto";',
         'export default async function ServerOnlyFragment() { return <p>{createHash("sha1").update("server").digest("hex")}</p>; }',
@@ -698,9 +706,9 @@ test("browser navigation preserves catch-all params and repeated query params", 
     const routeRoot = path.join(projectRoot, "app", "explore", "[...slug]");
     await fs.mkdir(routeRoot, { recursive: true });
     await fs.writeFile(
-      path.join(routeRoot, "page.litsx"),
+      path.join(routeRoot, "page.jsx"),
       [
-        'import FeatureCard from "../../components/feature-card.litsx";',
+        'import FeatureCard from "../../components/feature-card.jsx";',
         'import "./explore.css";',
         "",
         'export const metadata = { title: "Explore", description: "Explore collections", lang: "en", htmlAttributes: { dir: "ltr", "data-route": "explore" }, bodyAttributes: { "data-route": "explore" }, head: \'<meta name="robots" content="index,follow">\' };',
@@ -717,7 +725,7 @@ test("browser navigation preserves catch-all params and repeated query params", 
     await fs.writeFile(path.join(routeRoot, "explore.css"), ".explore-route { color: tomato; }\n", "utf8");
     await fs.mkdir(path.join(projectRoot, "app", "other"), { recursive: true });
     await fs.writeFile(
-      path.join(projectRoot, "app", "other", "page.litsx"),
+      path.join(projectRoot, "app", "other", "page.jsx"),
       [
         'import "./other.css";',
         'import AliasCard from "@ui/alias-card";',

@@ -21,9 +21,9 @@ test("hotComponent preserves class identity while replacing its implementation",
     }
   }
 
-  const proxy = hotComponent("src/feature-card.litsx", FirstImplementation);
+  const proxy = hotComponent("src/feature-card.jsx", FirstImplementation);
   const existingInstance = new proxy();
-  const replacement = hotComponent("src/feature-card.litsx", SecondImplementation);
+  const replacement = hotComponent("src/feature-card.jsx", SecondImplementation);
 
   assert.equal(replacement, proxy);
   assert.equal(existingInstance.render(), "second");

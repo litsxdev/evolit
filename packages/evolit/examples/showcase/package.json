@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "packageManager": "yarn@4.10.3",
+  "engines": {
+    "node": "^22.18.0 || >=24.11.0"
+  },
   "scripts": {
     "dev": "NODE_OPTIONS=--preserve-symlinks evolit dev",
     "build": "NODE_OPTIONS=--preserve-symlinks evolit build",
@@ -11,7 +14,7 @@
     "typecheck": "litsx-tsc -p jsconfig.json --noEmit"
   },
   "dependencies": {
-    "@litsx/core": "0.17.0-canary-feat-ssr-20260804063402",
+    "@litsx/core": "1.0.0-next.5",
     "evolit": "portal:../..",
     "lit": "^3.3.3"
   },

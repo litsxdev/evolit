@@ -1,5 +1,5 @@
 // @ts-nocheck
-import PageFrame from "../../components/page-frame.litsx";
+import PageFrame from "../../components/page-frame.jsx";
 
 /**
  * @param {{ params: { slug: string } }} props

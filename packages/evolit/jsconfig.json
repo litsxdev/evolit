@@ -6,7 +6,7 @@
     "allowJs": true,
     "checkJs": false,
     "strict": false,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "jsxImportSource": "@litsx/core",
     "allowArbitraryExtensions": true,
     "plugins": [

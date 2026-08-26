@@ -17,7 +17,6 @@
     "app/**/*.mjs",
     "app/**/*.ts",
     "app/**/*.tsx",
-    "app/**/*.litsx",
     "evolit.config.js"
   ]
 }

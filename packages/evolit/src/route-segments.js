@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import { html } from "lit";
+import { html } from "@litsx/ssr";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 
 const SEGMENT_MARKER_PREFIX = "evolit:segment";

@@ -1,7 +1,7 @@
 // @ts-nocheck
-import HomeHero from "./components/home-hero.litsx";
-import RouteCard from "./components/route-card.litsx";
-import ShowcaseBadge from "./components/showcase-badge.litsx";
+import HomeHero from "./components/home-hero.jsx";
+import RouteCard from "./components/route-card.jsx";
+import ShowcaseBadge from "./components/showcase-badge.jsx";
 
 export default async function HomePage() {
   return (

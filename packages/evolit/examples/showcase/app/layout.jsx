@@ -1,5 +1,6 @@
 // @ts-nocheck
-import AppShell from "./components/app-shell.litsx";
+import { css } from "lit";
+import AppShell from "./components/app-shell.jsx";
 
 export const metadata = {
   title: "evolit Showcase",
@@ -10,19 +11,19 @@ export const metadata = {
  * @param {{ href: string, label: string }} props
  */
 function NavLink(props) {
-  static styles = `
-    a {
-      color: rgba(243, 240, 232, 0.92);
-      text-decoration: none;
-      border-bottom: 1px solid rgba(243, 240, 232, 0.16);
-      padding-bottom: 2px;
-    }
-  `;
-
   const { href, label } = props;
 
   return <a href={href}>{label}</a>;
 }
+
+NavLink.styles = css`
+  a {
+    color: rgba(243, 240, 232, 0.92);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(243, 240, 232, 0.16);
+    padding-bottom: 2px;
+  }
+`;
 
 /**
  * @param {{ children: unknown }} props

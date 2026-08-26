@@ -1,0 +1,59 @@
+// @ts-nocheck
+import { css } from "lit";
+
+/**
+ * @param {{ children?: unknown }} props
+ */
+export default function AppShell(props) {
+  return (
+    <main class="shell">
+      <header class="header">
+        <div class="eyebrow">evolit showcase</div>
+        <nav class="nav">
+          <slot name="nav"></slot>
+        </nav>
+      </header>
+      {props.children}
+    </main>
+  );
+}
+
+AppShell.styles = css`
+  :host {
+    display: block;
+    min-height: 100vh;
+    padding: 40px 20px 72px;
+    color: #f3f0e8;
+    background:
+      radial-gradient(circle at top left, rgba(215, 106, 61, 0.18), transparent 28%),
+      linear-gradient(180deg, #12161d 0%, #182738 100%);
+    font-family: Iowan Old Style, Palatino Linotype, Book Antiqua, Georgia, serif;
+  }
+
+  .shell {
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+
+  .header {
+    display: grid;
+    gap: 18px;
+    margin-bottom: 40px;
+  }
+
+  .eyebrow {
+    display: inline-block;
+    padding: 8px 12px;
+    border: 1px solid rgba(243, 240, 232, 0.18);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-size: 12px;
+  }
+
+  .nav {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    font-size: 0.98rem;
+  }
+`;

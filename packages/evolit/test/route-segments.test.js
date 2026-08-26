@@ -17,10 +17,10 @@ test("route segment plans are stable and distinguish layouts from the page", () 
   const projectRoot = "/workspace/site";
   const route = {
     layouts: [
-      path.join(projectRoot, "app", "layout.litsx"),
-      path.join(projectRoot, "app", "explore", "layout.litsx"),
+      path.join(projectRoot, "app", "layout.jsx"),
+      path.join(projectRoot, "app", "explore", "layout.jsx"),
     ],
-    page: path.join(projectRoot, "app", "explore", "[...slug]", "page.litsx"),
+    page: path.join(projectRoot, "app", "explore", "[...slug]", "page.jsx"),
   };
 
   const firstPlan = createRouteSegmentPlan(route, projectRoot);
@@ -28,7 +28,7 @@ test("route segment plans are stable and distinguish layouts from the page", () 
 
   assert.deepEqual(firstPlan, secondPlan);
   assert.deepEqual(firstPlan.map((segment) => segment.kind), ["layout", "layout", "page"]);
-  assert.equal(firstPlan.at(-1).modulePath, "app/explore/[...slug]/page.litsx");
+  assert.equal(firstPlan.at(-1).modulePath, "app/explore/[...slug]/page.jsx");
   assert.equal(new Set(firstPlan.map((segment) => segment.id)).size, firstPlan.length);
 });
 
@@ -50,7 +50,7 @@ test("route segment payload does not expose absolute project paths", () => {
       id: "page-example",
       kind: "page",
       depth: 1,
-      modulePath: "app/explore/[...slug]/page.litsx",
+      modulePath: "app/explore/[...slug]/page.jsx",
     }],
   });
 
@@ -64,7 +64,7 @@ test("route segment payload does not expose absolute project paths", () => {
       id: "page-example",
       kind: "page",
       depth: 1,
-      modulePath: "app/explore/[...slug]/page.litsx",
+      modulePath: "app/explore/[...slug]/page.jsx",
     }],
   });
   assert.match(renderRouteSegmentPayload(payload), /id="__EVOLIT_ROUTE__"/);

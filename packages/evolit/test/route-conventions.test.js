@@ -22,36 +22,36 @@ test("route conventions render the nearest not-found boundary and server error b
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-route-conventions-"));
 
   try {
-    await writeAppFile(root, "layout.litsx", [
-      "export default async function Layout({ children }) {",
+    await writeAppFile(root, "layout.jsx", [
+      "export default async function RootLayout({ children }) {",
       '  return `<main data-layout="root">${children}</main>`;',
       "}",
       "",
     ].join("\n"));
-    await writeAppFile(root, "not-found.litsx", [
+    await writeAppFile(root, "not-found.jsx", [
       "export default async function RootNotFound() {",
       '  return "<p>root not found</p>";',
       "}",
       "",
     ].join("\n"));
-    await writeAppFile(root, "blog/not-found.litsx", [
+    await writeAppFile(root, "blog/not-found.jsx", [
       "export default async function BlogNotFound() {",
       '  return "<p>blog not found</p>";',
       "}",
       "",
     ].join("\n"));
-    await writeAppFile(root, "blog/page.litsx", [
+    await writeAppFile(root, "blog/page.jsx", [
       `import { notFound } from ${JSON.stringify(requestContextUrl)};`,
       "export default async function BlogPage() { notFound(); }",
       "",
     ].join("\n"));
-    await writeAppFile(root, "broken/error.litsx", [
+    await writeAppFile(root, "broken/error.jsx", [
       "export default async function BrokenError({ error }) {",
       '  return `<p>handled error: ${error.message}</p>`;',
       "}",
       "",
     ].join("\n"));
-    await writeAppFile(root, "broken/page.litsx", [
+    await writeAppFile(root, "broken/page.jsx", [
       "export default async function BrokenPage() {",
       '  throw new Error("expected failure");',
       "}",
@@ -106,15 +106,15 @@ test("route composition forwards the same opaque child ref from a layout to its 
   const observationsKey = "__EVOLIT_FORWARDED_ROUTE_REF__";
 
   try {
-    await writeAppFile(root, "layout.litsx", [
-      "export default async function Layout({ children }) {",
+    await writeAppFile(root, "layout.jsx", [
+      "export default async function RootLayout({ children }) {",
       `  globalThis[${JSON.stringify(observationsKey)}] = { ...globalThis[${JSON.stringify(observationsKey)}], layout: children.ref };`,
       '  return `<main>${children}</main>`;',
       "}",
       "",
     ].join("\n"));
-    await writeAppFile(root, "page.litsx", [
-      "export default async function Page(_props, ref) {",
+    await writeAppFile(root, "page.jsx", [
+      "export default async function RoutePage(_props, ref) {",
       `  globalThis[${JSON.stringify(observationsKey)}].page = ref;`,
       '  return "<p>ready</p>";',
       "}",

@@ -1,0 +1,59 @@
+// @ts-nocheck
+import { css } from "lit";
+
+/**
+ * @param {{ children?: unknown }} props
+ */
+export default function HomeHero(props) {
+  return (
+    <section class="page">
+      <div class="intro">
+        <slot name="intro"></slot>
+      </div>
+      <div class="card-grid">{props.children}</div>
+    </section>
+  );
+}
+
+HomeHero.styles = css`
+  :host {
+    display: block;
+  }
+
+  .page {
+    display: grid;
+    gap: 28px;
+  }
+
+  .intro {
+    display: grid;
+    gap: 20px;
+    max-width: 760px;
+  }
+
+  .eyebrow {
+    margin: 0;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-size: 12px;
+    color: rgba(243, 240, 232, 0.56);
+  }
+
+  .title {
+    margin: 0;
+    font-size: clamp(3rem, 8vw, 5.6rem);
+    line-height: 0.94;
+  }
+
+  .copy {
+    margin: 0;
+    line-height: 1.8;
+    color: rgba(243, 240, 232, 0.76);
+  }
+
+  .card-grid {
+    display: grid;
+    gap: 18px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+`;

@@ -256,15 +256,15 @@ test("createHydrationBootstrap deduplicates module imports by moduleId", () => {
   const bootstrap = createHydrationBootstrap({
     hydrationData: {
       roots: [
-        { id: "root-0", moduleId: "/app/components/feature-card.litsx" },
-        { id: "root-1", moduleId: "/app/components/feature-card.litsx" },
-        { id: "root-2", moduleId: "/app/components/hero-banner.litsx" },
+        { id: "root-0", moduleId: "/app/components/feature-card.jsx" },
+        { id: "root-1", moduleId: "/app/components/feature-card.jsx" },
+        { id: "root-2", moduleId: "/app/components/hero-banner.jsx" },
         { id: "root-3", moduleId: "" },
         { id: "root-4" },
       ],
     },
     assetResolver(moduleId) {
-      return `/_evolit/static${moduleId.replace(/\.litsx$/, ".mjs")}`;
+      return `/_evolit/static${moduleId.replace(/\.jsx$/, ".mjs")}`;
     },
   });
 
@@ -302,13 +302,13 @@ test("createHydrationBootstrap deduplicates module imports by moduleId", () => {
 test("resolveHydrationRootClientImports includes component modules without route re-exports", () => {
   const imports = resolveHydrationRootClientImports({
     roots: [
-      { id: "root-0", moduleId: "/app/components/payload-card.litsx" },
-      { id: "root-1", moduleId: "/app/components/payload-card.litsx" },
-      { id: "root-2", moduleId: "/app/components/hero-banner.litsx" },
+      { id: "root-0", moduleId: "/app/components/payload-card.jsx" },
+      { id: "root-1", moduleId: "/app/components/payload-card.jsx" },
+      { id: "root-2", moduleId: "/app/components/hero-banner.jsx" },
       { id: "root-3" },
     ],
   }, (moduleId) => (typeof moduleId === "string"
-    ? `/_evolit/static${moduleId.replace(/\.litsx$/, ".mjs")}`
+    ? `/_evolit/static${moduleId.replace(/\.jsx$/, ".mjs")}`
     : null));
 
   assert.deepEqual(imports, [
@@ -341,7 +341,7 @@ test("createAssetResolver resolves hydratable modules outside the project root",
   });
 
   assert.equal(
-    resolver("/workspace/vend.io/src/components/navigation/vds-breadcrumbs.litsx"),
+    resolver("/workspace/vend.io/src/components/navigation/vds-breadcrumbs.jsx"),
     "/_evolit/static/__unmanaged__/__up__/src/components/navigation/vds-breadcrumbs.mjs",
   );
 });
@@ -349,10 +349,10 @@ test("createAssetResolver resolves hydratable modules outside the project root",
 test("resolveRouteClientImports resolves sanitized dynamic route entry names", () => {
   const projectRoot = "/workspace/site";
   const scenarios = [
-    ["app/product/[slug]/page.litsx", "app/product/_slug_/page.mjs"],
-    ["app/explore/[...slug]/page.litsx", "app/explore/_...slug_/page.mjs"],
-    ["app/docs/[[...slug]]/page.litsx", "app/docs/__...slug__/page.mjs"],
-    ["app/catalog/[category]/[slug]/page.litsx", "app/catalog/_category_/_slug_/page.mjs"],
+    ["app/product/[slug]/page.jsx", "app/product/_slug_/page.mjs"],
+    ["app/explore/[...slug]/page.jsx", "app/explore/_...slug_/page.mjs"],
+    ["app/docs/[[...slug]]/page.jsx", "app/docs/__...slug__/page.mjs"],
+    ["app/catalog/[category]/[slug]/page.jsx", "app/catalog/_category_/_slug_/page.mjs"],
   ];
   const byClientModule = Object.fromEntries(
     scenarios.map(([, emittedClientModule]) => [
@@ -380,7 +380,7 @@ test("createHydrationBootstrap ignores unresolved module ids", () => {
   const bootstrap = createHydrationBootstrap({
     hydrationData: {
       roots: [
-        { id: "root-0", moduleId: "/outside/project/component-a.litsx" },
+        { id: "root-0", moduleId: "/outside/project/component-a.jsx" },
       ],
     },
     assetResolver() {
@@ -397,15 +397,15 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
     roots: [
       {
         id: "root-0",
-        moduleId: "/Users/example/site/app/components/feature-card.litsx",
+        moduleId: "/Users/example/site/app/components/feature-card.jsx",
       },
       {
         id: "root-1",
-        moduleId: "/outside/project/hero-banner.litsx",
+        moduleId: "/outside/project/hero-banner.jsx",
       },
       {
         id: "root-2",
-        moduleId: "/outside/project/ignored.litsx",
+        moduleId: "/outside/project/ignored.jsx",
       },
     ],
   };
@@ -449,15 +449,15 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
   assert.deepEqual(normalizedHydrationData.roots, [
     {
       id: "root-0",
-      moduleId: "/app/components/feature-card.litsx",
+      moduleId: "/app/components/feature-card.jsx",
     },
     {
       id: "root-1",
-      moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/hero-banner.litsx",
+      moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/hero-banner.jsx",
     },
     {
       id: "root-2",
-      moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/ignored.litsx",
+      moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/ignored.jsx",
     },
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(normalizedHydrationData)), {
@@ -465,15 +465,15 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
     roots: [
       {
         id: "root-0",
-        moduleId: "/app/components/feature-card.litsx",
+        moduleId: "/app/components/feature-card.jsx",
       },
       {
         id: "root-1",
-        moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/hero-banner.litsx",
+        moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/hero-banner.jsx",
       },
       {
         id: "root-2",
-        moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/ignored.litsx",
+        moduleId: "/__unmanaged__/__up__/__up__/__up__/outside/project/ignored.jsx",
       },
     ],
     payload: {
@@ -670,7 +670,7 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
       "dir",
     );
 
-    const pagePath = path.join(fixtureRoot, "app", "page.litsx");
+    const pagePath = path.join(fixtureRoot, "app", "page.jsx");
     const pageSource = await fs.readFile(pagePath, "utf8");
     await fs.writeFile(
       pagePath,
@@ -701,7 +701,7 @@ test("bundled static sourcemaps preserve original litsx sourcesContent", async (
     ) + ".map";
     const sourceMap = JSON.parse(await fs.readFile(sourceMapPath, "utf8"));
 
-    assert.deepEqual(sourceMap.sources, ["/app/page.litsx"]);
+    assert.deepEqual(sourceMap.sources, ["/app/page.jsx"]);
     assert.ok(Array.isArray(sourceMap.sourcesContent));
     assert.match(sourceMap.sourcesContent[0], /export default function HomePage/);
     assert.match(sourceMap.sourcesContent[0], /<FeatureCard/);
@@ -731,24 +731,24 @@ test("rewriting client-relative imports preserves LitSX sourcemap sources", asyn
   try {
     await fs.mkdir(path.join(appRoot, "components"), { recursive: true });
     await fs.writeFile(
-      path.join(appRoot, "components", "shell.litsx"),
-      "export default function Shell(props) { return <section>{props.children}</section>; }\n",
+      path.join(appRoot, "components", "shell.jsx"),
+      "export default function PageShell(props) { return <section>{props.children}</section>; }\n",
       "utf8",
     );
     await fs.writeFile(
-      path.join(appRoot, "page.litsx"),
+      path.join(appRoot, "page.jsx"),
       [
-        'import Shell from "./components/shell.litsx";',
+        'import PageShell from "./components/shell.jsx";',
         "",
-        "export default function Page() {",
-        "  return <Shell />;",
+        "export default function RoutePage() {",
+        "  return <PageShell />;",
         "}",
         "",
       ].join("\n"),
       "utf8",
     );
 
-    const { entrypoint } = await compileModuleGraph(path.join(appRoot, "page.litsx"), {
+    const { entrypoint } = await compileModuleGraph(path.join(appRoot, "page.jsx"), {
       projectRoot: tempRoot,
       mode: "development",
       sourceMaps: true,
@@ -758,9 +758,9 @@ test("rewriting client-relative imports preserves LitSX sourcemap sources", asyn
     const traceMap = new TraceMap(sourceMap);
     const importPosition = originalPositionFor(traceMap, { line: 3, column: 0 });
 
-    assert.deepEqual(sourceMap.sources, [path.join(appRoot, "page.litsx")]);
-    assert.match(sourceMap.sourcesContent[0], /import Shell from "\.\/components\/shell\.litsx"/);
-    assert.equal(importPosition.source, path.join(appRoot, "page.litsx"));
+    assert.deepEqual(sourceMap.sources, [path.join(appRoot, "page.jsx")]);
+    assert.match(sourceMap.sourcesContent[0], /import PageShell from "\.\/components\/shell\.jsx"/);
+    assert.equal(importPosition.source, path.join(appRoot, "page.jsx"));
     assert.equal(importPosition.line, 1);
     assert.doesNotMatch(sourceMap.sources[0], /#evolit-transform$/);
   } finally {
@@ -775,24 +775,24 @@ test("rewriting client-relative imports also works without sourcemaps", async ()
   try {
     await fs.mkdir(path.join(appRoot, "components"), { recursive: true });
     await fs.writeFile(
-      path.join(appRoot, "components", "shell.litsx"),
-      "export default function Shell() { return <section />; }\n",
+      path.join(appRoot, "components", "shell.jsx"),
+      "export default function PageShell() { return <section />; }\n",
       "utf8",
     );
     await fs.writeFile(
-      path.join(appRoot, "page.litsx"),
+      path.join(appRoot, "page.jsx"),
       [
-        'import Shell from "./components/shell.litsx";',
+        'import PageShell from "./components/shell.jsx";',
         "",
-        "export default function Page() {",
-        "  return <Shell />;",
+        "export default function RoutePage() {",
+        "  return <PageShell />;",
         "}",
         "",
       ].join("\n"),
       "utf8",
     );
 
-    const { entrypoint } = await compileModuleGraph(path.join(appRoot, "page.litsx"), {
+    const { entrypoint } = await compileModuleGraph(path.join(appRoot, "page.jsx"), {
       projectRoot: tempRoot,
       mode: "production",
       sourceMaps: false,

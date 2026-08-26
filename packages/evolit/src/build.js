@@ -344,7 +344,7 @@ export async function buildProject(projectRoot) {
         if (assetResolver(moduleId) || clientAssets.byPublicPath?.[moduleId]) continue;
         const importerPath = routeResult.boundaryModule
           ?? routeResult.route?.page
-          ?? path.join(projectRoot, "app", "page.litsx");
+          ?? path.join(projectRoot, "app", "page.jsx");
         let sourcePath = null;
         if (moduleId.startsWith("file:")) {
           try { sourcePath = fileURLToPath(moduleId); } catch {}

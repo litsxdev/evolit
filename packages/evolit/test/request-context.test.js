@@ -16,7 +16,7 @@ const requestContextUrl = pathToFileURL(
 async function writePage(root, routePath, source) {
   const directory = path.join(root, "app", ...routePath.split("/").filter(Boolean));
   await fs.mkdir(directory, { recursive: true });
-  await fs.writeFile(path.join(directory, "page.litsx"), source, "utf8");
+  await fs.writeFile(path.join(directory, "page.jsx"), source, "utf8");
 }
 
 test("server route APIs read request data and write response headers and cookies", async () => {
@@ -26,7 +26,7 @@ test("server route APIs read request data and write response headers and cookies
     await writePage(root, "", [
       `import { cookies, headers, requestUrl, responseHeaders } from ${JSON.stringify(requestContextUrl)};`,
       "",
-      "export default async function Page() {",
+      "export default async function RequestPage() {",
       '  const visit = Number(cookies().get("visit")?.value ?? "0") + 1;',
       '  cookies().set("visit", String(visit), { httpOnly: true, sameSite: "Lax" });',
       '  responseHeaders().set("x-route-context", requestUrl().pathname);',
@@ -90,7 +90,7 @@ test("reading the request prop marks an otherwise static route as dynamic", asyn
     await writePage(root, "", [
       'export const routeConfig = { cache: "static" };',
       "",
-      "export default async function Page({ request }) {",
+      "export default async function RequestPage({ request }) {",
       '  return `<main>${request instanceof Request}:${request.headers.get("x-example")}</main>`;',
       "}",
       "",

@@ -26,7 +26,7 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
     await fs.mkdir(path.join(fixtureRoot, "app", "cached-static"), { recursive: true });
     await fs.mkdir(path.join(fixtureRoot, "app", "cached-request"), { recursive: true });
     await fs.writeFile(
-      path.join(fixtureRoot, "app", "cached-static", "page.litsx"),
+      path.join(fixtureRoot, "app", "cached-static", "page.jsx"),
       [
         'export const routeConfig = { cache: "static" };',
         "",
@@ -38,7 +38,7 @@ test("createDeploymentRuntime resolves assets, cache hits, and render misses thr
       "utf8",
     );
     await fs.writeFile(
-      path.join(fixtureRoot, "app", "cached-request", "page.litsx"),
+      path.join(fixtureRoot, "app", "cached-request", "page.jsx"),
       [
         'export const routeConfig = { cache: "static" };',
         "",
@@ -109,7 +109,7 @@ test("development requests reuse hot client assets until development state is in
       fs.writeFile(path.join(externalStylesRoot, "styles", "tokens.css"), ":root { --theme: blue; }\n", "utf8"),
       fs.writeFile(path.join(externalStylesRoot, "themes", "composable.css"), "main { color: var(--theme); }\n", "utf8"),
     ]);
-    const layoutPath = path.join(fixtureRoot, "app", "layout.litsx");
+    const layoutPath = path.join(fixtureRoot, "app", "layout.jsx");
     const layoutSource = await fs.readFile(layoutPath, "utf8");
     await fs.writeFile(
       layoutPath,
@@ -162,8 +162,8 @@ test("development requests reuse hot client assets until development state is in
       false,
     );
     assert.equal(externalStyleAssets.length, 2);
-    assert.equal(runtime.renderer.assetManifest.serverAssetImportsByEntry["app/page.litsx"].styles.length, 0);
-    assert.equal(runtime.renderer.assetManifest.serverAssetImportsByEntry["app/layout.litsx"].styles.length, 3);
+    assert.equal(runtime.renderer.assetManifest.serverAssetImportsByEntry["app/page.jsx"].styles.length, 0);
+    assert.equal(runtime.renderer.assetManifest.serverAssetImportsByEntry["app/layout.jsx"].styles.length, 3);
     assert.equal(developmentEvents.filter((event) => event.type === "unmanaged-import").length, 2);
     for (const styleAsset of externalStyleAssets) {
       await fs.access(styleAsset.outputPath);
@@ -216,7 +216,7 @@ test("development rebuilds retain a catch-all route's previous CSS generation fo
     await fs.mkdir(routeRoot, { recursive: true });
     await fs.writeFile(stylePath, ".explore { color: tomato; }\n", "utf8");
     await fs.writeFile(
-      path.join(routeRoot, "page.litsx"),
+      path.join(routeRoot, "page.jsx"),
       [
         'import "./page.css";',
         "",

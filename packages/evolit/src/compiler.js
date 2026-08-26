@@ -52,6 +52,175 @@ function shouldCompileModule(filePath) {
   return MODULE_EXTENSIONS.some((extension) => filePath.endsWith(extension));
 }
 
+function containsJsxSyntax(source, filePath) {
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let containsJsx = false;
+
+  function visit(node) {
+    if (
+      ts.isJsxElement(node)
+      || ts.isJsxSelfClosingElement(node)
+      || ts.isJsxFragment(node)
+    ) {
+      containsJsx = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return containsJsx;
+}
+
+function containsLitsxComponentMetadata(source, filePath) {
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let containsMetadata = false;
+
+  function visit(node) {
+    if (
+      ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && ts.isPropertyAccessExpression(node.left)
+      && ts.isIdentifier(node.left.expression)
+      && /^[A-Z]/.test(node.left.expression.text)
+      && ["elements", "styles", "properties", "shadowRootOptions", "expose", "lightDom"].includes(node.left.name.text)
+    ) {
+      containsMetadata = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return containsMetadata;
+}
+
+function isLitsxAuthoredModule(filePath, source) {
+  return (
+    filePath.endsWith(".jsx")
+    || filePath.endsWith(".tsx")
+    || containsJsxSyntax(source, filePath)
+    || containsLitsxComponentMetadata(source, filePath)
+  );
+}
+
+function createIdentitySourceMap(source, sourcePath) {
+  return JSON.parse(new MagicString(source).generateMap({
+    hires: true,
+    includeContent: true,
+    source: sourcePath.split(path.sep).join("/"),
+  }).toString());
+}
+
+function collectSideEffectImports(source, sourcePath) {
+  const sourceFile = ts.createSourceFile(
+    sourcePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+
+  return sourceFile.statements
+    .filter((statement) => ts.isImportDeclaration(statement) && statement.importClause == null)
+    .map((statement) => ({
+      source: statement.moduleSpecifier.text,
+      statement: source.slice(statement.getStart(sourceFile), statement.end),
+    }));
+}
+
+function restoreSideEffectImports(source, sourcePath, transformed, sourceMaps) {
+  const transformedSpecifiers = new Set(
+    [...transformed.code.matchAll(MODULE_SPECIFIER_PATTERN)]
+      .map((match) => match[1] ?? match[2])
+      .filter(Boolean),
+  );
+  const missingImports = collectSideEffectImports(source, sourcePath)
+    .filter((entry) => !transformedSpecifiers.has(entry.source));
+  if (missingImports.length === 0) {
+    return transformed;
+  }
+
+  const magicSource = new MagicString(transformed.code);
+  magicSource.prepend(`${missingImports.map((entry) => entry.statement).join("\n")}\n`);
+  let map = transformed.map ?? null;
+
+  if (sourceMaps && map) {
+    const intermediateSourceId = `${sourcePath.split(path.sep).join("/")}#evolit-side-effects`;
+    const restoredMap = magicSource.generateMap({
+      hires: true,
+      includeContent: false,
+      source: intermediateSourceId,
+    });
+    map = remapping(restoredMap.toString(), (mappedSource) => (
+      mappedSource.endsWith("#evolit-side-effects") ? transformed.map : null
+    ));
+  }
+
+  return {
+    ...transformed,
+    code: magicSource.toString(),
+    map,
+  };
+}
+
+async function transformModuleSource(source, {
+  sourcePath,
+  sourceMaps,
+  ssr = false,
+}) {
+  if (isLitsxAuthoredModule(sourcePath, source)) {
+    const transformed = await transformLitsx(source, {
+      filename: sourcePath,
+      sourceMaps,
+      ssr,
+    });
+    return restoreSideEffectImports(source, sourcePath, transformed, sourceMaps);
+  }
+
+  if (sourcePath.endsWith(".ts")) {
+    const result = ts.transpileModule(source, {
+      fileName: sourcePath,
+      compilerOptions: {
+        inlineSources: sourceMaps,
+        module: ts.ModuleKind.ESNext,
+        sourceMap: sourceMaps,
+        target: ts.ScriptTarget.ESNext,
+      },
+    });
+    const map = sourceMaps && result.sourceMapText
+      ? JSON.parse(result.sourceMapText)
+      : null;
+    if (map) {
+      map.sources = [sourcePath.split(path.sep).join("/")];
+      map.sourcesContent = [source];
+    }
+    return {
+      code: result.outputText.replace(/\n?\/\/# sourceMappingURL=.*$/u, ""),
+      map,
+      metadata: {},
+    };
+  }
+
+  return {
+    code: source,
+    map: sourceMaps ? createIdentitySourceMap(source, sourcePath) : null,
+    metadata: {},
+  };
+}
+
 function isStaticAssetPath(filePath) {
   return STATIC_ASSET_EXTENSIONS.some((extension) => filePath.endsWith(extension));
 }
@@ -938,8 +1107,9 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
 
     await ensureDirectory(path.dirname(outputPath));
     const source = await fs.readFile(sourcePath, "utf8");
-    const transformed = await transformLitsx(source, {
-      filename: sourcePath,
+    const transformed = await transformModuleSource(source, {
+      projectRoot,
+      sourcePath,
       sourceMaps,
       ssr,
     });
@@ -1163,7 +1333,11 @@ export async function collectClientGraphInventory(entryPaths, options = {}) {
     if (visited.has(sourcePath)) return;
     visited.add(sourcePath);
     const source = await fs.readFile(sourcePath, "utf8");
-    const transformed = await transformLitsx(source, { filename: sourcePath, sourceMaps: false });
+    const transformed = await transformModuleSource(source, {
+      projectRoot,
+      sourcePath,
+      sourceMaps: false,
+    });
     const isServer = isCompiledServerComponentModule(transformed.code);
     const isComponent = isCompiledClientBoundaryModule(transformed.code);
     if (isComponent && !isServer) {

@@ -8,7 +8,7 @@ This repository now contains the first framework MVP:
 - nested `layout` composition
 - server rendering through `@litsx/ssr`
 - a small `evolit` CLI with `init`, `dev`, `build`, and `start`
-- on-demand compilation of authored `.litsx` modules through `@litsx/compiler`
+- on-demand compilation of authored `.jsx` modules through `@litsx/compiler`
 - a starter template for generating new sites
 
 ## MVP Scope
@@ -26,8 +26,6 @@ It focuses on the core contract that matters first:
 
 Supported authored module extensions:
 
-- `.litsx`
-- `.litsx.jsx`
 - `.js`
 - `.jsx`
 - `.ts`
@@ -306,20 +304,20 @@ code. Request values are isolated with async request context and are discarded w
 
 ## Route Boundaries
 
-`not-found.litsx` and `error.litsx` are resolved from the current route directory up to `app/`.
-The nearest file wins and its output is wrapped by the route layouts. A root `app/not-found.litsx`
+`not-found.jsx` and `error.jsx` are resolved from the current route directory up to `app/`.
+The nearest file wins and its output is wrapped by the route layouts. A root `app/not-found.jsx`
 also handles unmatched URLs; without one, evolit returns its minimal built-in 404 document.
 
 ```js
-// app/blog/error.litsx
+// app/blog/error.jsx
 export default async function BlogError({ error }) {
   return `<p>Could not load this post: ${error.message}</p>`;
 }
 ```
 
-Boundaries always bypass the route response cache. `loading.litsx` is intentionally not supported
+Boundaries always bypass the route response cache. `loading.jsx` is intentionally not supported
 yet: it requires an end-to-end streaming document transport rather than an HTML-string fallback.
-In production, `error.litsx` receives a generic error with an opaque `digest`; the original error
+In production, `error.jsx` receives a generic error with an opaque `digest`; the original error
 is reported only on the server.
 
 ## Route Handlers
@@ -414,7 +412,7 @@ enumerated at build time, so production applications can declare only those exce
 
 ```js
 export default {
-  clientBoundaries: ["./src/components/dynamic-card.litsx", "@acme/ui/product-card"],
+  clientBoundaries: ["./src/components/dynamic-card.jsx", "@acme/ui/product-card"],
 };
 ```
 
