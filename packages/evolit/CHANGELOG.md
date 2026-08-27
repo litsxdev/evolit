@@ -1,5 +1,11 @@
 # evolit
 
+## 0.1.2
+
+### Patch Changes
+
+- ee07e11: Resolve `@/…` imports from the application root across server and browser compilation, and configure the alias in newly scaffolded applications.
+
 ## 0.1.1
 
 ### Patch Changes
