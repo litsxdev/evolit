@@ -23,14 +23,13 @@ async function writeSitePackageJson(targetDirectory, siteName) {
       dev: "evolit dev",
       build: "evolit build",
       start: "evolit start",
-      typecheck: "litsx-tsc -p jsconfig.json --noEmit",
+      typecheck: "tsc -p jsconfig.json --noEmit",
     },
     dependencies: {
-      "@litsx/core": "1.0.0-next.5",
+      "@litsx/core": "1.0.0-next.8",
       evolit: frameworkVersion,
     },
     devDependencies: {
-      "@litsx/typescript": "^0.9.0",
       "typescript": "^6.0.0",
     },
   };

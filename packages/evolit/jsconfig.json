@@ -8,12 +8,7 @@
     "strict": false,
     "jsx": "react-jsx",
     "jsxImportSource": "@litsx/core",
-    "allowArbitraryExtensions": true,
-    "plugins": [
-      {
-        "name": "@litsx/typescript"
-      }
-    ]
+    "allowArbitraryExtensions": true
   },
   "include": [
     "src/**/*",

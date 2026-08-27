@@ -13,12 +13,7 @@
       "@/*": [
         "./*"
       ]
-    },
-    "plugins": [
-      {
-        "name": "@litsx/typescript"
-      }
-    ]
+    }
   },
   "include": [
     "app/**/*",

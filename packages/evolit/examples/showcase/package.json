@@ -11,15 +11,14 @@
     "dev": "NODE_OPTIONS=--preserve-symlinks evolit dev",
     "build": "NODE_OPTIONS=--preserve-symlinks evolit build",
     "start": "NODE_OPTIONS=--preserve-symlinks evolit start",
-    "typecheck": "litsx-tsc -p jsconfig.json --noEmit"
+    "typecheck": "tsc -p jsconfig.json --noEmit"
   },
   "dependencies": {
-    "@litsx/core": "1.0.0-next.5",
+    "@litsx/core": "1.0.0-next.8",
     "evolit": "portal:../..",
     "lit": "^3.3.3"
   },
   "devDependencies": {
-    "@litsx/typescript": "^0.9.0",
     "typescript": "^6.0.0"
   }
 }

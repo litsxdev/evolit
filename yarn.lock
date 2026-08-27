@@ -157,24 +157,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@babel/helper-string-parser@npm:^7.29.7":
-  version: 7.29.7
-  resolution: "@babel/helper-string-parser@npm:7.29.7"
-  checksum: 10c0/194bc0f1716e396d5ffde56ad6119745fb9557662c98611590e5e454906783a4ccb21ce93056b8eb69a4909044834e45d96e50ac695bbe9e3221648fe033c06c
-  languageName: node
-  linkType: hard
-
 "@babel/helper-string-parser@npm:^8.0.0":
   version: 8.0.0
   resolution: "@babel/helper-string-parser@npm:8.0.0"
   checksum: 10c0/b2272a9eaa63a1bc9ce2673d580e69620fd79786f3e3cf1891f406801f8211810f194f2739fef920f01a97ae06ae465b2dfd238ab8037a3182d0869939ca9a5d
-  languageName: node
-  linkType: hard
-
-"@babel/helper-validator-identifier@npm:^7.29.7":
-  version: 7.29.7
-  resolution: "@babel/helper-validator-identifier@npm:7.29.7"
-  checksum: 10c0/4795354e7ae0dcafa72de1cd04ec51252dc1498517170beaf019e03effc5b7bf13c6b21a3949a77e07b8125be7f106ed1131350d8ebd4566ae874094a726d62b
   languageName: node
   linkType: hard
 
@@ -199,17 +185,6 @@ __metadata:
     "@babel/template": "npm:^8.0.0"
     "@babel/types": "npm:^8.0.0"
   checksum: 10c0/5d649bf2cfc37b76b8c9dd7d2992fa0503a6081c2439cd4de16b56abb778f3bb391441d687594f3e08af5ef3f59c8b93a77ae81f9e5f831989ebfd3443851189
-  languageName: node
-  linkType: hard
-
-"@babel/parser@npm:^7.29.3":
-  version: 7.29.7
-  resolution: "@babel/parser@npm:7.29.7"
-  dependencies:
-    "@babel/types": "npm:^7.29.7"
-  bin:
-    parser: ./bin/babel-parser.js
-  checksum: 10c0/65133038f80b54a714d6027cb77cee3f9a6b5c4c6842ce674301e13947cbcbfa8055e63acaf1b84c085d34226a14425b2c2b97b829e0e226d2e8f1299942a51d
   languageName: node
   linkType: hard
 
@@ -291,16 +266,6 @@ __metadata:
     "@babel/types": "npm:^8.0.4"
     obug: "npm:^2.1.1"
   checksum: 10c0/0b7917580320c10027f660c97b754f883d11430bd4c9f877b1f57f424f31fd5a1e7260170be08f0197cbcf8abe65078063864e358cf024c90b64504837f3112e
-  languageName: node
-  linkType: hard
-
-"@babel/types@npm:^7.29.7":
-  version: 7.29.7
-  resolution: "@babel/types@npm:7.29.7"
-  dependencies:
-    "@babel/helper-string-parser": "npm:^7.29.7"
-    "@babel/helper-validator-identifier": "npm:^7.29.7"
-  checksum: 10c0/b6623994c69717fa27294f5fa46d59140338e2d86c6c1c13085c84ef7d53086ee357fbf4fe9abe3dd3da75734dc77c4c0df2f90fb29e667558bb3b3fb705e88f
   languageName: node
   linkType: hard
 
@@ -702,15 +667,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@litsx/authoring@npm:^0.5.0":
-  version: 0.5.0
-  resolution: "@litsx/authoring@npm:0.5.0"
-  dependencies:
-    magic-string: "npm:^0.30.21"
-  checksum: 10c0/14ce5c813ff3ce385c36a3d6143e7eb098f7bc3ff98cf162c4cc0a62fd45f730b83411ddd182ee43cdfa748f63de9bf3ec6bcc7d2b3d0fbe9985f5cb3a277298
-  languageName: node
-  linkType: hard
-
 "@litsx/authoring@npm:^1.0.0-next.3":
   version: 1.0.0-next.3
   resolution: "@litsx/authoring@npm:1.0.0-next.3"
@@ -726,6 +682,15 @@ __metadata:
   dependencies:
     magic-string: "npm:^0.30.21"
   checksum: 10c0/6c3c35f1b2563cc04405ce92ae3b9e0ed92eacddafd277099416a95144bb09118935352ff897856cb21a072769bada02cdc60d61999a5d1769d6a9ae10c56335
+  languageName: node
+  linkType: hard
+
+"@litsx/authoring@npm:^1.0.0-next.5":
+  version: 1.0.0-next.5
+  resolution: "@litsx/authoring@npm:1.0.0-next.5"
+  dependencies:
+    magic-string: "npm:^0.30.21"
+  checksum: 10c0/9409f7962300d2ed910403aac8792f38c6f8703395a1e13dc2d7bb1eef951be88925bb069a69a8d1837cc350bb40081decc0a5140ae245df3691958c4aa05ca4
   languageName: node
   linkType: hard
 
@@ -802,6 +767,21 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@litsx/babel-plugin-transform-litsx-scoped-elements@npm:^1.0.0-next.4, @litsx/babel-plugin-transform-litsx-scoped-elements@npm:^1.0.0-next.5":
+  version: 1.0.0-next.5
+  resolution: "@litsx/babel-plugin-transform-litsx-scoped-elements@npm:1.0.0-next.5"
+  dependencies:
+    "@babel/parser": "npm:^8.0.4"
+    "@babel/plugin-syntax-jsx": "npm:^8.0.1"
+    "@litsx/authoring": "npm:^1.0.0-next.5"
+    "@litsx/babel-plugin-shared-hooks": "npm:^1.0.0-next.3"
+    "@litsx/typescript-session": "npm:^1.0.0-next.0"
+  peerDependencies:
+    "@babel/core": ^8.0.0
+  checksum: 10c0/4e32b33df3f7c58f767808aadb3131c6dc2662d4fc7ab41ad0b105588e73e7d39d499118586550246f8a3c0b81b25abf570331c5f8efc86ac80ae5b5605d0d0d
+  languageName: node
+  linkType: hard
+
 "@litsx/babel-preset-litsx@npm:^1.0.0-next.4":
   version: 1.0.0-next.4
   resolution: "@litsx/babel-preset-litsx@npm:1.0.0-next.4"
@@ -821,70 +801,71 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@litsx/babel-preset-litsx@npm:^1.0.0-next.6":
-  version: 1.0.0-next.6
-  resolution: "@litsx/babel-preset-litsx@npm:1.0.0-next.6"
+"@litsx/babel-preset-litsx@npm:^1.0.0-next.8":
+  version: 1.0.0-next.8
+  resolution: "@litsx/babel-preset-litsx@npm:1.0.0-next.8"
   dependencies:
     "@babel/helper-plugin-utils": "npm:^8.0.1"
     "@babel/parser": "npm:^8.0.4"
     "@babel/plugin-syntax-jsx": "npm:^8.0.1"
     "@babel/traverse": "npm:^8.0.4"
-    "@litsx/authoring": "npm:^1.0.0-next.4"
+    "@litsx/authoring": "npm:^1.0.0-next.5"
     "@litsx/babel-plugin-shared-hooks": "npm:^1.0.0-next.3"
     "@litsx/babel-plugin-transform-jsx-html-template": "npm:^1.0.0-next.6"
-    "@litsx/babel-plugin-transform-litsx-scoped-elements": "npm:^1.0.0-next.2"
+    "@litsx/babel-plugin-transform-litsx-scoped-elements": "npm:^1.0.0-next.5"
     "@litsx/typescript-session": "npm:^1.0.0-next.0"
   peerDependencies:
     "@babel/core": ^8.0.0
-  checksum: 10c0/6a837386bf74f99353573b7f103dbc6b08f2405bcb5613281ef345c0b5edffc17450051ccc59250b37c7224e04717a86e5da37ccdcbef93ccd1984900ed41885
+  checksum: 10c0/32c59aa149d605bfa06492f4e802e16d810feac825d004595688c4ea18ec8f89ae45c49b6676fa84d6f7c80d48ee0544dbdaeee02882359b13f06fe2513db48e
   languageName: node
   linkType: hard
 
-"@litsx/babel-preset-react-compat@npm:^1.0.0-next.3":
-  version: 1.0.0-next.3
-  resolution: "@litsx/babel-preset-react-compat@npm:1.0.0-next.3"
+"@litsx/babel-preset-react-compat@npm:^1.0.0-next.4":
+  version: 1.0.0-next.4
+  resolution: "@litsx/babel-preset-react-compat@npm:1.0.0-next.4"
   dependencies:
     "@babel/helper-plugin-utils": "npm:^8.0.1"
     "@babel/plugin-syntax-jsx": "npm:^8.0.1"
     "@litsx/babel-plugin-litsx-proptypes": "npm:^1.0.0-next.1"
     "@litsx/babel-plugin-shared-hooks": "npm:^1.0.0-next.3"
     "@litsx/babel-plugin-transform-jsx-html-template": "npm:^1.0.0-next.4"
-    "@litsx/babel-plugin-transform-litsx-scoped-elements": "npm:^1.0.0-next.2"
+    "@litsx/babel-plugin-transform-litsx-scoped-elements": "npm:^1.0.0-next.4"
     "@litsx/babel-preset-litsx": "npm:^1.0.0-next.4"
   peerDependencies:
     "@babel/core": ^8.0.0
-  checksum: 10c0/b63f852ab459d81856ecd3c2c2f00b081190ae15aa7bd95261fe6c733be218020f9ad9f66f7d20cfbe8113e2778305813be881f83d2d4210f03be8fb18d003ec
+  checksum: 10c0/a91d7dc2636a54484529605f8f744c6ec587aa472eca5a42d9b84a09f2f21600d80c4b8f1bd73ea32942f0be2138925b94e8c9abec8e08b5f759974d39d22ec9
   languageName: node
   linkType: hard
 
-"@litsx/compiler@npm:1.0.0-next.8, @litsx/compiler@npm:^1.0.0-next.0, @litsx/compiler@npm:^1.0.0-next.8":
-  version: 1.0.0-next.8
-  resolution: "@litsx/compiler@npm:1.0.0-next.8"
+"@litsx/compiler@npm:1.0.0-next.12, @litsx/compiler@npm:^1.0.0-next.11":
+  version: 1.0.0-next.12
+  resolution: "@litsx/compiler@npm:1.0.0-next.12"
   dependencies:
     "@babel/core": "npm:^8.0.1"
     "@babel/parser": "npm:^8.0.4"
     "@babel/plugin-transform-typescript": "npm:^8.0.1"
     "@babel/types": "npm:^8.0.4"
-    "@litsx/authoring": "npm:^1.0.0-next.4"
+    "@litsx/authoring": "npm:^1.0.0-next.5"
     "@litsx/babel-plugin-transform-jsx-html-template": "npm:^1.0.0-next.6"
-    "@litsx/babel-preset-litsx": "npm:^1.0.0-next.6"
-    "@litsx/babel-preset-react-compat": "npm:^1.0.0-next.3"
+    "@litsx/babel-preset-litsx": "npm:^1.0.0-next.8"
+    "@litsx/babel-preset-react-compat": "npm:^1.0.0-next.4"
     "@litsx/typescript-session": "npm:^1.0.0-next.0"
     source-map-js: "npm:^1.2.1"
-  checksum: 10c0/975afc488bbe3f241bf439126d928e1aad775182bf36b15d082ab077311df1781340550b97425abc4b91c7a01c39faec6d4e59bb1afbeb899a28accaa8a7f843
+  checksum: 10c0/bfe13fe5a88654ef4abfae56e29b62281c73b115ebe53dfc3daed060c85045c3d7336373dcff980aae5c4afcca56b6087fbce248dadb58248aa236b93c6cacbf
   languageName: node
   linkType: hard
 
-"@litsx/core@npm:1.0.0-next.5, @litsx/core@npm:^1.0.0-next.5":
-  version: 1.0.0-next.5
-  resolution: "@litsx/core@npm:1.0.0-next.5"
+"@litsx/core@npm:1.0.0-next.8, @litsx/core@npm:^1.0.0-next.7":
+  version: 1.0.0-next.8
+  resolution: "@litsx/core@npm:1.0.0-next.8"
   dependencies:
+    "@lit-labs/ssr-client": "npm:^1.1.7"
     "@lit/context": "npm:^1.1.6"
-    "@litsx/authoring": "npm:^1.0.0-next.4"
-    "@litsx/scoped-registry-shim": "npm:^1.0.0-next.1"
+    "@litsx/authoring": "npm:^1.0.0-next.5"
+    "@litsx/scoped-registry-shim": "npm:^1.0.0-next.2"
   peerDependencies:
     lit: ">=3"
-  checksum: 10c0/fde2bbfca4cf2244c029aa9f3b73c21c026c3134ba08ffdd1e5fb54c083e04175404b7c5cb13a41cb1919b884adf67da50c62d45e91a549950ba969a87018465
+  checksum: 10c0/7036ae0628525a300034014d8ed95235e0585132a49d42eeef9f733c6edb6ef7eba17798352e75d1d4c433990c008bde5dc90f89aa7e5346f802fd5be8868083
   languageName: node
   linkType: hard
 
@@ -895,39 +876,25 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@litsx/scoped-registry-shim@npm:^1.0.0-next.1":
-  version: 1.0.0-next.1
-  resolution: "@litsx/scoped-registry-shim@npm:1.0.0-next.1"
-  checksum: 10c0/03ddeb0a0a475771d0f354bca6d4aaf09ea0b388dd7a041f80aca21b4d61df0a1f393bc56c0f7386924fe0a4edaba4a29eeb017f61a6f42608d9bf635f01b10a
+"@litsx/scoped-registry-shim@npm:^1.0.0-next.2":
+  version: 1.0.0-next.3
+  resolution: "@litsx/scoped-registry-shim@npm:1.0.0-next.3"
+  checksum: 10c0/111905e2f02f6c18c408efb275e76f4c01258a2f930225882101b96f89cb67f5a76091698f9caea932b4938ce66a2d1d132d0aa96d5675c274fad14cc5f8ab0d
   languageName: node
   linkType: hard
 
-"@litsx/ssr@npm:1.0.0-next.3":
-  version: 1.0.0-next.3
-  resolution: "@litsx/ssr@npm:1.0.0-next.3"
+"@litsx/ssr@npm:1.0.0-next.5":
+  version: 1.0.0-next.5
+  resolution: "@litsx/ssr@npm:1.0.0-next.5"
   dependencies:
     "@lit-labs/ssr": "npm:^4.0.0"
     "@lit-labs/ssr-client": "npm:^1.1.7"
     "@lit-labs/ssr-dom-shim": "npm:^1.6.0"
-    "@litsx/compiler": "npm:^1.0.0-next.8"
-    "@litsx/core": "npm:^1.0.0-next.5"
-    "@litsx/vite-plugin": "npm:^1.0.0-next.0"
+    "@litsx/compiler": "npm:^1.0.0-next.11"
+    "@litsx/core": "npm:^1.0.0-next.7"
   peerDependencies:
     lit: ">=3"
-    vite: ^7.3.2 || ^8.0.0
-  peerDependenciesMeta:
-    vite:
-      optional: true
-  checksum: 10c0/ab7ae1392c351d780b4b316b2c5c18c085f40bfbdae5662efc5030fd4ce8b4ded561c01a47eb4ae1fe867ffca84bc9eebf26e95e2f2be8bf06a68e11083362cc
-  languageName: node
-  linkType: hard
-
-"@litsx/typescript-session@npm:^0.2.4":
-  version: 0.2.4
-  resolution: "@litsx/typescript-session@npm:0.2.4"
-  peerDependencies:
-    typescript: ">=5"
-  checksum: 10c0/6bd8a6d6e6c86e0cdf81c7aa061653a8e1d9f7ef9fa289505758a6313d5b177c21c39fadda41d1abec36e572d21286a298793ead8163c246adb112358c4c689b
+  checksum: 10c0/ff49edd701cc87e6e3f2b627b6347a9ea95eef1fbf4caf81c383b2be793e31a927748baf82937e89662ec4fad3cd54bdd9d9dcc7637b9ef6b3285e2508ac574c
   languageName: node
   linkType: hard
 
@@ -937,32 +904,6 @@ __metadata:
   peerDependencies:
     typescript: ">=5"
   checksum: 10c0/c0c83326f8a01f3e58d481f410feb2db5aeb85780c9b13352c2dd2fd11a860aa7276cb840206ec0862a99057047506466ba4b3076d7cb4797f67227adff6104a
-  languageName: node
-  linkType: hard
-
-"@litsx/typescript@npm:^0.9.0":
-  version: 0.9.0
-  resolution: "@litsx/typescript@npm:0.9.0"
-  dependencies:
-    "@babel/parser": "npm:^7.29.3"
-    "@litsx/authoring": "npm:^0.5.0"
-    "@litsx/typescript-session": "npm:^0.2.4"
-  peerDependencies:
-    typescript: ">=5"
-  bin:
-    litsx-tsc: dist/litsx-tsc.js
-  checksum: 10c0/9e30ac3d7d5a615289b8b49e9bfa0a591e1da07e64ac4d2f3daafcfcb0d52fe5be874a50ad27619ffc7098cd0795f38e19dfd5818cc8c1dd847002c22aa91124
-  languageName: node
-  linkType: hard
-
-"@litsx/vite-plugin@npm:^1.0.0-next.0":
-  version: 1.0.0-next.0
-  resolution: "@litsx/vite-plugin@npm:1.0.0-next.0"
-  dependencies:
-    "@litsx/compiler": "npm:^1.0.0-next.0"
-  peerDependencies:
-    vite: ^7.3.2 || ^8.0.0
-  checksum: 10c0/a8907864ec86b244a4f77b515a8baa29b03a464850a9447fc25049381d080e97e4c2b0ca5b9991b40282bd62463a37310abb3b0bf4ac01d292f3bad72ac612c9
   languageName: node
   linkType: hard
 
@@ -1722,10 +1663,9 @@ __metadata:
   resolution: "evolit@workspace:packages/evolit"
   dependencies:
     "@jridgewell/remapping": "npm:^2.3.5"
-    "@litsx/compiler": "npm:1.0.0-next.8"
-    "@litsx/core": "npm:1.0.0-next.5"
-    "@litsx/ssr": "npm:1.0.0-next.3"
-    "@litsx/typescript": "npm:^0.9.0"
+    "@litsx/compiler": "npm:1.0.0-next.12"
+    "@litsx/core": "npm:1.0.0-next.8"
+    "@litsx/ssr": "npm:1.0.0-next.5"
     "@playwright/test": "npm:^1.62.0"
     "@rollup/plugin-commonjs": "npm:^29.0.0"
     "@rollup/plugin-node-resolve": "npm:^16.0.3"

@@ -27,9 +27,12 @@ test("CLI scaffolds a site from a directory argument", async () => {
   assert.equal(packageJson.dependencies.evolit, frameworkPackageJson.version);
   assert.equal(packageJson.dependencies["@litsx/core"], frameworkPackageJson.dependencies["@litsx/core"]);
   assert.equal(packageJson.engines.node, frameworkPackageJson.engines.node);
+  assert.equal(packageJson.scripts.typecheck, "tsc -p jsconfig.json --noEmit");
+  assert.equal(packageJson.devDependencies["@litsx/typescript"], undefined);
   assert.equal(jsconfig.compilerOptions.jsx, "react-jsx");
   assert.equal(jsconfig.compilerOptions.jsxImportSource, "@litsx/core");
   assert.deepEqual(jsconfig.compilerOptions.paths, { "@/*": ["./*"] });
+  assert.equal(jsconfig.compilerOptions.plugins, undefined);
   await fs.access(path.join(targetDirectory, "app", "page.jsx"));
   assert.match(
     await fs.readFile(path.join(targetDirectory, "app", "page.jsx"), "utf8"),
