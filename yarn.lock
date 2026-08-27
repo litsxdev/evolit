@@ -1742,7 +1742,7 @@ __metadata:
     "@litsx/urql":
       optional: true
   bin:
-    evolit: ./src/cli.js
+    evolit: src/cli.js
   languageName: unknown
   linkType: soft
 

@@ -72,7 +72,7 @@ jobs:
       - uses: actions/setup-node@v6
         if: steps.gate.outputs.ready == 'true'
         with:
-          node-version: 20
+          node-version-file: packages/evolit/.nvmrc
           package-manager-cache: false
       - name: Enable Yarn
         if: steps.gate.outputs.ready == 'true'
@@ -115,7 +115,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: packages/evolit/.nvmrc
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
       - name: Enable Yarn
@@ -137,8 +137,6 @@ jobs:
       - name: Validate packages
         run: corepack yarn release:check
       - name: Publish packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: corepack yarn changeset publish --tag ${{ needs.plan.outputs.release_kind == 'stable' && 'latest' || needs.plan.outputs.snapshot_tag }}
       - name: Collect stable package tags
         if: needs.plan.outputs.release_kind == 'stable'
