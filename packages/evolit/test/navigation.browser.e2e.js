@@ -680,7 +680,10 @@ test("browser navigation preserves catch-all params and repeated query params", 
     const jsconfigPath = path.join(projectRoot, "jsconfig.json");
     const jsconfig = JSON.parse(await fs.readFile(jsconfigPath, "utf8"));
     jsconfig.compilerOptions.baseUrl = ".";
-    jsconfig.compilerOptions.paths = { "@ui/*": ["src/ui/*"] };
+    jsconfig.compilerOptions.paths = {
+      ...jsconfig.compilerOptions.paths,
+      "@ui/*": ["src/ui/*"],
+    };
     jsconfig.include.push("src/**/*");
     await fs.writeFile(jsconfigPath, `${JSON.stringify(jsconfig, null, 2)}\n`, "utf8");
     await fs.mkdir(path.join(projectRoot, "src", "ui"), { recursive: true });
@@ -728,7 +731,7 @@ test("browser navigation preserves catch-all params and repeated query params", 
       path.join(projectRoot, "app", "other", "page.jsx"),
       [
         'import "./other.css";',
-        'import AliasCard from "@ui/alias-card";',
+        'import AliasCard from "@/src/ui/alias-card";',
         'import PackageCard from "@fixture/browser-card";',
         'import { MixedCard } from "@ui/mixed-card";',
         "",

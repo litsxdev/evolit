@@ -8,7 +8,12 @@
     "ignoreDeprecations": "6.0",
     "jsx": "react-jsx",
     "jsxImportSource": "@litsx/core",
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
   },
   "include": [
     "app/**/*.d.ts",

@@ -32,6 +32,20 @@ Supported authored module extensions:
 - `.tsx`
 - `.mjs`
 
+### Internal imports
+
+Imports beginning with `@/` resolve from the application root in server and browser graphs. This
+keeps internal imports stable when modules move between route directories:
+
+```jsx
+import FeatureCard from "@/app/components/feature-card";
+import { formatPrice } from "@/lib/format-price";
+```
+
+Generated applications declare `"@/*": ["./*"]` in `jsconfig.json`, so editors and typechecking
+use the same convention. An explicit `@/*` mapping in `jsconfig.json` or `tsconfig.json` takes
+priority when an application needs a different source root.
+
 ## Commands
 
 ```sh

@@ -155,7 +155,10 @@ before(async () => {
   const jsconfigPath = path.join(fixtureRoot, "jsconfig.json");
   const jsconfig = JSON.parse(await fs.readFile(jsconfigPath, "utf8"));
   jsconfig.compilerOptions.baseUrl = ".";
-  jsconfig.compilerOptions.paths = { "@components/*": ["app/components/*"] };
+  jsconfig.compilerOptions.paths = {
+    ...jsconfig.compilerOptions.paths,
+    "@components/*": ["app/components/*"],
+  };
   jsconfig.include.push("src/**/*");
   await fs.writeFile(jsconfigPath, `${JSON.stringify(jsconfig, null, 2)}\n`, "utf8");
   await fs.mkdir(path.join(fixtureRoot, "src", "styles"), { recursive: true });

@@ -419,6 +419,48 @@ test("resolves path aliases to client boundaries and rewrites aliases in the ser
   }
 });
 
+test("resolves @/ imports from the project root without alias configuration", async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-root-alias-"));
+  const projectRoot = path.join(workspaceRoot, "site");
+  try {
+    await fs.mkdir(path.join(projectRoot, "app"), { recursive: true });
+    await fs.mkdir(path.join(projectRoot, "src", "ui"), { recursive: true });
+    const card = path.join(projectRoot, "src", "ui", "card.jsx");
+    const entry = path.join(projectRoot, "app", "page.jsx");
+    const outside = path.join(workspaceRoot, "outside.jsx");
+    await fs.writeFile(card, "export default function FeatureCard() { return <button>root alias</button>; }\n");
+    await fs.writeFile(outside, "export default function Outside() { return <span />; }\n");
+    await fs.writeFile(
+      entry,
+      'import FeatureCard from "@/src/ui/card"; export default async function RoutePage() { return <FeatureCard />; }\n',
+    );
+
+    assert.equal(
+      await fs.realpath(await resolveProjectModuleSpecifier(projectRoot, entry, "@/src/ui/card")),
+      await fs.realpath(card),
+    );
+    assert.equal(
+      await resolveProjectModuleSpecifier(projectRoot, entry, "@/../outside"),
+      null,
+    );
+    assert.deepEqual(await collectClientBoundaryModules([entry], { projectRoot }), [card]);
+
+    const serverBuild = await compileModuleGraph(entry, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: false,
+      ssr: true,
+      target: "server",
+    });
+    const output = await fs.readFile(serverBuild.entrypoint, "utf8");
+    assert.doesNotMatch(output, /import FeatureCard from "@\/src\/ui\/card"/);
+    assert.match(output, /\.\.\/src\/ui\/card\.mjs/);
+    assert.match(output, /moduleId: "@\/src\/ui\/card"/);
+  } finally {
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test("treats a component package entry as a client boundary without pulling server packages", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-package-boundary-"));
   try {

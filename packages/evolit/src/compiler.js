@@ -706,8 +706,24 @@ async function resolveProjectPathAlias(projectRoot, specifier) {
   return null;
 }
 
+async function resolveProjectRootAlias(projectRoot, specifier) {
+  if (!specifier.startsWith("@/") || specifier.length === 2) return null;
+
+  const normalizedProjectRoot = path.resolve(projectRoot);
+  const candidatePath = path.resolve(normalizedProjectRoot, specifier.slice(2));
+  const relativePath = path.relative(normalizedProjectRoot, candidatePath);
+  const isOutsideProject =
+    relativePath === ".."
+    || relativePath.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativePath);
+  if (isOutsideProject) return null;
+
+  return resolveImportPath(path.join(normalizedProjectRoot, "__alias__.js"), candidatePath);
+}
+
 async function resolveProjectMappedImport(projectRoot, importerPath, specifier) {
   return await resolveProjectPathAlias(projectRoot, specifier)
+    ?? await resolveProjectRootAlias(projectRoot, specifier)
     ?? await resolveProjectPackageImportMap(importerPath, specifier);
 }
 

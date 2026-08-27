@@ -7,7 +7,7 @@ import {
   requestUrl,
   responseHeaders,
 } from "evolit/server";
-import PageFrame from "../components/page-frame.jsx";
+import PageFrame from "@/app/components/page-frame";
 
 export default async function RequestContextPage({ searchParams }) {
   if (searchParams.missing === "1") {

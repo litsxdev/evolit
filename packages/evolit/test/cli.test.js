@@ -29,7 +29,12 @@ test("CLI scaffolds a site from a directory argument", async () => {
   assert.equal(packageJson.engines.node, frameworkPackageJson.engines.node);
   assert.equal(jsconfig.compilerOptions.jsx, "react-jsx");
   assert.equal(jsconfig.compilerOptions.jsxImportSource, "@litsx/core");
+  assert.deepEqual(jsconfig.compilerOptions.paths, { "@/*": ["./*"] });
   await fs.access(path.join(targetDirectory, "app", "page.jsx"));
+  assert.match(
+    await fs.readFile(path.join(targetDirectory, "app", "page.jsx"), "utf8"),
+    /from "@\/app\/components\/feature-card"/,
+  );
   assert.equal(
     await fs.readFile(path.join(targetDirectory, ".yarnrc.yml"), "utf8"),
     "nodeLinker: node-modules\n",

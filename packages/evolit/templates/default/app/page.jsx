@@ -1,4 +1,4 @@
-import FeatureCard from "./components/feature-card.jsx";
+import FeatureCard from "@/app/components/feature-card";
 
 export default async function HomePage() {
   return (

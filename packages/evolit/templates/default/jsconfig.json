@@ -9,6 +9,11 @@
     "jsx": "react-jsx",
     "jsxImportSource": "@litsx/core",
     "allowArbitraryExtensions": true,
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
     "plugins": [
       {
         "name": "@litsx/typescript"
