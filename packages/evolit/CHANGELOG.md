@@ -1,5 +1,13 @@
 # evolit
 
+## 0.1.3
+
+### Patch Changes
+
+- 4f02bfd: Remove the deprecated `@litsx/typescript` integration, use standard TypeScript
+  for project typechecking, and update LitSX compiler, core, and SSR dependencies
+  to their current `next` releases.
+
 ## 0.1.2
 
 ### Patch Changes
