@@ -144,11 +144,36 @@ export async function resolvePackageRoot(packageName, options = {}) {
   }
 
   const pendingResolution = (async () => {
-    let packageEntryPath;
-    try {
-      packageEntryPath = createRequire(path.join(resolveFrom, "package.json")).resolve(packageName);
-    } catch {
-      packageEntryPath = requireFromHere.resolve(packageName);
+    const resolvers = [
+      createRequire(path.join(resolveFrom, "package.json")),
+      requireFromHere,
+    ];
+
+    for (const resolver of resolvers) {
+      try {
+        const packageJsonPath = resolver.resolve(`${packageName}/package.json`);
+        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+        if (packageJson?.name === packageName) {
+          return { packageRoot: path.dirname(packageJsonPath), packageJson };
+        }
+      } catch {
+        // Some packages intentionally do not export package.json. Resolve the
+        // entrypoint below and walk back to its owning manifest instead.
+      }
+    }
+
+    let packageEntryPath = null;
+    let resolutionError = null;
+    for (const resolver of resolvers) {
+      try {
+        packageEntryPath = resolver.resolve(packageName);
+        break;
+      } catch (error) {
+        resolutionError = error;
+      }
+    }
+    if (!packageEntryPath) {
+      throw resolutionError ?? new Error(`Unable to resolve package entry for ${packageName}`);
     }
     let currentPath = path.dirname(packageEntryPath);
 
@@ -190,6 +215,14 @@ function pickBrowserExportTarget(target) {
     return target;
   }
 
+  if (Array.isArray(target)) {
+    for (const candidate of target) {
+      const resolved = pickBrowserExportTarget(candidate);
+      if (resolved) return resolved;
+    }
+    return null;
+  }
+
   if (!target || typeof target !== "object") {
     return null;
   }
@@ -200,6 +233,33 @@ function pickBrowserExportTarget(target) {
     ?? pickBrowserExportTarget(target.module)
     ?? pickBrowserExportTarget(target.require)
     ?? null;
+}
+
+function resolveBrowserPackageExport(exportsField, exportKey) {
+  if (typeof exportsField === "string" || Array.isArray(exportsField)) {
+    return exportKey === "." ? pickBrowserExportTarget(exportsField) : null;
+  }
+  if (!exportsField || typeof exportsField !== "object") {
+    return null;
+  }
+  if (!Object.keys(exportsField).some((key) => key.startsWith("."))) {
+    return exportKey === "." ? pickBrowserExportTarget(exportsField) : null;
+  }
+  if (exportsField[exportKey] != null) {
+    return pickBrowserExportTarget(exportsField[exportKey]);
+  }
+
+  for (const [pattern, target] of Object.entries(exportsField)) {
+    const wildcardIndex = pattern.indexOf("*");
+    if (wildcardIndex < 0) continue;
+    const prefix = pattern.slice(0, wildcardIndex);
+    const suffix = pattern.slice(wildcardIndex + 1);
+    if (!exportKey.startsWith(prefix) || !exportKey.endsWith(suffix)) continue;
+    const wildcard = exportKey.slice(prefix.length, exportKey.length - suffix.length);
+    const resolved = pickBrowserExportTarget(target);
+    if (resolved) return resolved.replace("*", wildcard);
+  }
+  return null;
 }
 
 export async function resolveBrowserSpecifierFilePath(specifier, options = {}) {
@@ -222,17 +282,15 @@ export async function resolveBrowserSpecifierFilePath(specifier, options = {}) {
     const { packageName, subpath } = parsedSpecifier;
     const { packageRoot, packageJson } = await resolvePackageRoot(packageName, { projectRoot: resolveFrom });
     const exportKey = subpath.length > 0 ? `./${subpath}` : ".";
-    const exportsField = packageJson.exports;
-    const exportTarget = pickBrowserExportTarget(
-      exportsField && typeof exportsField === "object" && Object.keys(exportsField).some((key) => key.startsWith("."))
-        ? exportsField[exportKey]
-        : exportKey === "." ? exportsField : null,
-    );
-    const fallbackTarget = subpath.length > 0
-      ? `./${subpath}`
-      : typeof packageJson.browser === "string"
-        ? packageJson.browser
-        : packageJson.module ?? packageJson.main ?? null;
+    const hasExports = packageJson.exports != null;
+    const exportTarget = resolveBrowserPackageExport(packageJson.exports, exportKey);
+    const fallbackTarget = hasExports
+      ? null
+      : subpath.length > 0
+        ? `./${subpath}`
+        : typeof packageJson.browser === "string"
+          ? packageJson.browser
+          : packageJson.module ?? packageJson.main ?? null;
     let resolvedTarget = exportTarget ?? fallbackTarget;
     if (resolvedTarget && packageJson.browser && typeof packageJson.browser === "object") {
       const normalizedTarget = resolvedTarget.startsWith("./")

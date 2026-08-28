@@ -20,6 +20,7 @@ import {
   resolveRouteClientImports,
   resolveBrowserPackageAssetFilePath,
   resolveBrowserSpecifierFilePath,
+  resolvePackageRoot,
 } from "../src/client-assets.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -27,6 +28,203 @@ import { pathToFileURL } from "node:url";
 import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
 import { compileModuleGraph } from "../src/compiler.js";
 import { scaffoldSite } from "../src/scaffold.js";
+
+async function writeFixturePackage(projectRoot, packageName, packageJson, files) {
+  const packageRoot = path.join(projectRoot, "node_modules", ...packageName.split("/"));
+  await fs.mkdir(packageRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(packageRoot, "package.json"),
+    `${JSON.stringify({ name: packageName, ...packageJson }, null, 2)}\n`,
+    "utf8",
+  );
+  await Promise.all(Object.entries(files).map(async ([relativePath, contents]) => {
+    const filePath = path.join(packageRoot, relativePath);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, contents, "utf8");
+  }));
+  return packageRoot;
+}
+
+test("package roots resolve through an exported package.json for import-only ESM packages", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-esm-package-root-"));
+  const packageName = "@fixture/import-only";
+
+  try {
+    const packageRoot = await writeFixturePackage(
+      projectRoot,
+      packageName,
+      {
+        type: "module",
+        exports: {
+          ".": { types: "./index.d.ts", import: "./index.js" },
+          "./package.json": "./package.json",
+        },
+      },
+      {
+        "index.js": 'export const marker = "import-only";\n',
+        "index.d.ts": "export declare const marker: string;\n",
+      },
+    );
+
+    const resolution = await resolvePackageRoot(packageName, { projectRoot });
+    assert.equal(resolution.packageRoot, await fs.realpath(packageRoot));
+    assert.equal(resolution.packageJson.name, packageName);
+    assert.equal(
+      await resolveBrowserSpecifierFilePath(packageName, { projectRoot }),
+      path.join(await fs.realpath(packageRoot), "index.js"),
+    );
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("package root resolution falls back to the package entry when package.json is not exported", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-package-root-fallback-"));
+  const packageName = "fixture-package-root-fallback";
+
+  try {
+    const packageRoot = await writeFixturePackage(
+      projectRoot,
+      packageName,
+      {
+        exports: {
+          ".": { import: "./index.js", require: "./index.cjs" },
+        },
+      },
+      {
+        "index.js": 'export const marker = "esm";\n',
+        "index.cjs": 'module.exports = { marker: "commonjs" };\n',
+      },
+    );
+
+    const resolution = await resolvePackageRoot(packageName, { projectRoot });
+    assert.equal(resolution.packageRoot, await fs.realpath(packageRoot));
+    assert.equal(resolution.packageJson.name, packageName);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("package root resolution rejects an exported manifest owned by another package", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-package-root-name-"));
+  const packageName = "fixture-package-root-name";
+
+  try {
+    const packageRoot = path.join(projectRoot, "node_modules", packageName);
+    await fs.mkdir(packageRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "another-package",
+        exports: {
+          ".": "./index.cjs",
+          "./package.json": "./package.json",
+        },
+      }),
+      "utf8",
+    );
+    await fs.writeFile(path.join(packageRoot, "index.cjs"), "module.exports = {};\n", "utf8");
+
+    await assert.rejects(
+      resolvePackageRoot(packageName, { projectRoot }),
+      new RegExp(`Unable to resolve package root for ${packageName}`),
+    );
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+for (const mode of ["development", "production"]) {
+  test(`package CSS subpaths use the static asset pipeline in ${mode}`, async () => {
+    const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), `evolit-package-css-${mode}-`));
+    const packageName = "@fixture/package-assets";
+    const entryPath = path.join(projectRoot, "entry.js");
+
+    try {
+      await fs.writeFile(path.join(projectRoot, "package.json"), '{"type":"module"}\n', "utf8");
+      await writeFixturePackage(
+        projectRoot,
+        packageName,
+        {
+          type: "module",
+          exports: {
+            ".": { types: "./index.d.ts", import: "./index.js" },
+            "./package.json": "./package.json",
+            "./tokens.css": "./styles/tokens.css",
+            "./theme.css": "./styles/theme.css",
+          },
+        },
+        {
+          "index.js": 'export const marker = "package-assets";\n',
+          "index.d.ts": "export declare const marker: string;\n",
+          "styles/tokens.css": '@import "./base.css";\n.tokens { background: url("./grid.svg#tile"); }\n',
+          "styles/base.css": ":root { --fixture-color: rebeccapurple; }\n",
+          "styles/theme.css": ".theme { color: var(--fixture-color); }\n",
+          "styles/grid.svg": '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"></svg>\n',
+        },
+      );
+      await fs.writeFile(
+        entryPath,
+        [
+          `import { marker } from ${JSON.stringify(packageName)};`,
+          `import ${JSON.stringify(`${packageName}/tokens.css`)};`,
+          `import ${JSON.stringify(`${packageName}/theme.css`)};`,
+          "export { marker };",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      await compileModuleGraph(entryPath, {
+        projectRoot,
+        mode,
+        sourceMaps: mode === "development",
+        target: "client",
+      });
+      const metadata = JSON.parse(await fs.readFile(
+        path.join(projectRoot, ".evolit", mode === "development" ? "dev" : "build", "client", "entry.mjs.meta.json"),
+        "utf8",
+      ));
+      assert.deepEqual(metadata.vendorImports, [packageName]);
+      assert.deepEqual(metadata.styleImports, [
+        "node_modules/@fixture/package-assets/styles/theme.css",
+        "node_modules/@fixture/package-assets/styles/tokens.css",
+      ]);
+
+      const manifest = await emitBundledClientAssets(projectRoot, {
+        mode,
+        entryClientModules: ["entry.mjs"],
+      });
+      const entryAsset = getAssetByClientModule(manifest, "entry.mjs");
+      const tokensAsset = getAssetByClientModule(
+        manifest,
+        "node_modules/@fixture/package-assets/styles/tokens.css",
+      );
+      const baseAsset = getAssetByClientModule(
+        manifest,
+        "node_modules/@fixture/package-assets/styles/base.css",
+      );
+      const gridAsset = getAssetByClientModule(
+        manifest,
+        "node_modules/@fixture/package-assets/styles/grid.svg",
+      );
+      assert.ok(entryAsset);
+      assert.ok(tokensAsset);
+      assert.ok(baseAsset);
+      assert.ok(gridAsset);
+      assert.deepEqual(entryAsset.styleImports, [
+        "node_modules/@fixture/package-assets/styles/theme.css",
+        "node_modules/@fixture/package-assets/styles/tokens.css",
+      ]);
+      assert.equal(entryAsset.styleUrls.includes(tokensAsset.publicUrl), true);
+      const emittedCss = await fs.readFile(tokensAsset.outputPath, "utf8");
+      assert.match(emittedCss, new RegExp(path.basename(baseAsset.publicUrl).replaceAll(".", "\\.")));
+      assert.match(emittedCss, new RegExp(`${path.basename(gridAsset.publicUrl).replaceAll(".", "\\.")}#tile`));
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+}
 
 test("the hot component runtime is a development-only shared vendor", async () => {
   assert.ok(

@@ -46,6 +46,22 @@ Generated applications declare `"@/*": ["./*"]` in `jsconfig.json`, so editors a
 use the same convention. An explicit `@/*` mapping in `jsconfig.json` or `tsconfig.json` takes
 priority when an application needs a different source root.
 
+### Package CSS and static assets
+
+Applications can import stylesheets exposed through package `exports` in the same way as local
+stylesheets:
+
+```js
+import "@scope/design-system/tokens.css";
+import "@scope/design-system/theme.css";
+```
+
+Evolit resolves package subpaths with ESM `import` conditions, emits exported CSS through the
+route static-asset pipeline, and adds the resulting stylesheet URLs to the rendered document.
+Relative `@import` rules and `url(...)` references inside package CSS are emitted and rewritten
+from their location within `node_modules`. Bare package imports that resolve to JavaScript continue
+to use the shared vendor runtime; CSS and other static assets do not enter vendor chunks.
+
 ## Commands
 
 ```sh

@@ -19,6 +19,7 @@ import { ensureDirectory } from "./fs-utils.js";
 
 const MODULE_SPECIFIER_PATTERN =
   /\b(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+const CSS_DEPENDENCY_PATTERN = /(?:@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?|url\(\s*["']?([^"')]+)["']?\s*\))/g;
 const RESOLVABLE_IMPORT_EXTENSIONS = [
   ...MODULE_EXTENSIONS,
   ...STATIC_ASSET_EXTENSIONS,
@@ -497,7 +498,8 @@ function createStaticAssetStubSource(relativeAssetPath, mode, target = "server",
 }
 
 async function resolveImportPath(importerPath, specifier) {
-  const basePath = path.resolve(path.dirname(importerPath), specifier);
+  const cleanSpecifier = String(specifier).split("?")[0].split("#")[0];
+  const basePath = path.resolve(path.dirname(importerPath), cleanSpecifier);
   const candidates = [basePath];
 
   if (!hasResolvableImportExtension(basePath)) {
@@ -519,6 +521,29 @@ async function resolveImportPath(importerPath, specifier) {
   }
 
   return null;
+}
+
+async function collectStaticAssetGraph(entryPath, collected = new Set()) {
+  const normalizedEntryPath = path.resolve(entryPath);
+  if (collected.has(normalizedEntryPath) || !isStaticAssetPath(normalizedEntryPath)) {
+    return collected;
+  }
+
+  collected.add(normalizedEntryPath);
+  if (!isStyleAssetPath(normalizedEntryPath)) {
+    return collected;
+  }
+
+  const source = await fs.readFile(normalizedEntryPath, "utf8");
+  for (const match of source.matchAll(CSS_DEPENDENCY_PATTERN)) {
+    const specifier = match[1] ?? match[2];
+    if (!specifier || !isRelativeSpecifier(specifier)) continue;
+    const resolvedPath = await resolveImportPath(normalizedEntryPath, specifier);
+    if (resolvedPath && isStaticAssetPath(resolvedPath)) {
+      await collectStaticAssetGraph(resolvedPath, collected);
+    }
+  }
+  return collected;
 }
 
 async function loadProjectPathAliases(projectRoot) {
@@ -660,12 +685,15 @@ async function resolveProjectPackageImport(projectRoot, importerPath, specifier)
     try {
       const packageJson = JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf8"));
       const exportKey = parsed.subpath ? `./${parsed.subpath}` : ".";
+      const hasExports = packageJson.exports != null;
       let target = resolvePackageExports(packageJson.exports, exportKey)
-        ?? (parsed.subpath
-          ? `./${parsed.subpath}`
-          : typeof packageJson.browser === "string"
-            ? packageJson.browser
-            : packageJson.module ?? packageJson.main);
+        ?? (hasExports
+          ? null
+          : parsed.subpath
+            ? `./${parsed.subpath}`
+            : typeof packageJson.browser === "string"
+              ? packageJson.browser
+              : packageJson.module ?? packageJson.main);
       if (target && packageJson.browser && typeof packageJson.browser === "object") {
         const normalizedTarget = target.startsWith("./") ? target : `./${target}`;
         const browserTarget = packageJson.browser[normalizedTarget]
@@ -828,8 +856,19 @@ async function rewriteRelativeSpecifiers({
     const aliasedImportPath = isBareSpecifier(specifier)
       ? await resolveProjectMappedImport(projectRoot, sourcePath, specifier)
       : null;
+    const packageImportPath = isBareSpecifier(specifier) && !aliasedImportPath
+      ? await resolveProjectPackageImport(projectRoot, sourcePath, specifier)
+      : null;
+    const packageAssetPath = packageImportPath && isStaticAssetPath(packageImportPath)
+      ? packageImportPath
+      : null;
 
-    if (target === "client" && isBareSpecifier(specifier) && !aliasedImportPath) {
+    if (
+      target === "client"
+      && isBareSpecifier(specifier)
+      && !aliasedImportPath
+      && !packageAssetPath
+    ) {
       const sourceMetadata = moduleMetadata.get(sourcePath) ?? {
         moduleImports: new Set(),
         vendorImports: new Set(),
@@ -841,11 +880,13 @@ async function rewriteRelativeSpecifiers({
       continue;
     }
 
-    if (!isRelativeSpecifier(specifier) && !aliasedImportPath) {
+    if (!isRelativeSpecifier(specifier) && !aliasedImportPath && !packageAssetPath) {
       continue;
     }
 
-    const resolvedImportPath = aliasedImportPath ?? await resolveImportPath(sourcePath, specifier);
+    const resolvedImportPath = packageAssetPath
+      ?? aliasedImportPath
+      ?? await resolveImportPath(sourcePath, specifier);
     if (!resolvedImportPath) {
       continue;
     }
@@ -875,7 +916,10 @@ async function rewriteRelativeSpecifiers({
         );
       }
     } else if (isStaticAssetPath(resolvedImportPath)) {
-      staticAssetFiles?.add(resolvedImportPath);
+      const staticAssetGraph = await collectStaticAssetGraph(resolvedImportPath);
+      for (const staticAssetPath of staticAssetGraph) {
+        staticAssetFiles?.add(staticAssetPath);
+      }
       const relativeAssetPath = toOutputRelativePath(projectRoot, resolvedImportPath);
       const assetOutputPath = path.join(outputRoot, relativeAssetPath);
       const stubOutputPath = `${assetOutputPath}.mjs`;
@@ -888,8 +932,14 @@ async function rewriteRelativeSpecifiers({
       );
 
       if (target === "client") {
-        await ensureDirectory(path.dirname(assetOutputPath));
-        await fs.copyFile(resolvedImportPath, assetOutputPath);
+        for (const staticAssetPath of staticAssetGraph) {
+          const staticAssetOutputPath = path.join(
+            outputRoot,
+            toOutputRelativePath(projectRoot, staticAssetPath),
+          );
+          await ensureDirectory(path.dirname(staticAssetOutputPath));
+          await fs.copyFile(staticAssetPath, staticAssetOutputPath);
+        }
         const sourceMetadata = moduleMetadata.get(sourcePath) ?? {
           moduleImports: new Set(),
           vendorImports: new Set(),
@@ -1239,8 +1289,6 @@ export async function compileModuleGraph(entryPath, options = {}) {
   }
 }
 
-const CSS_DEPENDENCY_PATTERN = /(?:@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?|url\(\s*["']?([^"')]+)["']?\s*\))/g;
-
 function normalizeProjectRelativePath(projectRoot, filePath) {
   return toOutputRelativePath(projectRoot, filePath).split(path.sep).join("/");
 }
@@ -1406,8 +1454,13 @@ export async function emitClientStaticAssets(assetPaths, options = {}) {
   const outputRoot = getTypedOutputRoot(projectRoot, mode, "client");
   const emitted = [];
 
+  const expandedAssetPaths = new Set();
   for (const assetPath of new Set(assetPaths ?? [])) {
     if (!isStaticAssetPath(assetPath)) continue;
+    await collectStaticAssetGraph(assetPath, expandedAssetPaths);
+  }
+
+  for (const assetPath of expandedAssetPaths) {
     const relativePath = normalizeProjectRelativePath(projectRoot, assetPath);
     const outputPath = path.join(outputRoot, relativePath.split("/").join(path.sep));
     await ensureDirectory(path.dirname(outputPath));
