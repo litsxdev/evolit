@@ -1,5 +1,11 @@
 # evolit
 
+## 0.1.7
+
+### Patch Changes
+
+- 71f00dd: Add JSON-safe, history-scoped navigation context with SSR transport, cache isolation, popstate restoration, and URL-free `replaceContext` updates.
+
 ## 0.1.6
 
 ### Patch Changes
