@@ -1,6 +1,6 @@
 {
   "name": "evolit",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A convention-driven application framework for LitSX and web components.",
   "type": "module",
   "packageManager": "yarn@4.10.3",

@@ -1,5 +1,11 @@
 # evolit
 
+## 0.1.6
+
+### Patch Changes
+
+- edc432c: Preserve browser module identity across public subpaths of the same package by compiling each package as one shared development vendor graph.
+
 ## 0.1.5
 
 ### Patch Changes
