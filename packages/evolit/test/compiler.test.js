@@ -99,6 +99,36 @@ test("compiler preserves plain route-handler exports outside the LitSX authoring
   }
 });
 
+test("compiler reports bare packages imported by the production SSR graph", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-ssr-package-imports-"));
+  const sourcePath = path.join(projectRoot, "page.js");
+
+  try {
+    await fs.writeFile(sourcePath, [
+      'import value from "runtime-package/subpath";',
+      'import "./nested.js";',
+      "export default value;",
+      "",
+    ].join("\n"), "utf8");
+    await fs.writeFile(
+      path.join(projectRoot, "nested.js"),
+      'export { default as nested } from "nested-runtime-package";\n',
+      "utf8",
+    );
+
+    const result = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: false,
+      ssr: true,
+      target: "server",
+    });
+    assert.deepEqual(result.packageImports, ["nested-runtime-package", "runtime-package/subpath"]);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("compiler preserves LitSX side-effect imports for asset discovery", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-side-effect-imports-"));
   const sourcePath = path.join(projectRoot, "feature-card.jsx");
@@ -509,6 +539,12 @@ test("treats a component package entry as a client boundary without pulling serv
       await fs.realpath(inventory.clientBoundaries[0]),
       await fs.realpath(packageEntry),
     );
+    assert.deepEqual(inventory.packageClientBoundaries, [
+      {
+        specifier: "@fixture/card",
+        sourcePath: packageEntry,
+      },
+    ]);
     assert.equal(inventory.sourceFiles.some((filePath) => filePath.includes("node:crypto")), false);
     assert.equal(inventory.sourceFiles.some((filePath) => filePath.includes("server-only")), false);
   } finally {

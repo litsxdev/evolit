@@ -13,6 +13,7 @@ import {
 import {
   collectTransitiveAssetPreloads,
   collectTransitiveStyleUrls,
+  canonicalizePackageModuleId,
   createAssetResolver,
   createHydrationBootstrap,
   createStaticAssetPublicUrlMap,
@@ -46,6 +47,20 @@ import {
   resolveEvolitExtensions,
   runRequestExtensions,
 } from "./extensions.js";
+
+function isBarePackageModuleId(value) {
+  return typeof value === "string"
+    && value.length > 0
+    && !value.startsWith(".")
+    && !value.startsWith("/")
+    && !value.startsWith("@/")
+    && !value.startsWith("#")
+    && !value.startsWith("file:")
+    && !value.startsWith("node:")
+    && !value.startsWith("data:")
+    && !value.startsWith("http:")
+    && !value.startsWith("https:");
+}
 const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".css", "text/css; charset=utf-8"],
   [".svg", "image/svg+xml"],
@@ -240,27 +255,32 @@ export async function createRequestRenderer({
   extensions = [],
 }) {
   let currentAssetManifest = normalizeClientAssetManifest(assetManifest);
-  let currentAssetResolver = createAssetResolver(projectRoot, {
-    assetManifest: currentAssetManifest,
-  });
   const extensionClientDescriptors = getExtensionClientDescriptors(extensions);
   const extensionClientSpecifiers = extensionClientDescriptors.map((descriptor) => descriptor.module);
-  const sharedVendorOptions = { additionalEntrySpecifiers: extensionClientSpecifiers };
-  let currentHydrationModuleUrl = await resolveSharedVendorModuleUrl(
-    projectRoot,
-    mode,
-    "@litsx/ssr/hydration",
-    sharedVendorOptions,
+  const packageClientSpecifiers = new Set(extensionClientSpecifiers);
+  const persistedSharedImports = currentAssetManifest?.sharedImports ?? {};
+  const packageImports = new Map(Object.entries(persistedSharedImports));
+  const packageImportUrls = new Set(packageImports.values());
+  let currentAssetResolver = createAssetResolver(projectRoot, {
+    assetManifest: currentAssetManifest,
+    packageImports,
+  });
+  const sharedVendorOptions = { additionalEntrySpecifiers: [...packageClientSpecifiers] };
+  const resolveSharedModuleUrl = (specifier, options = sharedVendorOptions) => (
+    persistedSharedImports[specifier]
+    ?? (mode === "development"
+      ? resolveSharedVendorModuleUrl(projectRoot, mode, specifier, options)
+      : null)
   );
-  let currentNavigationModuleUrl = await resolveSharedVendorModuleUrl(
-    projectRoot,
-    mode,
+  let currentHydrationModuleUrl = await resolveSharedModuleUrl(
+    "@litsx/ssr/hydration",
+  );
+  let currentNavigationModuleUrl = await resolveSharedModuleUrl(
     "evolit/navigation",
-    sharedVendorOptions,
   );
   let currentNavigationExtensions = await Promise.all(extensionClientDescriptors.map(async (descriptor) => ({
     ...descriptor,
-    module: await resolveSharedVendorModuleUrl(projectRoot, mode, descriptor.module, sharedVendorOptions),
+    module: await resolveSharedModuleUrl(descriptor.module),
   })));
   const devBundledEntries = new Set();
   const devPreparedClientModules = new Set();
@@ -359,11 +379,13 @@ export async function createRequestRenderer({
       retainOutputPaths: devPreviousAssetOutputPaths,
       serverAssetImportsByEntry: devServerAssetImportsByEntry,
       clientBoundariesByEntry: devClientBoundariesByEntry,
+      additionalVendorSpecifiers: [...packageClientSpecifiers],
     });
     currentAssetManifest = bundledClientAssets.manifest;
     devPreviousAssetOutputPaths = new Set();
     currentAssetResolver = createAssetResolver(projectRoot, {
       assetManifest: currentAssetManifest,
+      packageImports,
     });
     currentHydrationModuleUrl = await resolveSharedVendorModuleUrl(
       projectRoot,
@@ -405,6 +427,7 @@ export async function createRequestRenderer({
     return (
       typeof currentAssetResolver(moduleId) === "string"
       || typeof currentAssetManifest?.byPublicPath?.[moduleId] === "string"
+      || packageImportUrls.has(moduleId)
     );
   }
 
@@ -447,6 +470,46 @@ export async function createRequestRenderer({
     ].filter((moduleId) => typeof moduleId === "string" && moduleId.length > 0))];
     const unresolvedModules = [];
     for (const moduleId of renderedModules) {
+      const packageSpecifier = isBarePackageModuleId(moduleId)
+        ? moduleId
+        : await canonicalizePackageModuleId(projectRoot, moduleId, packageClientSpecifiers);
+      if (packageSpecifier) {
+        packageClientSpecifiers.add(packageSpecifier);
+        sharedVendorOptions.additionalEntrySpecifiers = [...packageClientSpecifiers].sort();
+        const publicUrl = packageImports.get(packageSpecifier) ?? await resolveSharedModuleUrl(
+          packageSpecifier,
+          {
+            assetManifest: currentAssetManifest,
+            entryClientModules: [...devBundledEntries],
+            additionalEntrySpecifiers: sharedVendorOptions.additionalEntrySpecifiers,
+          },
+        );
+        if (publicUrl) {
+          const previousPublicUrl = currentAssetResolver(moduleId);
+          packageImports.set(packageSpecifier, publicUrl);
+          packageImportUrls.add(publicUrl);
+          currentAssetResolver = createAssetResolver(projectRoot, {
+            assetManifest: currentAssetManifest,
+            packageImports,
+          });
+          for (const root of result.hydrationData?.roots ?? []) {
+            if (root?.moduleId === moduleId) root.moduleId = packageSpecifier;
+          }
+          if (Array.isArray(result.clientImports)) {
+            result.clientImports = result.clientImports.map((value) => (
+              value === moduleId || value === previousPublicUrl ? publicUrl : value
+            ));
+          }
+          if (Array.isArray(result.hydrationData?.clientImports)) {
+            result.hydrationData.clientImports = result.hydrationData.clientImports.map((value) => (
+              value === moduleId || value === previousPublicUrl ? publicUrl : value
+            ));
+          }
+          continue;
+        }
+        unresolvedModules.push(moduleId);
+        continue;
+      }
       const sourcePath = await resolveRenderedClientSource(moduleId, routeResult);
       if (sourcePath) devKnownClientBoundarySources.add(path.resolve(sourcePath));
       if (hasClientArtifact(moduleId)) continue;
@@ -575,6 +638,7 @@ export async function createRequestRenderer({
           result.hydrationData,
           projectRoot,
           resolveHydrationRootClientImports(result.hydrationData, currentAssetResolver),
+          currentAssetResolver,
         ),
         assetResolver(moduleId) {
           return currentAssetResolver(moduleId);
@@ -591,9 +655,10 @@ export async function createRequestRenderer({
           result.hydrationData,
           projectRoot,
           resolveHydrationRootClientImports(
-              result.hydrationData,
-              currentAssetResolver,
-            ),
+            result.hydrationData,
+            currentAssetResolver,
+          ),
+          currentAssetResolver,
         ),
       );
     },
@@ -678,6 +743,7 @@ export async function createRequestRenderer({
           currentAssetManifest = null;
           currentAssetResolver = createAssetResolver(projectRoot, {
             assetManifest: currentAssetManifest,
+            packageImports,
           });
           devRollupCache = null;
           for (const clientModule of affectedClientModules) {
@@ -726,11 +792,24 @@ export async function createRequestRenderer({
       ])));
       const inventory = {
         clientBoundaries: [...new Set([...inventoriesByEntry.values()].flatMap((entry) => entry.clientBoundaries))].sort(),
+        packageClientBoundaries: [...new Map(
+          [...inventoriesByEntry.values()]
+            .flatMap((entry) => entry.packageClientBoundaries ?? [])
+            .map((entry) => [entry.specifier, entry]),
+        ).values()].sort((left, right) => left.specifier.localeCompare(right.specifier)),
         styles: [...new Set([...inventoriesByEntry.values()].flatMap((entry) => entry.styles))].sort(),
         assets: [...new Set([...inventoriesByEntry.values()].flatMap((entry) => entry.assets))].sort(),
         sourceFiles: [...new Set([...inventoriesByEntry.values()].flatMap((entry) => entry.sourceFiles))].sort(),
       };
-      const clientBoundaries = inventory.clientBoundaries;
+      const packageBoundarySources = new Set(
+        inventory.packageClientBoundaries.map((entry) => entry.sourcePath),
+      );
+      for (const packageBoundary of inventory.packageClientBoundaries) {
+        packageClientSpecifiers.add(packageBoundary.specifier);
+      }
+      sharedVendorOptions.additionalEntrySpecifiers = [...packageClientSpecifiers].sort();
+      const clientBoundaries = inventory.clientBoundaries
+        .filter((clientBoundary) => !packageBoundarySources.has(clientBoundary));
       for (const clientBoundary of clientBoundaries) {
         devKnownClientBoundarySources.add(path.resolve(clientBoundary));
       }
@@ -747,6 +826,8 @@ export async function createRequestRenderer({
           assets: entryInventory.assets.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
         };
         devClientBoundariesByEntry[entryKey] = entryInventory.clientBoundaries
+          .filter((filePath) => !(entryInventory.packageClientBoundaries ?? [])
+            .some((packageBoundary) => packageBoundary.sourcePath === filePath))
           .map((filePath) => getCompiledClientModule(projectRoot, filePath))
           .sort();
       }

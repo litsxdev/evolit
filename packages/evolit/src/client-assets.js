@@ -172,32 +172,56 @@ export async function resolvePackageRoot(packageName, options = {}) {
         resolutionError = error;
       }
     }
-    if (!packageEntryPath) {
-      throw resolutionError ?? new Error(`Unable to resolve package entry for ${packageName}`);
-    }
-    let currentPath = path.dirname(packageEntryPath);
+    if (packageEntryPath) {
+      let currentPath = path.dirname(packageEntryPath);
 
-    while (true) {
-      const packageJsonPath = path.join(currentPath, "package.json");
+      while (true) {
+        const packageJsonPath = path.join(currentPath, "package.json");
 
-      try {
-        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
-        if (packageJson?.name === packageName) {
-          return { packageRoot: currentPath, packageJson };
+        try {
+          const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+          if (packageJson?.name === packageName) {
+            return { packageRoot: currentPath, packageJson };
+          }
+        } catch {
+          // Keep walking up until we find the owning package root.
         }
-      } catch {
-        // Keep walking up until we find the owning package root.
-      }
 
-      const parentPath = path.dirname(currentPath);
-      if (parentPath === currentPath) {
-        break;
-      }
+        const parentPath = path.dirname(currentPath);
+        if (parentPath === currentPath) {
+          break;
+        }
 
-      currentPath = parentPath;
+        currentPath = parentPath;
+      }
     }
 
-    throw new Error(`Unable to resolve package root for ${packageName}`);
+    const packageSegments = packageName.split("/");
+    const validPackageSegments = packageSegments.length === 1
+      || (packageSegments.length === 2 && packageSegments[0].startsWith("@"));
+    if (validPackageSegments && packageSegments.every((segment) => segment && segment !== "." && segment !== "..")) {
+      let currentPath = resolveFrom;
+      while (true) {
+        const packageJsonPath = path.join(currentPath, "node_modules", ...packageSegments, "package.json");
+        try {
+          const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+          if (packageJson?.name === packageName) {
+            return {
+              packageRoot: await fs.realpath(path.dirname(packageJsonPath)),
+              packageJson,
+            };
+          }
+        } catch {
+          // Continue through the normal node_modules ancestor lookup.
+        }
+
+        const parentPath = path.dirname(currentPath);
+        if (parentPath === currentPath) break;
+        currentPath = parentPath;
+      }
+    }
+
+    throw resolutionError ?? new Error(`Unable to resolve package root for ${packageName}`);
   })();
 
   packageRootCache.set(cacheKey, pendingResolution);
@@ -320,6 +344,79 @@ export async function resolveBrowserSpecifierFilePath(specifier, options = {}) {
     browserSpecifierFilePathCache.delete(cacheKey);
     throw error;
   }
+}
+
+export async function resolveDeclaredPackageNames(projectRoot) {
+  try {
+    const packageJson = JSON.parse(await fs.readFile(path.join(projectRoot, "package.json"), "utf8"));
+    return new Set([
+      ...Object.keys(packageJson.dependencies ?? {}),
+      ...Object.keys(packageJson.optionalDependencies ?? {}),
+      ...Object.keys(packageJson.peerDependencies ?? {}),
+      ...Object.keys(packageJson.devDependencies ?? {}),
+    ]);
+  } catch (error) {
+    if (error?.code === "ENOENT") return new Set();
+    throw error;
+  }
+}
+
+export async function canonicalizePackageModuleId(projectRoot, moduleId, packageSpecifiers = []) {
+  const declaredPackageNames = await resolveDeclaredPackageNames(projectRoot);
+  const specifiers = [...new Set(packageSpecifiers)]
+    .filter((specifier) => {
+      const parsed = parsePackageSpecifier(specifier);
+      return parsed && declaredPackageNames.has(parsed.packageName);
+    });
+  if (specifiers.includes(moduleId)) {
+    return moduleId;
+  }
+
+  let sourcePath = null;
+  if (typeof moduleId === "string" && moduleId.startsWith("file:")) {
+    try { sourcePath = fileURLToPath(moduleId); } catch { return null; }
+  } else if (typeof moduleId === "string" && path.isAbsolute(moduleId)) {
+    sourcePath = moduleId;
+  }
+  if (!sourcePath || sourcePath.startsWith(`${path.sep}_evolit${path.sep}`)) {
+    return null;
+  }
+
+  let realSourcePath;
+  try {
+    realSourcePath = await fs.realpath(sourcePath);
+  } catch {
+    realSourcePath = path.resolve(sourcePath);
+  }
+
+  const exactMatches = [];
+  const packageMatches = [];
+  for (const specifier of specifiers) {
+    const parsed = parsePackageSpecifier(specifier);
+    try {
+      const [{ packageRoot }, entryPath] = await Promise.all([
+        resolvePackageRoot(parsed.packageName, { projectRoot }),
+        resolveBrowserSpecifierFilePath(specifier, { projectRoot }),
+      ]);
+      const [realPackageRoot, realEntryPath] = await Promise.all([
+        fs.realpath(packageRoot),
+        fs.realpath(entryPath),
+      ]);
+      const relativePath = path.relative(realPackageRoot, realSourcePath);
+      const belongsToPackage = relativePath === ""
+        || (relativePath !== ".."
+          && !relativePath.startsWith(`..${path.sep}`)
+          && !path.isAbsolute(relativePath));
+      if (!belongsToPackage) continue;
+      packageMatches.push(specifier);
+      if (realEntryPath === realSourcePath) exactMatches.push(specifier);
+    } catch {
+      // An unrelated or unavailable optional package cannot own this module.
+    }
+  }
+
+  if (exactMatches.length === 1) return exactMatches[0];
+  return packageMatches.length === 1 ? packageMatches[0] : null;
 }
 
 export function getSharedOutputRoot(projectRoot, mode) {
@@ -1140,6 +1237,10 @@ function toPublicHydrationModuleId(projectRoot, moduleId) {
     return `/${relativePath}`;
   }
 
+  if (isBareSpecifier(moduleId)) {
+    return moduleId;
+  }
+
   if (moduleId.startsWith("/")) {
     return moduleId;
   }
@@ -1171,10 +1272,17 @@ function getServerOutputRoot(projectRoot) {
 
 export function createAssetResolver(projectRoot, options = {}) {
   const assetManifest = normalizeClientAssetManifest(options.assetManifest);
+  const packageImports = options.packageImports instanceof Map
+    ? options.packageImports
+    : new Map(Object.entries(options.packageImports ?? {}));
 
   return function assetResolver(moduleId) {
     if (typeof moduleId !== "string" || moduleId.length === 0) {
       return null;
+    }
+
+    if (packageImports.has(moduleId)) {
+      return packageImports.get(moduleId);
     }
 
     let relativeClientModule = null;
@@ -1278,6 +1386,7 @@ export function normalizeHydrationDataForClient(
   hydrationData,
   projectRoot = null,
   additionalClientImports = [],
+  assetResolver = null,
 ) {
   if (!hydrationData || typeof hydrationData !== "object") {
     return hydrationData ?? null;
@@ -1314,7 +1423,9 @@ export function normalizeHydrationDataForClient(
   const clientImports = [...new Set([
     ...(Array.isArray(hydrationData.clientImports) ? hydrationData.clientImports : []),
     ...(Array.isArray(additionalClientImports) ? additionalClientImports : []),
-  ].filter((value) => typeof value === "string" && value.length > 0))];
+  ]
+    .map((value) => typeof assetResolver === "function" ? assetResolver(value) ?? value : value)
+    .filter((value) => typeof value === "string" && value.length > 0))];
 
   Object.defineProperties(normalizedHydrationData, {
     payload: {
@@ -1844,10 +1955,15 @@ async function bundleClientAssets(projectRoot, options = {}) {
   const scriptAssetRecords = [];
   let nextRollupCache = options.rollupCache ?? null;
   if (Object.keys(inputEntries).length > 0) {
-    const sharedVendorSpecifiers = await collectClientVendorSpecifiers(projectRoot, [], {
-      mode,
-      entryClientModules: [...entryClientModules],
-    });
+    const sharedVendorSpecifiers = [...new Set([
+      ...await collectClientVendorSpecifiers(projectRoot, [], {
+        mode,
+        entryClientModules: [...entryClientModules],
+      }),
+      ...(Array.isArray(options.additionalVendorSpecifiers)
+        ? options.additionalVendorSpecifiers.filter((specifier) => isBareSpecifier(specifier))
+        : []),
+    ])].sort();
     const sharedRuntime = await buildSharedVendorRuntime(projectRoot, mode, {
       additionalEntrySpecifiers: sharedVendorSpecifiers,
     });
@@ -2285,6 +2401,9 @@ export function normalizeClientAssetManifest(manifest) {
     chunks: Array.isArray(manifest.chunks) ? manifest.chunks : [],
     styles: Array.isArray(manifest.styles) ? manifest.styles : [],
     resources: Array.isArray(manifest.resources) ? manifest.resources : [],
+    sharedImports: manifest.sharedImports && typeof manifest.sharedImports === "object"
+      ? manifest.sharedImports
+      : {},
     serverAssetImportsByEntry:
       manifest.serverAssetImportsByEntry && typeof manifest.serverAssetImportsByEntry === "object"
         ? manifest.serverAssetImportsByEntry

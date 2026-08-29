@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import {
   buildSharedVendorRuntime,
+  canonicalizePackageModuleId,
   collectClientVendorSpecifiers,
   collectSharedVendorSpecifiers,
   createBrowserSpecifierPublicUrl,
@@ -102,6 +103,83 @@ test("package root resolution falls back to the package entry when package.json 
     assert.equal(resolution.packageJson.name, packageName);
   } finally {
     await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("package roots resolve import-only browser packages without a package.json export", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-browser-package-root-"));
+  const packageName = "@fixture/browser-import-only";
+
+  try {
+    const packageRoot = await writeFixturePackage(
+      projectRoot,
+      packageName,
+      {
+        type: "module",
+        exports: {
+          ".": { browser: "./browser.js", import: "./index.js" },
+        },
+      },
+      {
+        "browser.js": 'export const runtime = "browser";\n',
+        "index.js": 'export const runtime = "import";\n',
+      },
+    );
+
+    const resolution = await resolvePackageRoot(packageName, { projectRoot });
+    assert.equal(resolution.packageRoot, await fs.realpath(packageRoot));
+    assert.equal(
+      await resolveBrowserSpecifierFilePath(packageName, { projectRoot }),
+      path.join(await fs.realpath(packageRoot), "browser.js"),
+    );
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("physical workspace package modules canonicalize to their exported package subpath", async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-workspace-package-"));
+  const projectRoot = path.join(workspaceRoot, "apps", "site");
+  const packageRoot = path.join(workspaceRoot, "packages", "features");
+  const packageName = "@fixture/workspace-features";
+
+  try {
+    await fs.mkdir(path.join(projectRoot, "node_modules", "@fixture"), { recursive: true });
+    await fs.writeFile(path.join(projectRoot, "package.json"), JSON.stringify({
+      name: "fixture-site",
+      private: true,
+      dependencies: { [packageName]: "workspace:*" },
+    }), "utf8");
+    await fs.mkdir(path.join(packageRoot, "dist"), { recursive: true });
+    await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
+      name: packageName,
+      type: "module",
+      exports: { "./features": { browser: "./dist/features.mjs", import: "./dist/features.mjs" } },
+    }), "utf8");
+    const entryPath = path.join(packageRoot, "dist", "features.mjs");
+    await fs.writeFile(entryPath, "export class Feature {}\n", "utf8");
+    await fs.symlink(packageRoot, path.join(projectRoot, "node_modules", "@fixture", "workspace-features"), "dir");
+
+    assert.equal(
+      await canonicalizePackageModuleId(projectRoot, entryPath, [`${packageName}/features`]),
+      `${packageName}/features`,
+    );
+    assert.equal(
+      await canonicalizePackageModuleId(
+        projectRoot,
+        pathToFileURL(entryPath).href,
+        [`${packageName}/features`],
+      ),
+      `${packageName}/features`,
+    );
+    const packageJsonPath = path.join(projectRoot, "package.json");
+    await fs.writeFile(packageJsonPath, JSON.stringify({ name: "fixture-site", private: true }), "utf8");
+    assert.equal(
+      await canonicalizePackageModuleId(projectRoot, entryPath, [`${packageName}/features`]),
+      null,
+    );
+  } finally {
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
   }
 });
 
@@ -515,6 +593,43 @@ test("resolveHydrationRootClientImports includes component modules without route
   ]);
 });
 
+test("package hydration roots resolve through the canonical shared vendor mapping", () => {
+  const resolver = createAssetResolver("/workspace/site", {
+    assetManifest: { assets: [], byClientModule: {} },
+    packageImports: {
+      "@fixture/components/features": "/_evolit/shared/vendor-fixture/features.mjs",
+    },
+  });
+  const hydrationData = {
+    version: 1,
+    roots: [
+      { id: "root-0", moduleId: "@fixture/components/features" },
+      { id: "root-1", moduleId: "@fixture/components/features" },
+    ],
+    clientImports: ["@fixture/components/features"],
+  };
+
+  assert.deepEqual(resolveHydrationRootClientImports(hydrationData, resolver), [
+    "/_evolit/shared/vendor-fixture/features.mjs",
+  ]);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(normalizeHydrationDataForClient(
+      hydrationData,
+      "/workspace/site",
+      resolveHydrationRootClientImports(hydrationData, resolver),
+      resolver,
+    ))),
+    {
+      version: 1,
+      roots: [
+        { id: "root-0", moduleId: "@fixture/components/features" },
+        { id: "root-1", moduleId: "@fixture/components/features" },
+      ],
+      clientImports: ["/_evolit/shared/vendor-fixture/features.mjs"],
+    },
+  );
+});
+
 test("createHydrationBootstrap registers route client imports alongside hydration roots", () => {
   const bootstrap = createHydrationBootstrap({
     hydrationData: {
@@ -688,6 +803,9 @@ test("normalizeHydrationDataForClient rewrites project-absolute module ids to pu
 test("client asset manifest helpers normalize and query structured asset entries", () => {
   const manifest = normalizeClientAssetManifest({
     resources: ["app/components/card-accent.svg"],
+    sharedImports: {
+      "@fixture/components/features": "/_evolit/shared/vendor-fixture/features.mjs",
+    },
     assets: [
       {
         clientModule: "app/page.mjs",
@@ -705,6 +823,9 @@ test("client asset manifest helpers normalize and query structured asset entries
   assert.equal(manifest.version, 1);
   assert.equal(manifest.publicPathPrefix, "/_evolit/static/");
   assert.deepEqual(manifest.resources, ["app/components/card-accent.svg"]);
+  assert.deepEqual(manifest.sharedImports, {
+    "@fixture/components/features": "/_evolit/shared/vendor-fixture/features.mjs",
+  });
   assert.equal(
     getAssetByClientModule(manifest, "app/page.mjs")?.publicUrl,
     "/_evolit/static/app/page.hash.mjs",

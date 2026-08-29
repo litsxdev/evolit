@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { buildProject } from "../src/build.js";
+import { buildProject, collectSsrDevDependencyWarnings } from "../src/build.js";
 import { createStartServer } from "../src/server.js";
 import { scaffoldSite } from "../src/scaffold.js";
 
@@ -22,6 +22,26 @@ let deployServerManifest;
 let builtRuntimeEntry;
 const cardBadgePngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII=";
 const cardBadgeSpecialPngFile = "card badge@2x.png";
+
+test("SSR dev dependency warnings only include packages absent from production dependency fields", () => {
+  assert.deepEqual(collectSsrDevDependencyWarnings({
+    dependencies: { "runtime-package": "^1.0.0" },
+    optionalDependencies: { "optional-package": "^1.0.0" },
+    peerDependencies: { "peer-package": "^1.0.0" },
+    devDependencies: {
+      "runtime-package": "^1.0.0",
+      "dev-only-package": "^1.0.0",
+      "@fixture/dev-only": "workspace:*",
+    },
+  }, [
+    "runtime-package/subpath",
+    "optional-package",
+    "peer-package/client",
+    "dev-only-package/feature",
+    "@fixture/dev-only/components",
+    "transitive-but-undeclared",
+  ]), ["@fixture/dev-only", "dev-only-package"]);
+});
 
 function createCounterPageSource(cacheExport, counterKey, label) {
   return [

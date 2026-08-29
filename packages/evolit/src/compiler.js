@@ -840,6 +840,7 @@ async function rewriteRelativeSpecifiers({
   staticAssetFiles,
   managedSourceRoots,
   serverExportsByModule,
+  packageImports,
 }) {
   const magicSource = new MagicString(code);
   let didRewrite = false;
@@ -862,6 +863,15 @@ async function rewriteRelativeSpecifiers({
     const packageAssetPath = packageImportPath && isStaticAssetPath(packageImportPath)
       ? packageImportPath
       : null;
+
+    if (
+      target === "server"
+      && isBareSpecifier(specifier)
+      && !aliasedImportPath
+      && !packageAssetPath
+    ) {
+      packageImports?.add(specifier);
+    }
 
     if (
       target === "client"
@@ -1152,6 +1162,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
   const staticAssetFiles = new Set();
   const moduleMetadata = new Map();
   const serverExportsByModule = new Map();
+  const packageImports = new Set();
   const serverImportQuery = target === "server" && mode === "development"
     ? `t=${Date.now()}`
     : null;
@@ -1221,6 +1232,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
       staticAssetFiles,
       managedSourceRoots,
       serverExportsByModule,
+      packageImports,
     });
 
     await fs.writeFile(outputPath, rewritten.code, "utf8");
@@ -1250,6 +1262,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
     entrypoint: await compileModule(entryPath),
     outputRoot,
     sourceFiles: [...new Set([...visited.keys(), ...staticAssetFiles])],
+    packageImports: [...packageImports].sort(),
   };
 }
 
@@ -1314,6 +1327,7 @@ export async function collectClientGraphInventory(entryPaths, options = {}) {
   const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
   const visited = new Set();
   const boundaries = new Set();
+  const packageBoundaries = new Map();
   const styles = new Set();
   const assets = new Set();
 
@@ -1422,7 +1436,10 @@ export async function collectClientGraphInventory(entryPaths, options = {}) {
       if (!resolved) continue;
       if (shouldCompileModule(resolved)) {
         if (isBareSpecifier(specifier) && aliasResolved == null) {
-          if (componentImportSpecifiers.has(specifier)) boundaries.add(resolved);
+          if (componentImportSpecifiers.has(specifier)) {
+            boundaries.add(resolved);
+            packageBoundaries.set(specifier, resolved);
+          }
         } else {
           await visit(resolved, true);
         }
@@ -1438,6 +1455,9 @@ export async function collectClientGraphInventory(entryPaths, options = {}) {
   for (const entryPath of entryPaths) await visit(entryPath);
   return {
     clientBoundaries: [...boundaries].sort(),
+    packageClientBoundaries: [...packageBoundaries]
+      .map(([specifier, sourcePath]) => ({ specifier, sourcePath }))
+      .sort((left, right) => left.specifier.localeCompare(right.specifier)),
     styles: [...styles].sort(),
     assets: [...assets].sort(),
     sourceFiles: [...visited].sort(),

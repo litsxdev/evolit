@@ -10,6 +10,8 @@ import {
 import {
   collectTransitiveAssetPreloads,
   collectTransitiveStyleUrls,
+  buildSharedVendorRuntime,
+  canonicalizePackageModuleId,
   createAssetResolver,
   createHydrationBootstrap,
   createStaticAssetPublicUrlMap,
@@ -70,6 +72,31 @@ const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".js", "text/javascript; charset=utf-8"],
 ]);
 
+function getBarePackageName(specifier) {
+  if (typeof specifier !== "string" || specifier.length === 0) return null;
+  const segments = specifier.split("/");
+  return specifier.startsWith("@")
+    ? segments.length >= 2 ? `${segments[0]}/${segments[1]}` : null
+    : segments[0];
+}
+
+export function collectSsrDevDependencyWarnings(packageJson, packageSpecifiers) {
+  const productionDependencies = new Set([
+    ...Object.keys(packageJson?.dependencies ?? {}),
+    ...Object.keys(packageJson?.optionalDependencies ?? {}),
+    ...Object.keys(packageJson?.peerDependencies ?? {}),
+  ]);
+  const devDependencies = new Set(Object.keys(packageJson?.devDependencies ?? {}));
+  return [...new Set(packageSpecifiers
+    .map(getBarePackageName)
+    .filter((packageName) => (
+      packageName
+      && devDependencies.has(packageName)
+      && !productionDependencies.has(packageName)
+    )))]
+    .sort();
+}
+
 function getContentTypeForBuildArtifact(filePath) {
   return CONTENT_TYPE_BY_EXTENSION.get(path.extname(filePath)) ?? "application/octet-stream";
 }
@@ -128,12 +155,15 @@ async function writeDeploymentRuntimeEntry(buildRoot) {
   return runtimeEntryPath;
 }
 
-export async function buildProject(projectRoot) {
+export async function buildProject(projectRoot, options = {}) {
   const evolitConfig = await loadEvolitConfig(projectRoot);
   const extensions = resolveEvolitExtensions(evolitConfig);
   const extensionClientDescriptors = getExtensionClientDescriptors(extensions);
+  const packageClientSpecifiers = new Set(
+    extensionClientDescriptors.map((descriptor) => descriptor.module),
+  );
   const sharedVendorOptions = {
-    additionalEntrySpecifiers: extensionClientDescriptors.map((descriptor) => descriptor.module),
+    additionalEntrySpecifiers: [],
   };
   const routes = await discoverAppRoutes(projectRoot);
   const routeHandlers = await discoverAppRouteHandlers(projectRoot);
@@ -144,6 +174,19 @@ export async function buildProject(projectRoot) {
   const deployHandlers = [];
   const compiledClientBoundaries = new Map();
   const inventoriesBySourceEntry = new Map();
+  const ssrPackageImports = new Set();
+
+  async function compileProductionServerEntry(sourcePath) {
+    const result = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: false,
+      ssr: true,
+      target: "server",
+    });
+    result.packageImports.forEach((specifier) => ssrPackageImports.add(specifier));
+    return result;
+  }
 
   function getEntryInventory(entryPath) {
     let inventory = inventoriesBySourceEntry.get(entryPath);
@@ -174,13 +217,7 @@ export async function buildProject(projectRoot) {
   await ensureDirectory(buildRoot);
 
   for (const routeHandler of routeHandlers) {
-    await compileModuleGraph(routeHandler.handler, {
-      projectRoot,
-      mode: "production",
-      sourceMaps: false,
-      ssr: true,
-      target: "server",
-    });
+    await compileProductionServerEntry(routeHandler.handler);
 
     const handlerModule = await importCompiledModule(routeHandler.handler, {
       projectRoot,
@@ -204,22 +241,10 @@ export async function buildProject(projectRoot) {
   }
 
   for (const route of routes) {
-    await compileModuleGraph(route.page, {
-      projectRoot,
-      mode: "production",
-      sourceMaps: false,
-      ssr: true,
-      target: "server",
-    });
+    await compileProductionServerEntry(route.page);
 
     for (const layoutPath of route.layouts) {
-      await compileModuleGraph(layoutPath, {
-        projectRoot,
-        mode: "production",
-        sourceMaps: false,
-        ssr: true,
-        target: "server",
-      });
+      await compileProductionServerEntry(layoutPath);
 
     }
 
@@ -228,13 +253,7 @@ export async function buildProject(projectRoot) {
       ...(route.errorBoundaries ?? []).map((boundary) => boundary.module),
     ];
     for (const boundaryPath of new Set(boundaryModules)) {
-      await compileModuleGraph(boundaryPath, {
-        projectRoot,
-        mode: "production",
-        sourceMaps: false,
-        ssr: true,
-        target: "server",
-      });
+      await compileProductionServerEntry(boundaryPath);
     }
 
     const toProjectRelative = (filePath) => path.relative(projectRoot, filePath).split(path.sep).join("/");
@@ -247,13 +266,21 @@ export async function buildProject(projectRoot) {
     const allAssets = new Set();
     const allClientBoundaries = new Set();
     for (const [entryPath, entryInventory] of inventoriesByEntry) {
+      const packageBoundarySources = new Set(
+        (entryInventory.packageClientBoundaries ?? []).map((entry) => entry.sourcePath),
+      );
+      for (const packageBoundary of entryInventory.packageClientBoundaries ?? []) {
+        packageClientSpecifiers.add(packageBoundary.specifier);
+      }
       serverAssetImportsByEntry[toProjectRelative(entryPath)] = {
         styles: entryInventory.styles.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
         assets: entryInventory.assets.map((filePath) => getClientStaticAssetModule(projectRoot, filePath)),
       };
       entryInventory.styles.forEach((filePath) => allStyles.add(filePath));
       entryInventory.assets.forEach((filePath) => allAssets.add(filePath));
-      entryInventory.clientBoundaries.forEach((filePath) => allClientBoundaries.add(filePath));
+      entryInventory.clientBoundaries
+        .filter((filePath) => !packageBoundarySources.has(filePath))
+        .forEach((filePath) => allClientBoundaries.add(filePath));
     }
     await emitClientStaticAssets([...allStyles, ...allAssets], {
       projectRoot,
@@ -268,10 +295,21 @@ export async function buildProject(projectRoot) {
     }
     for (const [entryPath, entryInventory] of inventoriesByEntry) {
       clientBoundariesByEntry[toProjectRelative(entryPath)] = entryInventory.clientBoundaries
+        .filter((clientBoundary) => !(entryInventory.packageClientBoundaries ?? [])
+          .some((packageBoundary) => packageBoundary.sourcePath === clientBoundary))
         .map((clientBoundary) => compiledBoundaryModules.get(clientBoundary))
         .filter(Boolean)
         .sort();
     }
+  }
+
+  const projectPackageJson = JSON.parse(await fs.readFile(path.join(projectRoot, "package.json"), "utf8"));
+  const warn = options.onWarning ?? console.warn;
+  for (const packageName of collectSsrDevDependencyWarnings(projectPackageJson, [...ssrPackageImports])) {
+    warn(
+      `[evolit] Production SSR imports ${JSON.stringify(packageName)}, but it is declared only in devDependencies. `
+      + "Move it to dependencies or ensure production installations include development dependencies.",
+    );
   }
 
   const configuredClientBoundaries = evolitConfig.clientBoundaries ?? [];
@@ -295,8 +333,10 @@ export async function buildProject(projectRoot) {
     await compileProductionClientBoundary(sourcePath);
   }
 
+  sharedVendorOptions.additionalEntrySpecifiers = [...packageClientSpecifiers].sort();
   const clientAssets = await emitBundledClientAssets(projectRoot, {
     entryClientModules,
+    additionalVendorSpecifiers: sharedVendorOptions.additionalEntrySpecifiers,
     serverAssetImportsByEntry,
     clientBoundariesByEntry,
   });
@@ -306,8 +346,12 @@ export async function buildProject(projectRoot) {
   const routeResolver = await createRouteResolver(projectRoot, "production", {
     staticAssetPublicUrls,
   });
+  const sharedRuntime = await buildSharedVendorRuntime(projectRoot, "production", sharedVendorOptions);
+  clientAssets.sharedImports = { ...sharedRuntime.imports };
+  const packageImports = sharedRuntime.imports;
   const assetResolver = createAssetResolver(projectRoot, {
     assetManifest: clientAssets,
+    packageImports,
   });
   const hydrationModuleUrl = await resolveSharedVendorModuleUrl(
     projectRoot,
@@ -341,6 +385,33 @@ export async function buildProject(projectRoot) {
       ].filter((moduleId) => typeof moduleId === "string" && moduleId.length > 0))];
       const unresolved = [];
       for (const moduleId of renderedModules) {
+        const packageSpecifier = await canonicalizePackageModuleId(
+          projectRoot,
+          moduleId,
+          packageClientSpecifiers,
+        );
+        if (packageSpecifier) {
+          const publicUrl = packageImports[packageSpecifier] ?? null;
+          if (!publicUrl) {
+            unresolved.push(moduleId);
+            continue;
+          }
+          const previousPublicUrl = assetResolver(moduleId);
+          for (const root of result.hydrationData?.roots ?? []) {
+            if (root?.moduleId === moduleId) root.moduleId = packageSpecifier;
+          }
+          if (Array.isArray(result.clientImports)) {
+            result.clientImports = result.clientImports.map((value) => (
+              value === moduleId || value === previousPublicUrl ? publicUrl : value
+            ));
+          }
+          if (Array.isArray(result.hydrationData?.clientImports)) {
+            result.hydrationData.clientImports = result.hydrationData.clientImports.map((value) => (
+              value === moduleId || value === previousPublicUrl ? publicUrl : value
+            ));
+          }
+          continue;
+        }
         if (assetResolver(moduleId) || clientAssets.byPublicPath?.[moduleId]) continue;
         const importerPath = routeResult.boundaryModule
           ?? routeResult.route?.page
@@ -406,6 +477,7 @@ export async function buildProject(projectRoot) {
           result.hydrationData,
           projectRoot,
           resolveHydrationRootClientImports(result.hydrationData, assetResolver),
+          assetResolver,
         ),
         assetResolver,
         hydrationModuleUrl,
@@ -420,6 +492,7 @@ export async function buildProject(projectRoot) {
           result.hydrationData,
           projectRoot,
           resolveHydrationRootClientImports(result.hydrationData, assetResolver),
+          assetResolver,
         ),
       );
     },

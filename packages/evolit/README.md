@@ -60,7 +60,16 @@ Evolit resolves package subpaths with ESM `import` conditions, emits exported CS
 route static-asset pipeline, and adds the resulting stylesheet URLs to the rendered document.
 Relative `@import` rules and `url(...)` references inside package CSS are emitted and rewritten
 from their location within `node_modules`. Bare package imports that resolve to JavaScript continue
-to use the shared vendor runtime; CSS and other static assets do not enter vendor chunks.
+to use the shared vendor runtime; hydration metadata uses that same canonical package URL so an
+external component is evaluated only once. CSS and other static assets do not enter vendor chunks.
+
+Packages declared by the application remain package dependencies even when a workspace manager
+links them to sources elsewhere in a monorepo. Evolit uses the declared package name and its
+browser `exports` subpath as the public identity; the physical symlink or real filesystem path is
+used only to verify package ownership and is never exposed as an `__unmanaged__` client module.
+During `evolit build`, a package reached by the production SSR graph that is declared only in
+`devDependencies` produces a warning. Its package identity is preserved, but applications should
+move it to `dependencies` or keep development dependencies installed in the production runtime.
 
 ## Commands
 
