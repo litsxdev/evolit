@@ -41,6 +41,8 @@ const DEVELOPMENT_SHARED_VENDOR_SPECIFIERS = [
 const browserSpecifierFilePathCache = new Map();
 const packageRootCache = new Map();
 const sharedRuntimeBuildCache = new Map();
+const sharedRuntimeBuildQueues = new Map();
+const sharedVendorSpecifierRegistry = new Map();
 const clientVendorSpecifierCache = new Map();
 const clientModuleMetadataCache = new Map();
 
@@ -50,6 +52,8 @@ export function resetDevelopmentAssetCaches(projectRoot) {
 
   for (const cache of [
     sharedRuntimeBuildCache,
+    sharedRuntimeBuildQueues,
+    sharedVendorSpecifierRegistry,
     clientVendorSpecifierCache,
     clientModuleMetadataCache,
   ]) {
@@ -469,6 +473,58 @@ export async function collectSharedVendorSpecifiers(
   ])].sort();
 }
 
+async function groupDevelopmentVendorSpecifiers(projectRoot, additionalEntrySpecifiers) {
+  const baseSpecifiers = new Set([
+    ...SHARED_VENDOR_SPECIFIERS,
+    ...DEVELOPMENT_SHARED_VENDOR_SPECIFIERS,
+  ]);
+  const basePackageNames = new Set(
+    [...baseSpecifiers]
+      .map((specifier) => parsePackageSpecifier(specifier)?.packageName)
+      .filter(Boolean),
+  );
+  const packageGroups = new Map();
+
+  for (const specifier of additionalEntrySpecifiers) {
+    if (baseSpecifiers.has(specifier)) continue;
+    const parsedSpecifier = parsePackageSpecifier(specifier);
+    if (!parsedSpecifier) continue;
+    if (basePackageNames.has(parsedSpecifier.packageName)) {
+      baseSpecifiers.add(specifier);
+      continue;
+    }
+
+    const { packageRoot, packageJson } = await resolvePackageRoot(parsedSpecifier.packageName, {
+      projectRoot,
+    });
+    const realPackageRoot = await fs.realpath(packageRoot);
+    let group = packageGroups.get(realPackageRoot);
+    if (!group) {
+      const portablePackageRoot = path.relative(projectRoot, realPackageRoot)
+        .split(path.sep)
+        .join("/");
+      const groupIdentity = [
+        parsedSpecifier.packageName,
+        packageJson.version ?? "0.0.0",
+        portablePackageRoot,
+      ].join("\0");
+      group = {
+        vendorGroup: `vendor-${crypto.createHash("sha1").update(groupIdentity).digest("hex").slice(0, 10)}`,
+        specifiers: [],
+      };
+      packageGroups.set(realPackageRoot, group);
+    }
+    group.specifiers.push(specifier);
+  }
+
+  return {
+    baseSpecifiers: [...baseSpecifiers].sort(),
+    packageGroups: [...packageGroups.values()]
+      .map((group) => ({ ...group, specifiers: [...new Set(group.specifiers)].sort() }))
+      .sort((left, right) => left.vendorGroup.localeCompare(right.vendorGroup)),
+  };
+}
+
 async function createSharedRuntimeInputEntries(projectRoot, entriesRoot, specifiers) {
   await fs.rm(entriesRoot, { recursive: true, force: true });
   await ensureDirectory(entriesRoot);
@@ -662,28 +718,35 @@ export async function buildSharedVendorRuntime(
   mode = "development",
   options = {},
 ) {
-  const additionalEntrySpecifiers = [...new Set(
+  let additionalEntrySpecifiers = [...new Set(
     Array.isArray(options.additionalEntrySpecifiers)
       ? options.additionalEntrySpecifiers.filter((specifier) => isBareSpecifier(specifier))
       : [],
   )].sort();
+  if (!options.vendorGroup) {
+    const registryKey = `${path.resolve(projectRoot)}::${mode}::vendors`;
+    const knownSpecifiers = sharedVendorSpecifierRegistry.get(registryKey) ?? new Set();
+    additionalEntrySpecifiers.forEach((specifier) => knownSpecifiers.add(specifier));
+    sharedVendorSpecifierRegistry.set(registryKey, knownSpecifiers);
+    additionalEntrySpecifiers = [...knownSpecifiers].sort();
+  }
   if (mode === "development" && !options.vendorGroup) {
+    const developmentGroups = await groupDevelopmentVendorSpecifiers(
+      projectRoot,
+      additionalEntrySpecifiers,
+    );
     const baseRuntime = await buildSharedVendorRuntime(projectRoot, mode, {
       ...options,
-      additionalEntrySpecifiers: [],
+      additionalEntrySpecifiers: developmentGroups.baseSpecifiers,
       vendorGroup: "base",
-      includeBase: true,
+      includeBase: false,
     });
     const additionalRuntimes = await Promise.all(
-      additionalEntrySpecifiers
-        .filter((specifier) => ![
-          ...SHARED_VENDOR_SPECIFIERS,
-          ...DEVELOPMENT_SHARED_VENDOR_SPECIFIERS,
-        ].includes(specifier))
-        .map((specifier) => buildSharedVendorRuntime(projectRoot, mode, {
+      developmentGroups.packageGroups
+        .map((group) => buildSharedVendorRuntime(projectRoot, mode, {
           ...options,
-          additionalEntrySpecifiers: [specifier],
-          vendorGroup: `vendor-${crypto.createHash("sha1").update(specifier).digest("hex").slice(0, 10)}`,
+          additionalEntrySpecifiers: group.specifiers,
+          vendorGroup: group.vendorGroup,
           includeBase: false,
         })),
     );
@@ -703,7 +766,9 @@ export async function buildSharedVendorRuntime(
     return sharedRuntimeBuildCache.get(cacheKey);
   }
 
-  const pendingBuild = (async () => {
+  const queueKey = `${path.resolve(projectRoot)}::${mode}::${vendorGroup ?? "all"}`;
+  const previousBuild = sharedRuntimeBuildQueues.get(queueKey) ?? Promise.resolve();
+  const pendingBuild = previousBuild.catch(() => {}).then(async () => {
     const sharedRootBase = getSharedOutputRoot(projectRoot, mode);
     const sharedRoot = vendorGroup ? path.join(sharedRootBase, vendorGroup) : sharedRootBase;
     const entriesRoot = path.join(
@@ -794,7 +859,13 @@ export async function buildSharedVendorRuntime(
     } finally {
       await bundle.close();
     }
-  })();
+  });
+  sharedRuntimeBuildQueues.set(queueKey, pendingBuild);
+  void pendingBuild.finally(() => {
+    if (sharedRuntimeBuildQueues.get(queueKey) === pendingBuild) {
+      sharedRuntimeBuildQueues.delete(queueKey);
+    }
+  }).catch(() => {});
 
   sharedRuntimeBuildCache.set(cacheKey, pendingBuild);
 

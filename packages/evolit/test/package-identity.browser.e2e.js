@@ -10,7 +10,11 @@ import { scaffoldSite } from "../src/scaffold.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const frameworkNodeModules = path.resolve(frameworkRoot, "..", "..", "node_modules");
-const packageSpecifier = "@fixture/hydration-identity/features";
+const packageSpecifiers = {
+  blocks: "@fixture/hydration-identity/blocks",
+  components: "@fixture/hydration-identity/components",
+  features: "@fixture/hydration-identity/features",
+};
 
 async function waitForServer(url) {
   let lastResponse = null;
@@ -71,6 +75,14 @@ async function writeFixture(projectRoot, workspaceRoot) {
     type: "module",
     exports: {
       "./package.json": "./package.json",
+      "./blocks": {
+        browser: "./dist/blocks.mjs",
+        import: "./dist/blocks.mjs",
+      },
+      "./components": {
+        browser: "./dist/components.mjs",
+        import: "./dist/components.mjs",
+      },
       "./features": {
         browser: "./dist/features.mjs",
         import: "./dist/features.mjs",
@@ -78,49 +90,71 @@ async function writeFixture(projectRoot, workspaceRoot) {
     },
   }), "utf8");
   await fs.mkdir(path.join(packageRoot, "dist"), { recursive: true });
-  const packageEntry = path.join(packageRoot, "dist", "features.mjs");
-  await fs.writeFile(packageEntry, [
+  const internalEntry = path.join(packageRoot, "dist", "internal", "icon.mjs");
+  await fs.mkdir(path.dirname(internalEntry), { recursive: true });
+  await fs.writeFile(internalEntry, [
     'import { LITSX_MODULE_ID } from "@litsx/core/elements";',
     'import { LitElement, html } from "lit";',
-    "class InteractiveElement extends LitElement {",
+    "globalThis.__fixtureIconEvaluations = (globalThis.__fixtureIconEvaluations ?? 0) + 1;",
+    "export class FixtureIcon extends LitElement {",
+    `  static [LITSX_MODULE_ID] = ${JSON.stringify(internalEntry)};`,
+    '  static [Symbol.for("litsx.hydratableTag")] = "fixture-icon";',
+    '  static [Symbol.for("litsx.component")] = true;',
     "  count = 0;",
     "  increment() { this.count += 1; this.requestUpdate(); }",
     '  render() { return html`<button @click=${() => this.increment()}>count:${this.count}</button>`; }',
     "}",
-    "export class CatalogRoot extends InteractiveElement {",
-    `  static [LITSX_MODULE_ID] = ${JSON.stringify(packageEntry)};`,
-    '  static [Symbol.for("litsx.hydratableTag")] = "catalog-root";',
-    '  static [Symbol.for("litsx.component")] = true;',
-    "}",
-    "export class FiltersTrigger extends InteractiveElement {",
-    `  static [LITSX_MODULE_ID] = ${JSON.stringify(packageEntry)};`,
-    '  static [Symbol.for("litsx.hydratableTag")] = "filters-trigger";',
-    '  static [Symbol.for("litsx.component")] = true;',
-    "}",
     "",
   ].join("\n"), "utf8");
+  const entries = {
+    blocks: ["BlockRoot", "block-root"],
+    features: ["FeatureRoot", "feature-root"],
+  };
+  for (const [subpath, [className, tagName]] of Object.entries(entries)) {
+    const packageEntry = path.join(packageRoot, "dist", `${subpath}.mjs`);
+    await fs.writeFile(packageEntry, [
+      'import { LITSX_MODULE_ID } from "@litsx/core/elements";',
+      'import { LitElement, html } from "lit";',
+      'import { FixtureIcon } from "./internal/icon.mjs";',
+      `export class ${className} extends LitElement {`,
+      `  static [LITSX_MODULE_ID] = ${JSON.stringify(packageEntry)};`,
+      `  static [Symbol.for("litsx.hydratableTag")] = ${JSON.stringify(tagName)};`,
+      '  static [Symbol.for("litsx.component")] = true;',
+      '  static elements = { "fixture-icon": FixtureIcon };',
+      '  render() { return html`<fixture-icon></fixture-icon>`; }',
+      "}",
+      'export { FixtureIcon } from "./internal/icon.mjs";',
+      "",
+    ].join("\n"), "utf8");
+  }
+  await fs.writeFile(
+    path.join(packageRoot, "dist", "components.mjs"),
+    'export { FixtureIcon } from "./internal/icon.mjs";\n',
+    "utf8",
+  );
 
   await fs.mkdir(path.join(projectRoot, "app", "components"), { recursive: true });
   await fs.writeFile(path.join(projectRoot, "app", "components", "local-wrapper.jsx"), [
-    `import { FiltersTrigger } from ${JSON.stringify(packageSpecifier)};`,
+    `import { FixtureIcon } from ${JSON.stringify(packageSpecifiers.components)};`,
     "export default function LocalWrapper() {",
-    "  return <section><FiltersTrigger /></section>;",
+    "  return <section><FixtureIcon /></section>;",
     "}",
-    'LocalWrapper.elements = { "filters-trigger": FiltersTrigger };',
+    'LocalWrapper.elements = { "fixture-icon": FixtureIcon };',
     "",
   ].join("\n"), "utf8");
   await fs.writeFile(path.join(projectRoot, "app", "page.jsx"), [
-    `import { CatalogRoot } from ${JSON.stringify(packageSpecifier)};`,
+    `import { BlockRoot } from ${JSON.stringify(packageSpecifiers.blocks)};`,
+    `import { FeatureRoot } from ${JSON.stringify(packageSpecifiers.features)};`,
     'import LocalWrapper from "./components/local-wrapper.jsx";',
     "export default async function HomePage() {",
-    "  return <div><CatalogRoot /><LocalWrapper /></div>;",
+    '  return <div><BlockRoot /><FeatureRoot /><LocalWrapper /><a href="/other">other</a></div>;',
     "}",
     "",
   ].join("\n"), "utf8");
   await fs.mkdir(path.join(projectRoot, "app", "other"), { recursive: true });
   await fs.writeFile(
     path.join(projectRoot, "app", "other", "page.jsx"),
-    'export default async function OtherPage() { return <p data-other>other</p>; }\n',
+    'export default async function OtherPage() { return <main><p data-other>other</p><a href="/">home</a></main>; }\n',
     "utf8",
   );
 }
@@ -164,46 +198,74 @@ test("declared workspace package hydration uses one canonical constructor in dev
       child.stdout.on("data", (chunk) => { output += String(chunk); });
       child.stderr.on("data", (chunk) => { output += String(chunk); });
       const errorOffset = pageErrors.length;
+      const consoleErrorOffset = consoleErrors.length;
       try {
         await waitForServer(origin);
         await page.goto(origin, { waitUntil: "networkidle", timeout: 30_000 });
         expect(pageErrors.slice(errorOffset)).toEqual([]);
-        await expect(page.locator("catalog-root button")).toHaveText("count:0");
-        const nestedButton = page.locator("local-wrapper").locator("filters-trigger button");
+        await expect(page.locator("block-root fixture-icon button")).toHaveText("count:0");
+        await expect(page.locator("feature-root fixture-icon button")).toHaveText("count:0");
+        const nestedButton = page.locator("local-wrapper").locator("fixture-icon button");
         await expect(nestedButton).toHaveText("count:0");
-        await expect.poll(() => page.locator("catalog-root").evaluate((element) =>
-          element.constructor.name !== "HTMLElement" && Boolean(element.shadowRoot)
+        await expect.poll(() => page.locator("block-root").evaluate((element) =>
+          Boolean(element.shadowRoot?.querySelector("fixture-icon")?.shadowRoot)
         )).toBe(true);
         await expect.poll(() => page.locator("local-wrapper").evaluate((element) =>
-          element.constructor.name !== "HTMLElement"
-          && element.shadowRoot?.querySelector("filters-trigger")?.constructor.name !== "HTMLElement"
+          Boolean(element.shadowRoot?.querySelector("fixture-icon")?.shadowRoot)
         )).toBe(true);
-        await page.locator("catalog-root button").click();
         await nestedButton.click();
-        await expect(page.locator("catalog-root button")).toHaveText("count:1");
         await expect(nestedButton).toHaveText("count:1");
 
         const identity = await page.evaluate(async () => {
           const hydration = JSON.parse(document.getElementById("__LITSX_HYDRATION__").textContent);
-          const sharedUrl = hydration.clientImports.find((value) => value.includes("/_evolit/shared/") && value.includes("features"));
-          const module = await import(sharedUrl);
+          const packageUrls = [...new Set(performance.getEntriesByType("resource")
+            .map((entry) => new URL(entry.name).pathname)
+            .filter((value) => value.includes("/_evolit/shared/") && value.includes("hydration-identity")))];
+          const modules = await Promise.all(packageUrls.map((url) => import(url)));
+          const identities = modules.map((module) => module.FixtureIcon);
           const wrapper = document.querySelector("local-wrapper");
-          const current = wrapper.constructor.elements["filters-trigger"];
-          const registered = wrapper.shadowRoot.querySelector("filters-trigger").constructor;
+          const current = wrapper.constructor.elements["fixture-icon"];
+          const registered = wrapper.shadowRoot.querySelector("fixture-icon").constructor;
           return {
-            sharedUrl,
+            sharedUrl: packageUrls[0],
+            packageUrls,
             clientImports: hydration.clientImports,
-            sameExport: current === module.FiltersTrigger,
+            sameIdentity: identities.every((identity) => identity === identities[0]),
+            sameExport: current === identities[0],
             currentEqualsRegistered: current === registered,
+            iconEvaluations: globalThis.__fixtureIconEvaluations,
             resourceUrls: performance.getEntriesByType("resource").map((entry) => entry.name),
           };
         });
         expect(identity.sameExport).toBe(true);
+        expect(identity.sameIdentity).toBe(true);
         expect(identity.currentEqualsRegistered).toBe(true);
+        expect(identity.iconEvaluations).toBe(1);
+        expect(new Set(identity.packageUrls.map((url) => url.slice(0, url.lastIndexOf("/")))).size).toBe(1);
         expect(identity.sharedUrl).toContain("/_evolit/shared/");
         expect(identity.clientImports.some((value) => value.includes("__unmanaged__"))).toBe(false);
         expect(identity.resourceUrls.some((value) => value.includes("__unmanaged__") && value.includes("hydration-identity"))).toBe(false);
         expect(pageErrors.slice(errorOffset)).toEqual([]);
+        expect(consoleErrors.slice(consoleErrorOffset).filter((message) =>
+          message.includes("different constructor")
+        )).toEqual([]);
+
+        if (mode === "dev") {
+          const wrapperPath = path.join(projectRoot, "app", "components", "local-wrapper.jsx");
+          const wrapperSource = await fs.readFile(wrapperPath, "utf8");
+          await fs.writeFile(
+            wrapperPath,
+            wrapperSource.replace("<section>", '<section data-hot="updated">'),
+            "utf8",
+          );
+          await expect(page.locator("local-wrapper section")).toHaveAttribute("data-hot", "updated", {
+            timeout: 10_000,
+          });
+          expect(await page.locator("local-wrapper").evaluate((wrapper) =>
+            wrapper.constructor.elements["fixture-icon"]
+            === wrapper.shadowRoot.querySelector("fixture-icon").constructor
+          )).toBe(true);
+        }
 
         if (mode === "production") {
           const manifest = JSON.parse(await fs.readFile(
@@ -224,10 +286,10 @@ test("declared workspace package hydration uses one canonical constructor in dev
           }
         }
 
-        await page.goto(`${origin}/other`, { waitUntil: "networkidle" });
+        await page.getByRole("link", { name: "other" }).click();
         await expect(page.locator("[data-other]")).toHaveText("other");
-        await page.goBack({ waitUntil: "networkidle" });
-        await expect(page.locator("local-wrapper filters-trigger button")).toHaveText("count:0");
+        await page.getByRole("link", { name: "home" }).click();
+        await expect(page.locator("local-wrapper fixture-icon button")).toHaveText("count:0");
         expect(pageErrors.slice(errorOffset)).toEqual([]);
       } catch (error) {
         const diagnostics = await page.evaluate(async () => {
@@ -241,8 +303,12 @@ test("declared workspace package hydration uses one canonical constructor in dev
             hydration: hydrationText,
             scripts: [...document.scripts].map((script) => script.textContent ?? ""),
             scriptTypes: [...document.scripts].map((script) => script.type),
-            catalogConstructor: document.querySelector("catalog-root")?.constructor?.name ?? null,
-            catalogDefined: customElements.get("catalog-root")?.name ?? null,
+            blockConstructor: document.querySelector("block-root")?.constructor?.name ?? null,
+            blockDefined: customElements.get("block-root")?.name ?? null,
+            localWrapperConstructor: document.querySelector("local-wrapper")?.constructor?.name ?? null,
+            filtersConstructor: document.querySelector("local-wrapper")?.shadowRoot
+              ?.querySelector("fixture-icon")?.constructor?.name ?? null,
+            resourceUrls: performance.getEntriesByType("resource").map((entry) => entry.name),
             sharedExports: module ? Object.keys(module) : [],
             sharedTags: module ? Object.fromEntries(Object.entries(module).map(([key, value]) => [
               key,
