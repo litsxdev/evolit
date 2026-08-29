@@ -140,12 +140,18 @@ export default function CollectionControls() {
 }
 ```
 
-The hook returns `{ status, url, pendingUrl, error, push, replace, refresh, createHref }`:
+The hook returns
+`{ status, url, pendingUrl, error, context, push, replace, replaceContext, refresh, createHref }`:
 
 - `push(target, { scroll: false })` adds a browser-history entry. Pass
   `scroll: false` to keep the current viewport position.
 - `replace(target, { scroll: false })` updates the current entry, useful for
   visual-only query state. It accepts the same scroll option.
+- `push(target, { context })` and `replace(target, { context })` attach JSON-safe transient state
+  to that history entry and make it available to the destination page and layouts as their
+  `navigationContext` prop during SSR.
+- `replaceContext(contextOrUpdater)` updates only the current history entry and hook state. It does
+  not change the URL or fetch a route delta.
 - `refresh()` bypasses the client delta cache for the current URL.
 - `createHref(pathname, searchParams)` creates a relative internal URL. It accepts standard
   `URLSearchParams`, preserving repeated keys such as `facet=brand&facet=material`.
@@ -153,6 +159,12 @@ The hook returns `{ status, url, pendingUrl, error, push, replace, refresh, crea
 `createHref` can also be imported directly from `evolit/navigation`; it is browser-free and safe to
 share with server-evaluated route code. `useNavigation()` itself is browser-only and must only run
 from a connected client component.
+
+Navigation context is intended for compact UI state that must survive back/forward navigation but
+does not belong in the public URL. It must be a JSON-safe object and is limited to 8 KiB after UTF-8
+serialization. Evolit includes it in browser, response, and segment cache identity so the same URL
+cannot reuse markup rendered for a different context. Invalid context is rejected at the client
+boundary; malformed context received by the server is ignored.
 
 Client components can also read the active route state with browser-only hooks:
 

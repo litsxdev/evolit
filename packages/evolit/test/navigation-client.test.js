@@ -63,7 +63,130 @@ test("a superseded navigation cannot apply its late delta", async () => {
     url: "http://example.test/second",
     pendingUrl: null,
     error: null,
+    context: null,
   });
+});
+
+test("push transports context to SSR and stores it on the new history entry", async () => {
+  let receivedHeader = null;
+  const context = {
+    catalogFilters: {
+      panelOpen: false,
+      drawerOpen: false,
+      disclosureState: { color: { open: true, showAll: true } },
+    },
+  };
+  const windowRef = createBrowserWindow(async (_href, init) => {
+    receivedHeader = new Headers(init.headers).get("x-evolit-navigation-context");
+    return {
+      headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+      json: async () => ({ type: "route", url: "/explore?color=red", route: {} }),
+    };
+  });
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+
+  await navigation.push("/explore?color=red", { context });
+
+  assert.ok(receivedHeader);
+  assert.deepEqual(windowRef.history.state.__evolitNavigationContext, context);
+  assert.deepEqual(navigation.getState().context, context);
+});
+
+test("replaceContext updates only the current history entry without fetching or changing URL", async () => {
+  let requests = 0;
+  const windowRef = createBrowserWindow(async () => {
+    requests += 1;
+    throw new Error("replaceContext must not fetch");
+  });
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+
+  await navigation.replaceContext({ catalogFilters: { panelOpen: true } });
+  await navigation.replaceContext((current) => ({
+    ...current,
+    catalogFilters: { ...current.catalogFilters, drawerOpen: true },
+  }));
+
+  assert.equal(requests, 0);
+  assert.equal(windowRef.history.lastReplace, "http://example.test/");
+  assert.deepEqual(windowRef.history.state.__evolitNavigationContext, {
+    catalogFilters: { panelOpen: true, drawerOpen: true },
+  });
+  assert.deepEqual(navigation.getState().context, {
+    catalogFilters: { panelOpen: true, drawerOpen: true },
+  });
+});
+
+test("popstate restores the context belonging to that history entry before requesting its delta", async () => {
+  let receivedHeader = null;
+  const restoredContext = { catalogFilters: { panelOpen: false, drawerOpen: true } };
+  const windowRef = createBrowserWindow(async (_href, init) => {
+    receivedHeader = new Headers(init.headers).get("x-evolit-navigation-context");
+    return {
+      headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+      json: async () => ({ type: "route", url: "/explore", route: {} }),
+    };
+  });
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+
+  windowRef.location.href = "http://example.test/explore";
+  windowRef.history.state = {
+    __evolitNavigationEntry: "restored-entry",
+    __evolitNavigationContext: restoredContext,
+  };
+  windowRef.dispatch("popstate", { state: windowRef.history.state });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(receivedHeader);
+  assert.deepEqual(navigation.getState().context, restoredContext);
+  assert.deepEqual(windowRef.history.state.__evolitNavigationContext, restoredContext);
+});
+
+test("malformed history context is discarded instead of breaking browser navigation", async () => {
+  const windowRef = createBrowserWindow(async () => ({
+    headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+    json: async () => ({ type: "route", url: "/explore", route: {} }),
+  }));
+  windowRef.history.state = { __evolitNavigationContext: { invalid: () => {} } };
+
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+
+  assert.equal(navigation.getState().context, null);
+  await navigation.push("/explore", { context: { catalogFilters: { panelOpen: true } } });
+  assert.equal(navigation.getState().status, "idle");
+});
+
+test("failed programmatic navigation restores the current entry context", async () => {
+  const windowRef = createBrowserWindow(async () => { throw new Error("offline"); });
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+  const currentContext = { catalogFilters: { panelOpen: true } };
+  await navigation.replaceContext(currentContext);
+
+  await assert.rejects(
+    navigation.replace("/explore", { context: { catalogFilters: { panelOpen: false } } }),
+    /offline/u,
+  );
+
+  assert.deepEqual(navigation.getState().context, currentContext);
+  assert.deepEqual(windowRef.history.state.__evolitNavigationContext, currentContext);
+});
+
+test("refresh preserves the current navigation context by default", async () => {
+  let receivedHeader = null;
+  const windowRef = createBrowserWindow(async (_href, init) => {
+    receivedHeader = new Headers(init.headers).get("x-evolit-navigation-context");
+    return {
+      headers: new Headers({ "content-type": "application/vnd.evolit.navigation+json" }),
+      json: async () => ({ type: "route", url: "/", route: {} }),
+    };
+  });
+  const navigation = createBrowserNavigation({ window: windowRef, applyDelta: async () => {} });
+  const context = { catalogFilters: { panelOpen: false } };
+  await navigation.replaceContext(context);
+
+  await navigation.refresh();
+
+  assert.ok(receivedHeader);
+  assert.deepEqual(navigation.getState().context, context);
 });
 
 test("an internal GET form becomes a client navigation with repeated query parameters", async () => {

@@ -8,6 +8,11 @@ import {
 } from "@litsx/ssr/hydration";
 import { createHref as createBaseHref } from "./navigation-url.js";
 import {
+  EVOLIT_NAVIGATION_CONTEXT_HEADER,
+  encodeNavigationContext,
+  normalizeNavigationContext,
+} from "./navigation-context.js";
+import {
   getNavigationExtensions,
   registerNavigationExtensions,
   runAfterNavigation,
@@ -305,10 +310,18 @@ function toHref(target, location) {
   return new URL(target, location.href).href;
 }
 
-function toCacheKey(href) {
+function toCacheKey(href, encodedContext = null) {
   const url = new URL(href);
   url.hash = "";
-  return url.href;
+  return `${url.href}\ncontext:${encodedContext ?? ""}`;
+}
+
+function readStoredNavigationContext(value) {
+  try {
+    return normalizeNavigationContext(value ?? null);
+  } catch {
+    return null;
+  }
 }
 
 function getDeltaExpiry(delta, now = Date.now()) {
@@ -406,7 +419,15 @@ export function createBrowserNavigation(options = {}) {
   const historyEntries = new Map();
   let controller = null;
   let navigationSequence = 0;
-  let state = { status: "idle", url: windowRef.location.href, pendingUrl: null, error: null };
+  let state = {
+    status: "idle",
+    url: windowRef.location.href,
+    pendingUrl: null,
+    error: null,
+    context: readStoredNavigationContext(
+      windowRef.history.state?.__evolitNavigationContext ?? null,
+    ),
+  };
   const emit = () => listeners.forEach((listener) => listener(state));
   const notifyLocationChange = () => {
     const EventConstructor = windowRef.CustomEvent ?? globalThis.CustomEvent;
@@ -445,7 +466,17 @@ export function createBrowserNavigation(options = {}) {
 
   function ensureHistoryEntry(entryId = windowRef.history.state?.__evolitNavigationEntry) {
     const id = typeof entryId === "string" ? entryId : createHistoryEntryId();
-    if (!historyEntries.has(id)) historyEntries.set(id, { parentId: null, url: null, delta: null, expiresAt: null });
+    if (!historyEntries.has(id)) {
+      historyEntries.set(id, {
+        parentId: null,
+        url: null,
+        delta: null,
+        expiresAt: null,
+        context: readStoredNavigationContext(
+          windowRef.history.state?.__evolitNavigationContext ?? null,
+        ),
+      });
+    }
     if (windowRef.history.state?.__evolitNavigationEntry !== id) {
       windowRef.history.replaceState(
         { ...(windowRef.history.state ?? {}), __evolitNavigationEntry: id },
@@ -490,6 +521,7 @@ export function createBrowserNavigation(options = {}) {
 
   async function navigate(target, mode = "push", fromPopState = false, options = {}) {
     const previousHref = windowRef.location.href;
+    const previousContext = state.context;
     const requestedHref = toHref(target, windowRef.location);
     const initialHref = toHref(transformNavigationUrl(requestedHref, { type: "navigation" }), windowRef.location);
     const navigationExtensions = getNavigationExtensions();
@@ -502,7 +534,11 @@ export function createBrowserNavigation(options = {}) {
       : { url: initialHref, cancelled: false };
     if (beforeNavigation.cancelled) return null;
     const href = toHref(beforeNavigation.url, windowRef.location);
-    const cacheKey = toCacheKey(href);
+    const navigationContext = normalizeNavigationContext(
+      options.context === undefined ? null : options.context,
+    );
+    const encodedContext = encodeNavigationContext(navigationContext);
+    const cacheKey = toCacheKey(href, encodedContext);
     const scrollPosition = options.scroll === false
       ? currentScrollPosition(windowRef)
       : options.scrollPosition;
@@ -513,17 +549,33 @@ export function createBrowserNavigation(options = {}) {
     const isCurrent = () => navigationId === navigationSequence && !navigationController.signal.aborted;
     const currentEntryId = ensureHistoryEntry();
     let entryId = options.historyEntryId;
+    let createdEntry = false;
     if (fromPopState) {
       entryId = ensureHistoryEntry(entryId);
     } else if (mode === "push") {
       saveCurrentScrollPosition();
       removeForwardHistoryEntries(currentEntryId);
       entryId = createHistoryEntryId();
-      historyEntries.set(entryId, { parentId: currentEntryId, url: null, delta: null, expiresAt: null });
+      createdEntry = true;
+      historyEntries.set(entryId, {
+        parentId: currentEntryId,
+        url: null,
+        delta: null,
+        expiresAt: null,
+        context: navigationContext,
+      });
     } else {
       entryId = currentEntryId;
+      const entry = historyEntries.get(entryId);
+      if (entry) entry.context = navigationContext;
     }
-    state = { ...state, status: "pending", pendingUrl: href, error: null };
+    state = {
+      ...state,
+      status: "pending",
+      pendingUrl: href,
+      error: null,
+      context: navigationContext,
+    };
     emit();
     try {
       const cached = getCachedDelta(entryId, cacheKey, options.force);
@@ -531,7 +583,12 @@ export function createBrowserNavigation(options = {}) {
         ? cached
         : await (async () => {
           const response = await windowRef.fetch(href, {
-            headers: { accept: "application/vnd.evolit.navigation+json" },
+            headers: {
+              accept: "application/vnd.evolit.navigation+json",
+              ...(encodedContext
+                ? { [EVOLIT_NAVIGATION_CONTEXT_HEADER]: encodedContext }
+                : {}),
+            },
             // A document response may already be fresh in the browser HTTP cache.
             // Navigation is a different representation of that URL, so it must
             // reach the server rather than reusing the cached HTML document.
@@ -558,7 +615,9 @@ export function createBrowserNavigation(options = {}) {
           return nextDelta;
         })();
       if (!delta || !isCurrent()) return null;
-      if (delta.type === "redirect") return navigate(delta.location, "replace", false);
+      if (delta.type === "redirect") {
+        return navigate(delta.location, "replace", false, { context: navigationContext });
+      }
       const applied = await applyDelta(delta, {
         signal: navigationController.signal,
         moduleVersion: options.moduleVersion,
@@ -576,19 +635,26 @@ export function createBrowserNavigation(options = {}) {
             ...(mode === "replace" ? windowRef.history.state : {}),
             __evolitNavigationEntry: entryId,
             __evolitScroll: scrollPosition ?? { x: 0, y: 0 },
+            __evolitNavigationContext: navigationContext,
           },
           "",
           canonicalHref,
         );
       }
-      cacheDelta(entryId, toCacheKey(canonicalHref), delta);
+      cacheDelta(entryId, toCacheKey(canonicalHref, encodedContext), delta);
       restoreScrollAndFocus(
         windowRef,
         canonicalHref,
         scrollPosition,
         options.scroll === false,
       );
-      state = { status: "idle", url: canonicalHref, pendingUrl: null, error: null };
+      state = {
+        status: "idle",
+        url: canonicalHref,
+        pendingUrl: null,
+        error: null,
+        context: navigationContext,
+      };
       emit();
       notifyLocationChange();
       if (navigationExtensions.length > 0) {
@@ -603,16 +669,53 @@ export function createBrowserNavigation(options = {}) {
       return delta;
     } catch (error) {
       if (error?.name === "AbortError" || !isCurrent()) return null;
-      state = { ...state, status: "error", pendingUrl: null, error };
+      if (!fromPopState) {
+        if (createdEntry) historyEntries.delete(entryId);
+        else {
+          const entry = historyEntries.get(entryId);
+          if (entry) entry.context = previousContext;
+        }
+      }
+      state = {
+        ...state,
+        status: "error",
+        pendingUrl: null,
+        error,
+        context: fromPopState ? navigationContext : previousContext,
+      };
       emit();
       throw error;
     }
+  }
+
+  async function replaceContext(nextContext) {
+    const currentContext = normalizeNavigationContext(state.context);
+    const resolvedContext = normalizeNavigationContext(
+      typeof nextContext === "function" ? nextContext(currentContext) : nextContext,
+    );
+    const entryId = ensureHistoryEntry();
+    const entry = historyEntries.get(entryId);
+
+    if (entry) entry.context = resolvedContext;
+    windowRef.history.replaceState(
+      {
+        ...(windowRef.history.state ?? {}),
+        __evolitNavigationEntry: entryId,
+        __evolitNavigationContext: resolvedContext,
+      },
+      "",
+      windowRef.location.href,
+    );
+    state = { ...state, context: resolvedContext };
+    emit();
+    return resolvedContext;
   }
 
   windowRef.addEventListener("popstate", (event) => {
     void navigate(windowRef.location.href, "replace", true, {
       historyEntryId: event.state?.__evolitNavigationEntry,
       scrollPosition: event.state?.__evolitScroll ?? null,
+      context: readStoredNavigationContext(event.state?.__evolitNavigationContext),
     });
   });
   windowRef.addEventListener(DEVELOPMENT_REFRESH_EVENT, (event) => {
@@ -635,7 +738,13 @@ export function createBrowserNavigation(options = {}) {
       requireSegmentChange: true,
     }).then((applied) => {
       if (applied === false || refreshController.signal.aborted) return false;
-      state = { status: "idle", url: windowRef.location.href, pendingUrl: null, error: null };
+      state = {
+        status: "idle",
+        url: windowRef.location.href,
+        pendingUrl: null,
+        error: null,
+        context: state.context,
+      };
       emit();
       return true;
     }).catch((error) => {
@@ -667,7 +776,12 @@ export function createBrowserNavigation(options = {}) {
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     push: (target, options) => navigate(target, "push", false, options),
     replace: (target, options) => navigate(target, "replace", false, options),
-    refresh: (options) => navigate(windowRef.location.href, "replace", false, { ...options, force: true }),
+    replaceContext,
+    refresh: (options = {}) => navigate(windowRef.location.href, "replace", false, {
+      ...options,
+      context: options.context ?? state.context,
+      force: true,
+    }),
     createHref,
   };
 }
@@ -686,6 +800,7 @@ export function useNavigation() {
     ...state,
     push: navigation.push,
     replace: navigation.replace,
+    replaceContext: navigation.replaceContext,
     refresh: navigation.refresh,
     createHref: navigation.createHref,
   };

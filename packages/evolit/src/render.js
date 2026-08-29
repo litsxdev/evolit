@@ -206,6 +206,7 @@ async function renderComponentTree(
         await component({
           params: requestContext.params,
           searchParams: requestContext.searchParams,
+          navigationContext: requestContext.navigationContext,
           request,
           ...extraProps,
         }, incomingRef),
@@ -221,6 +222,7 @@ async function renderComponentTree(
     return wrapRouteSegment(segment, await layoutComponents[index]({
       params: requestContext.params,
       searchParams: requestContext.searchParams,
+      navigationContext: requestContext.navigationContext,
       request,
       children,
     }, incomingRef));
@@ -292,7 +294,14 @@ function createTrackedRouteValues(values) {
   };
 }
 
-function createSegmentCacheKey(segment, idPrefix, profile, params, searchParams) {
+function createSegmentCacheKey(
+  segment,
+  idPrefix,
+  profile,
+  params,
+  searchParams,
+  navigationContext,
+) {
   const select = (values) => Object.fromEntries(
     (profile.all ? Object.keys(values) : profile.keys)
       .sort()
@@ -303,10 +312,11 @@ function createSegmentCacheKey(segment, idPrefix, profile, params, searchParams)
     idPrefix,
     params: select(params),
     searchParams: select(searchParams),
+    navigationContext: navigationContext ?? null,
   });
 }
 
-function createSegmentInputKey(profile, params, searchParams) {
+function createSegmentInputKey(profile, params, searchParams, navigationContext) {
   const select = (values) => Object.fromEntries(
     (profile.all ? Object.keys(values) : profile.keys)
       .sort()
@@ -315,6 +325,7 @@ function createSegmentInputKey(profile, params, searchParams) {
   return JSON.stringify({
     params: select(params),
     searchParams: select(searchParams),
+    navigationContext: navigationContext ?? null,
   });
 }
 
@@ -331,13 +342,20 @@ function createSegmentRenderCache(projectRoot, onDevelopmentEvent) {
   const profiles = new Map();
 
   return {
-    get(segment, idPrefix, params, searchParams) {
+    get(segment, idPrefix, params, searchParams, navigationContext) {
       const profile = profiles.get(segment.modulePath);
       if (!profile) {
         onDevelopmentEvent?.({ type: "segment-cache-miss", modulePath: segment.modulePath, reason: "cold" });
         return null;
       }
-      const key = createSegmentCacheKey(segment, idPrefix, profile, params, searchParams);
+      const key = createSegmentCacheKey(
+        segment,
+        idPrefix,
+        profile,
+        params,
+        searchParams,
+        navigationContext,
+      );
       const entry = entries.get(key);
       if (!entry || entry.expiresAt <= Date.now()) {
         if (entry) entries.delete(key);
@@ -354,11 +372,27 @@ function createSegmentRenderCache(projectRoot, onDevelopmentEvent) {
     getProfile(segment) {
       return profiles.get(segment.modulePath) ?? null;
     },
-    set(segment, idPrefix, params, searchParams, profile, result, cachePolicy) {
+    set(
+      segment,
+      idPrefix,
+      params,
+      searchParams,
+      navigationContext,
+      profile,
+      result,
+      cachePolicy,
+    ) {
       const expiresAt = getSegmentCacheExpiry(cachePolicy);
       if (expiresAt == null) return;
       profiles.set(segment.modulePath, profile);
-      const key = createSegmentCacheKey(segment, idPrefix, profile, params, searchParams);
+      const key = createSegmentCacheKey(
+        segment,
+        idPrefix,
+        profile,
+        params,
+        searchParams,
+        navigationContext,
+      );
       entries.set(key, { result, expiresAt, modulePath: segment.modulePath });
       if (entries.size > 256) entries.delete(entries.keys().next().value);
     },
@@ -425,6 +459,7 @@ async function renderSegmentedComponentTree(
       const pageValue = await component({
         params: requestContext.params,
         searchParams: requestContext.searchParams,
+        navigationContext: requestContext.navigationContext,
         request,
         ...extraProps,
       }, incomingRef);
@@ -445,6 +480,7 @@ async function renderSegmentedComponentTree(
       idPrefix,
       requestContext.params,
       requestContext.searchParams,
+      requestContext.navigationContext,
     ) ?? null;
     if (!layoutResult) {
       const trackedParams = createTrackedRouteValues(requestContext.params);
@@ -453,6 +489,7 @@ async function renderSegmentedComponentTree(
       const layoutValue = await layoutComponents[index]({
         params: trackedParams.value,
         searchParams: trackedSearchParams.value,
+        navigationContext: requestContext.navigationContext,
         request,
         children: withForwardedChildRef(html`${unsafeHTML(childrenMarker)}`, childRef),
       }, incomingRef);
@@ -474,6 +511,7 @@ async function renderSegmentedComponentTree(
           idPrefix,
           requestContext.params,
           requestContext.searchParams,
+          requestContext.navigationContext,
           profile,
           layoutResult,
           options.cachePolicy,
@@ -485,6 +523,7 @@ async function renderSegmentedComponentTree(
         profile,
         requestContext.params,
         requestContext.searchParams,
+        requestContext.navigationContext,
       );
     }
     results.push(layoutResult);

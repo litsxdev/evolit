@@ -6,6 +6,10 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRouteResolver } from "../src/render.js";
 import { createSsrAdapter } from "../src/ssr-adapter.js";
+import {
+  EVOLIT_NAVIGATION_CONTEXT_HEADER,
+  encodeNavigationContext,
+} from "../src/navigation-context.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const requestContextUrl = pathToFileURL(
@@ -135,6 +139,61 @@ test("route composition forwards the same opaque child ref from a layout to its 
     );
   } finally {
     delete globalThis[observationsKey];
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("navigation context reaches layouts and pages during SSR and participates in segment identity", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-navigation-context-"));
+
+  try {
+    await writeAppFile(root, "layout.jsx", [
+      "export default async function RootLayout({ children, navigationContext }) {",
+      "  const filters = navigationContext?.catalogFilters;",
+      '  return `<main data-panel-open="${filters?.panelOpen === true}">${children}</main>`;',
+      "}",
+      "",
+    ].join("\n"));
+    await writeAppFile(root, "page.jsx", [
+      "export default async function RoutePage({ navigationContext }) {",
+      "  const filters = navigationContext?.catalogFilters;",
+      '  return `<p data-show-all="${filters?.disclosureState?.color?.showAll === true}">ready</p>`;',
+      "}",
+      "",
+    ].join("\n"));
+
+    const resolver = await createRouteResolver(root);
+    const firstContext = {
+      catalogFilters: {
+        panelOpen: true,
+        drawerOpen: false,
+        disclosureState: { color: { open: true, showAll: false } },
+      },
+    };
+    const secondContext = {
+      catalogFilters: {
+        panelOpen: false,
+        drawerOpen: false,
+        disclosureState: { color: { open: true, showAll: true } },
+      },
+    };
+    const renderWithContext = (context) => resolver.resolveRequest(
+      new Request("http://evolit.local/", {
+        headers: {
+          [EVOLIT_NAVIGATION_CONTEXT_HEADER]: encodeNavigationContext(context),
+        },
+      }),
+    );
+
+    const first = await renderWithContext(firstContext);
+    const second = await renderWithContext(secondContext);
+
+    assert.match(first.tree, /data-panel-open="true"/);
+    assert.match(first.tree, /data-show-all="false"/);
+    assert.match(second.tree, /data-panel-open="false"/);
+    assert.match(second.tree, /data-show-all="true"/);
+    assert.notEqual(first.segments[0].inputKey, second.segments[0].inputKey);
+  } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
 });

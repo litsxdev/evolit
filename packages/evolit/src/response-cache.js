@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { BUILD_DIRECTORY, INTERNAL_DIRECTORY, ROUTE_CACHE_DIRECTORY } from "./constants.js";
 import { ensureDirectory, pathExists, readJson, writeJson } from "./fs-utils.js";
+import { encodeNavigationContext, readNavigationContext } from "./navigation-context.js";
 
 function createCacheFileName(cacheKey) {
   return `${crypto.createHash("sha1").update(cacheKey).digest("hex")}.json`;
@@ -160,7 +161,8 @@ export class ObjectStorageResponseCacheStore {
 
 export function createDefaultRouteCacheKey(request) {
   const url = new URL(request.url);
-  return `${url.pathname}${url.search}`;
+  const context = encodeNavigationContext(readNavigationContext(request));
+  return `${url.pathname}${url.search}${context ? `\ncontext:${context}` : ""}`;
 }
 
 export function getRouteCacheArtifactFileName(cacheKey) {

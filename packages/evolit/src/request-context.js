@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { readNavigationContext } from "./navigation-context.js";
 
 const REQUEST_CONTEXT_STORAGE = Symbol.for("evolit.request-context.storage");
 const HTTP_SIGNAL_CLASS = Symbol.for("evolit.request-context.http-signal");
@@ -106,6 +107,7 @@ export function createRequestContext({
   request,
   params = {},
   searchParams = {},
+  navigationContext = readNavigationContext(request),
   extensionValues = {},
   didUseDynamicRequestData = false,
 }) {
@@ -113,6 +115,7 @@ export function createRequestContext({
     request,
     params: Object.freeze({ ...params }),
     searchParams: Object.freeze({ ...searchParams }),
+    navigationContext,
     responseHeaders: new Headers(),
     responseCookies: [],
     didUseDynamicRequestData: didUseDynamicRequestData === true,

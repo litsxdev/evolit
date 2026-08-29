@@ -6,6 +6,10 @@ import {
   createDefaultRouteCacheKey,
   resolveResponseCacheRuntime,
 } from "../src/response-cache.js";
+import {
+  EVOLIT_NAVIGATION_CONTEXT_HEADER,
+  encodeNavigationContext,
+} from "../src/navigation-context.js";
 
 test("resolveResponseCacheRuntime returns deployable hooks from evolit config", async () => {
   const customStore = new MemoryResponseCacheStore();
@@ -35,6 +39,19 @@ test("resolveResponseCacheRuntime returns deployable hooks from evolit config", 
 test("createDefaultRouteCacheKey uses the request pathname and search", () => {
   const request = new Request("https://example.com/products?tenant=acme");
   assert.equal(createDefaultRouteCacheKey(request), "/products?tenant=acme");
+});
+
+test("createDefaultRouteCacheKey isolates navigation contexts for the same URL", () => {
+  const requestFor = (panelOpen) => new Request("https://example.com/products?tenant=acme", {
+    headers: {
+      [EVOLIT_NAVIGATION_CONTEXT_HEADER]: encodeNavigationContext({ panelOpen }),
+    },
+  });
+
+  assert.notEqual(
+    createDefaultRouteCacheKey(requestFor(true)),
+    createDefaultRouteCacheKey(requestFor(false)),
+  );
 });
 
 test("ObjectStorageResponseCacheStore persists cached entries through object-store hooks", async () => {
