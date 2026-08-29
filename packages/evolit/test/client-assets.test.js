@@ -17,6 +17,7 @@ import {
   getSharedOutputRoot,
   normalizeHydrationDataForClient,
   normalizeClientAssetManifest,
+  resetDevelopmentAssetCaches,
   resolveHydrationRootClientImports,
   resolveRouteClientImports,
   resolveBrowserPackageAssetFilePath,
@@ -888,6 +889,261 @@ test("development vendors add bare imports without rebuilding the base runtime",
     assert.equal(expandedRuntime.imports["@litsx/ssr/hydration"], baseHydrationUrl);
     assert.match(expandedRuntime.imports["magic-string"], /^\/_evolit\/shared\/vendor-[a-f0-9]+\/.+\.mjs$/);
     assert.equal(after.mtimeMs, before.mtimeMs);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("development vendor subpaths share one package module identity", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-dev-package-identity-"));
+  const packageName = "@fixture/shared-identity";
+
+  try {
+    await fs.writeFile(
+      path.join(projectRoot, "package.json"),
+      JSON.stringify({ type: "module", dependencies: { [packageName]: "1.0.0" } }),
+      "utf8",
+    );
+    await writeFixturePackage(
+      projectRoot,
+      packageName,
+      {
+        version: "1.0.0",
+        type: "module",
+        exports: {
+          "./components": { browser: "./components.js", import: "./components.js" },
+          "./blocks": { browser: "./blocks.js", import: "./blocks.js" },
+          "./features": { browser: "./features.js", import: "./features.js" },
+        },
+      },
+      {
+        "internal/icon.js": "export class SharedIcon {}\n",
+        "components.js": 'export { SharedIcon } from "./internal/icon.js";\n',
+        "blocks.js": 'export { SharedIcon } from "./internal/icon.js";\n',
+        "features.js": 'export { SharedIcon } from "./internal/icon.js";\n',
+      },
+    );
+
+    const specifiers = [
+      `${packageName}/components`,
+      `${packageName}/blocks`,
+      `${packageName}/features`,
+    ];
+    const runtime = await buildSharedVendorRuntime(projectRoot, "development", {
+      additionalEntrySpecifiers: specifiers,
+    });
+    const publicUrls = specifiers.map((specifier) => runtime.imports[specifier]);
+    const vendorDirectories = publicUrls.map((publicUrl) => publicUrl.split("/")[3]);
+    const modules = await Promise.all(publicUrls.map((publicUrl) => import(pathToFileURL(path.join(
+      getSharedOutputRoot(projectRoot, "development"),
+      publicUrl.slice("/_evolit/shared/".length),
+    )).href)));
+
+    assert.equal(new Set(vendorDirectories).size, 1);
+    assert.strictEqual(modules[0].SharedIcon, modules[1].SharedIcon);
+    assert.strictEqual(modules[1].SharedIcon, modules[2].SharedIcon);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("development package grouping is deterministic, isolated, and cache-safe", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-dev-package-groups-"));
+
+  try {
+    await fs.writeFile(path.join(projectRoot, "package.json"), JSON.stringify({
+      type: "module",
+      dependencies: {
+        "fixture-near": "1.0.0",
+        "fixture-nearby": "1.0.0",
+      },
+    }), "utf8");
+    const nearRoot = await writeFixturePackage(
+      projectRoot,
+      "fixture-near",
+      {
+        version: "1.0.0",
+        type: "module",
+        exports: {
+          "./alpha": { browser: "./alpha.browser.js", import: "./alpha.server.js" },
+          "./beta": { browser: "./beta.browser.js", import: "./beta.server.js" },
+        },
+      },
+      {
+        "internal.js": 'export class SharedIdentity {}; export const marker = "v1";\n',
+        "alpha.browser.js": 'export { SharedIdentity, marker } from "./internal.js"; export const target = "browser";\n',
+        "alpha.server.js": 'throw new Error("server alpha selected");\n',
+        "beta.browser.js": 'export { SharedIdentity, marker } from "./internal.js"; export const target = "browser";\n',
+        "beta.server.js": 'throw new Error("server beta selected");\n',
+      },
+    );
+    await writeFixturePackage(
+      projectRoot,
+      "fixture-nearby",
+      { version: "1.0.0", type: "module", exports: { ".": "./index.js" } },
+      { "index.js": "export class SeparateIdentity {}\n" },
+    );
+    const ordered = ["fixture-near/alpha", "fixture-near/beta", "fixture-nearby"];
+    const first = await buildSharedVendorRuntime(projectRoot, "development", {
+      additionalEntrySpecifiers: ordered,
+    });
+    resetDevelopmentAssetCaches(projectRoot);
+    const second = await buildSharedVendorRuntime(projectRoot, "development", {
+      additionalEntrySpecifiers: [...ordered].reverse(),
+    });
+
+    assert.deepEqual(second.imports, first.imports);
+    assert.equal(
+      first.imports["fixture-near/alpha"].slice(0, first.imports["fixture-near/alpha"].lastIndexOf("/")),
+      first.imports["fixture-near/beta"].slice(0, first.imports["fixture-near/beta"].lastIndexOf("/")),
+    );
+    assert.notEqual(
+      first.imports["fixture-near/alpha"].split("/")[3],
+      first.imports["fixture-nearby"].split("/")[3],
+    );
+
+    const alphaPath = path.join(
+      getSharedOutputRoot(projectRoot, "development"),
+      first.imports["fixture-near/alpha"].slice("/_evolit/shared/".length),
+    );
+    const betaPath = path.join(
+      getSharedOutputRoot(projectRoot, "development"),
+      first.imports["fixture-near/beta"].slice("/_evolit/shared/".length),
+    );
+    const [alpha, beta] = await Promise.all([
+      import(pathToFileURL(alphaPath).href),
+      import(pathToFileURL(betaPath).href),
+    ]);
+    assert.equal(alpha.target, "browser");
+    assert.equal(beta.target, "browser");
+    assert.strictEqual(alpha.SharedIdentity, beta.SharedIdentity);
+
+    await fs.writeFile(
+      path.join(nearRoot, "internal.js"),
+      'export class SharedIdentity {}; export const marker = "v2";\n',
+      "utf8",
+    );
+    resetDevelopmentAssetCaches(projectRoot);
+    const rebuilt = await buildSharedVendorRuntime(projectRoot, "development", {
+      additionalEntrySpecifiers: ordered,
+    });
+    const groupRoot = path.dirname(path.join(
+      getSharedOutputRoot(projectRoot, "development"),
+      rebuilt.imports["fixture-near/alpha"].slice("/_evolit/shared/".length),
+    ));
+    const rebuiltSource = (await Promise.all(
+      (await fs.readdir(groupRoot, { recursive: true }))
+        .filter((fileName) => fileName.endsWith(".mjs"))
+        .map((fileName) => fs.readFile(path.join(groupRoot, fileName), "utf8")),
+    )).join("\n");
+    assert.match(rebuiltSource, /v2/);
+    assert.doesNotMatch(rebuiltSource, /v1/);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("development package builds retain every entry under concurrent discovery", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-dev-package-race-"));
+  const packageName = "fixture-concurrent-package";
+
+  try {
+    await fs.writeFile(path.join(projectRoot, "package.json"), JSON.stringify({
+      dependencies: { [packageName]: "1.0.0" },
+    }), "utf8");
+    await writeFixturePackage(
+      projectRoot,
+      packageName,
+      {
+        version: "1.0.0",
+        type: "module",
+        exports: {
+          "./one": "./one.js",
+          "./two": "./two.js",
+          "./three": "./three.js",
+        },
+      },
+      {
+        "shared.js": "export class SharedIdentity {}\n",
+        "one.js": 'export { SharedIdentity } from "./shared.js";\n',
+        "two.js": 'export { SharedIdentity } from "./shared.js";\n',
+        "three.js": 'export { SharedIdentity } from "./shared.js";\n',
+      },
+    );
+    const specifiers = ["one", "two", "three"].map((subpath) => `${packageName}/${subpath}`);
+    const runtimes = await Promise.all(specifiers.map((specifier) => buildSharedVendorRuntime(
+      projectRoot,
+      "development",
+      { additionalEntrySpecifiers: [specifier] },
+    )));
+    const imports = Object.assign({}, ...runtimes.map((runtime) => runtime.imports));
+
+    for (const specifier of specifiers) {
+      const filePath = path.join(
+        getSharedOutputRoot(projectRoot, "development"),
+        imports[specifier].slice("/_evolit/shared/".length),
+      );
+      assert.equal((await fs.stat(filePath)).isFile(), true);
+    }
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("development package groups keep nested dependency versions isolated", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-dev-package-versions-"));
+
+  try {
+    await fs.writeFile(path.join(projectRoot, "package.json"), JSON.stringify({
+      dependencies: { "fixture-host-one": "1.0.0", "fixture-host-two": "1.0.0" },
+    }), "utf8");
+    for (const [hostName, dependencyVersion] of [
+      ["fixture-host-one", "1.0.0"],
+      ["fixture-host-two", "2.0.0"],
+    ]) {
+      const hostRoot = await writeFixturePackage(
+        projectRoot,
+        hostName,
+        { version: "1.0.0", type: "module", exports: { ".": "./index.js" } },
+        {
+          "index.js": [
+            'export { SharedIdentity, version } from "fixture-nested-identity";',
+            'export const loadIdentity = () => import("fixture-nested-identity");',
+            "",
+          ].join("\n"),
+        },
+      );
+      const dependencyRoot = path.join(hostRoot, "node_modules", "fixture-nested-identity");
+      await fs.mkdir(dependencyRoot, { recursive: true });
+      await fs.writeFile(path.join(dependencyRoot, "package.json"), JSON.stringify({
+        name: "fixture-nested-identity",
+        version: dependencyVersion,
+        type: "module",
+        exports: { ".": "./index.js" },
+      }), "utf8");
+      await fs.writeFile(
+        path.join(dependencyRoot, "index.js"),
+        `export class SharedIdentity {}; export const version = ${JSON.stringify(dependencyVersion)};\n`,
+        "utf8",
+      );
+    }
+
+    const runtime = await buildSharedVendorRuntime(projectRoot, "development", {
+      additionalEntrySpecifiers: ["fixture-host-one", "fixture-host-two"],
+    });
+    const modules = await Promise.all(["fixture-host-one", "fixture-host-two"].map((specifier) => {
+      const filePath = path.join(
+        getSharedOutputRoot(projectRoot, "development"),
+        runtime.imports[specifier].slice("/_evolit/shared/".length),
+      );
+      return import(pathToFileURL(filePath).href);
+    }));
+
+    assert.deepEqual(modules.map((module) => module.version), ["1.0.0", "2.0.0"]);
+    assert.notStrictEqual(modules[0].SharedIdentity, modules[1].SharedIdentity);
+    const dynamicallyLoaded = await Promise.all(modules.map((module) => module.loadIdentity()));
+    assert.strictEqual(dynamicallyLoaded[0].SharedIdentity, modules[0].SharedIdentity);
+    assert.strictEqual(dynamicallyLoaded[1].SharedIdentity, modules[1].SharedIdentity);
   } finally {
     await fs.rm(projectRoot, { recursive: true, force: true });
   }
