@@ -52,3 +52,10 @@ export { responseHeaders } from "./request-context.js";
 
 /** Returns the active request's extension-provided serializable values. */
 export { getRequestContext } from "./request-context.js";
+
+/**
+ * Returns a read-only snapshot of the active SSR route. This is the server
+ * counterpart for reading navigation state; redirects remain separate
+ * control-flow functions and browser history methods are intentionally absent.
+ */
+export { getRouteState } from "./request-context.js";

@@ -10,3 +10,4 @@ export function redirect() { return throwServerOnlyApi("redirect"); }
 export function requestUrl() { return throwServerOnlyApi("requestUrl"); }
 export function responseHeaders() { return throwServerOnlyApi("responseHeaders"); }
 export function getRequestContext() { return throwServerOnlyApi("getRequestContext"); }
+export function getRouteState() { return throwServerOnlyApi("getRouteState"); }

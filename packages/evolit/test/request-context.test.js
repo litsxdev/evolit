@@ -6,7 +6,11 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRouteResolver } from "../src/render.js";
 import { createSsrAdapter } from "../src/ssr-adapter.js";
-import { createRequestContext, runWithRequestContext } from "../src/request-context.js";
+import {
+  createRequestContext,
+  getRouteState,
+  runWithRequestContext,
+} from "../src/request-context.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const requestContextUrl = pathToFileURL(
@@ -122,5 +126,53 @@ test("server route APIs share request context across duplicate module identities
   assert.equal(
     alternateContextModule.getRequestContextResponse(context).headers["x-shared-context"],
     "yes",
+  );
+});
+
+test("getRouteState returns isolated read-only SSR route snapshots", async () => {
+  const firstContext = createRequestContext({
+    request: new Request("http://evolit.local/catalog/first?view=grid"),
+    params: { slug: "first" },
+    searchParams: { view: "grid" },
+    navigationContext: { filtersOpen: true },
+  });
+  const secondContext = createRequestContext({
+    request: new Request("http://evolit.local/catalog/second?view=list"),
+    params: { slug: "second" },
+    searchParams: { view: "list" },
+    navigationContext: { filtersOpen: false },
+  });
+
+  const [first, second] = await Promise.all([
+    runWithRequestContext(firstContext, async () => {
+      await Promise.resolve();
+      return getRouteState();
+    }),
+    runWithRequestContext(secondContext, async () => {
+      await Promise.resolve();
+      return getRouteState();
+    }),
+  ]);
+
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(Object.isFrozen(first.params), true);
+  assert.equal(Object.isFrozen(first.searchParams), true);
+  assert.equal(Object.isFrozen(first.navigationContext), true);
+  assert.equal(first.url.pathname, "/catalog/first");
+  assert.deepEqual(first.params, { slug: "first" });
+  assert.deepEqual(first.searchParams, { view: "grid" });
+  assert.deepEqual(first.navigationContext, { filtersOpen: true });
+  assert.equal(second.url.pathname, "/catalog/second");
+  assert.deepEqual(second.params, { slug: "second" });
+  assert.deepEqual(second.searchParams, { view: "list" });
+  assert.deepEqual(second.navigationContext, { filtersOpen: false });
+  assert.equal(firstContext.didUseDynamicRequestData, true);
+  assert.equal(secondContext.didUseDynamicRequestData, true);
+});
+
+test("getRouteState rejects calls outside SSR route execution", () => {
+  assert.throws(
+    () => getRouteState(),
+    /Request APIs can only be called while rendering a evolit route/,
   );
 });

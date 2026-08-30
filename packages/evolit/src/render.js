@@ -14,6 +14,7 @@ import {
   getRequestContextResponse,
   isEvolitHttpSignal,
   runWithRequestContext,
+  runWithRouteState,
 } from "./request-context.js";
 import { createDevelopmentEventReporter } from "./development-events.js";
 import {
@@ -486,16 +487,21 @@ async function renderSegmentedComponentTree(
       const trackedParams = createTrackedRouteValues(requestContext.params);
       const trackedSearchParams = createTrackedRouteValues(requestContext.searchParams);
       const didUseDynamicRequestData = requestContext.didUseDynamicRequestData;
-      const layoutValue = await layoutComponents[index]({
+      layoutResult = await runWithRouteState(requestContext, {
         params: trackedParams.value,
         searchParams: trackedSearchParams.value,
-        navigationContext: requestContext.navigationContext,
-        request,
-        children: withForwardedChildRef(html`${unsafeHTML(childrenMarker)}`, childRef),
-      }, incomingRef);
-      layoutResult = await renderToString(wrapRouteSegment(segment, layoutValue), {
-        assetResolver: options.assetResolver,
-        context: { idPrefix },
+      }, async () => {
+        const layoutValue = await layoutComponents[index]({
+          params: trackedParams.value,
+          searchParams: trackedSearchParams.value,
+          navigationContext: requestContext.navigationContext,
+          request,
+          children: withForwardedChildRef(html`${unsafeHTML(childrenMarker)}`, childRef),
+        }, incomingRef);
+        return renderToString(wrapRouteSegment(segment, layoutValue), {
+          assetResolver: options.assetResolver,
+          context: { idPrefix },
+        });
       });
       layoutResult.segmentModulePath = segment.modulePath;
       profile = {

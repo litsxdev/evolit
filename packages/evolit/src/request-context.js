@@ -2,9 +2,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { readNavigationContext } from "./navigation-context.js";
 
 const REQUEST_CONTEXT_STORAGE = Symbol.for("evolit.request-context.storage");
+const ROUTE_STATE_STORAGE = Symbol.for("evolit.route-state.storage");
 const HTTP_SIGNAL_CLASS = Symbol.for("evolit.request-context.http-signal");
 
 const requestContextStorage = globalThis[REQUEST_CONTEXT_STORAGE] ??= new AsyncLocalStorage();
+const routeStateStorage = globalThis[ROUTE_STATE_STORAGE] ??= new AsyncLocalStorage();
 const EvolitHttpSignal = globalThis[HTTP_SIGNAL_CLASS] ??= class EvolitHttpSignal extends Error {
   constructor(type, options = {}) {
     super(type);
@@ -111,11 +113,14 @@ export function createRequestContext({
   extensionValues = {},
   didUseDynamicRequestData = false,
 }) {
+  const routeNavigationContext = navigationContext == null
+    ? null
+    : Object.freeze({ ...navigationContext });
   const context = {
     request,
     params: Object.freeze({ ...params }),
     searchParams: Object.freeze({ ...searchParams }),
-    navigationContext,
+    navigationContext: routeNavigationContext,
     responseHeaders: new Headers(),
     responseCookies: [],
     didUseDynamicRequestData: didUseDynamicRequestData === true,
@@ -128,6 +133,53 @@ export function createRequestContext({
 
 export function runWithRequestContext(context, callback) {
   return requestContextStorage.run(context, callback);
+}
+
+export function runWithRouteState(context, routeState, callback) {
+  return routeStateStorage.run({ context, ...routeState }, callback);
+}
+
+/**
+ * Returns a read-only snapshot of the active SSR route. Unlike the browser
+ * navigation controller, this state has no history or mutation methods.
+ * Reading `url` follows the same dynamic-rendering semantics as requestUrl().
+ *
+ * @returns {{
+ *   url: URL,
+ *   params: Readonly<Record<string, string | string[] | undefined>>,
+ *   searchParams: Readonly<Record<string, string | string[] | undefined>>,
+ *   navigationContext: Readonly<Record<string, unknown>> | null,
+ * }}
+ */
+export function getRouteState() {
+  const context = getActiveContext();
+  const trackedState = routeStateStorage.getStore();
+  const routeState = trackedState?.context === context ? trackedState : context;
+  const state = {};
+
+  Object.defineProperties(state, {
+    url: {
+      enumerable: true,
+      get() {
+        context.didUseDynamicRequestData = true;
+        return new URL(context.request.url);
+      },
+    },
+    params: {
+      enumerable: true,
+      value: routeState.params,
+    },
+    searchParams: {
+      enumerable: true,
+      value: routeState.searchParams,
+    },
+    navigationContext: {
+      enumerable: true,
+      value: context.navigationContext,
+    },
+  });
+
+  return Object.freeze(state);
 }
 
 /**

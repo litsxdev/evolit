@@ -20,8 +20,8 @@ It focuses on the core contract that matters first:
 - route modules live in `app/**/page.*`
 - layout modules live in `app/**/layout.*`
 - page and layout modules export a default async function
-- pages receive `{ params, searchParams, request }`
-- layouts receive `{ children, params, searchParams, request }`
+- pages receive `{ params, searchParams, navigationContext, request }`
+- layouts receive `{ children, params, searchParams, navigationContext, request }`
 - SSR document rendering is delegated to `@litsx/ssr`
 
 Supported authored module extensions:
@@ -266,20 +266,24 @@ Server pages and layouts can access the active Web Request context through `evol
 ```js
 import {
   cookies,
+  getRouteState,
   headers,
   notFound,
+  permanentRedirect,
   redirect,
   requestUrl,
   responseHeaders,
 } from "evolit/server";
 
 export default async function AccountPage() {
+  const { params, searchParams, navigationContext } = getRouteState();
+
   if (!cookies().has("session")) {
     redirect("/sign-in");
   }
 
   responseHeaders().set("x-account-page", "1");
-  return `<p>${headers().get("user-agent")} ${requestUrl().pathname}</p>`;
+  return `<p>${headers().get("user-agent")} ${requestUrl().pathname} ${params.account ?? ""}</p>`;
 }
 ```
 
@@ -287,6 +291,14 @@ export default async function AccountPage() {
 headers. `redirect()` and `permanentRedirect()` end rendering with `307` and `308` responses, and
 `notFound()` renders a `404`. Reading headers, cookies, or the request URL makes the completed
 render dynamic, so it is not stored by the route response cache.
+
+`getRouteState()` is the request-scoped server counterpart for reading the active route from nested
+server components and helpers that do not receive route props directly. It returns the current
+`{ url, params, searchParams, navigationContext }` as a read-only snapshot. It deliberately has no
+`push`, `replace`, `refresh`, pending state, or history mutation methods: those belong to the browser
+`useNavigation()` API. Redirects and `notFound()` remain separate server control-flow functions.
+Reading `getRouteState().url` has the same dynamic-rendering semantics as `requestUrl()`; reading
+`params` and `searchParams` participates in the normal segment-cache key tracking.
 
 ## Extensions
 

@@ -478,13 +478,28 @@ before(async () => {
     );
   }
   await fs.writeFile(
+    path.join(fixtureRoot, "app", "param-layout", "[slug]", "route-state-summary.jsx"),
+    [
+      'import { getRouteState } from "evolit/server";',
+      "",
+      "export default async function RouteStateSummary() {",
+      "  const { params, searchParams } = getRouteState();",
+      "  return <span data-param-layout={String(params.slug)} data-param-layout-view={String(searchParams.view ?? \"default\")} />;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
     path.join(fixtureRoot, "app", "param-layout", "[slug]", "layout.jsx"),
     [
+      'import RouteStateSummary from "./route-state-summary.jsx";',
+      "",
       "globalThis.__EVOLIT_PARAM_LAYOUT_RENDER_COUNT ??= 0;",
       "",
-      "export default async function ParamLayout({ children, params, searchParams }) {",
+      "export default async function ParamLayout({ children }) {",
       "  globalThis.__EVOLIT_PARAM_LAYOUT_RENDER_COUNT += 1;",
-      "  return <section data-param-layout={String(params.slug)} data-param-layout-view={String(searchParams.view ?? \"default\")} data-param-layout-count={String(globalThis.__EVOLIT_PARAM_LAYOUT_RENDER_COUNT)}>{children}</section>;",
+      "  return <section data-param-layout-count={String(globalThis.__EVOLIT_PARAM_LAYOUT_RENDER_COUNT)}><RouteStateSummary />{children}</section>;",
       "}",
       "",
     ].join("\n"),
