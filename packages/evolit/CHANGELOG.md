@@ -1,5 +1,13 @@
 # evolit
 
+## 0.2.1
+
+### Patch Changes
+
+- a17c736: Preserve a valid, connected root body while applying navigation deltas and track
+  layout and page navigation-context dependencies precisely so unrelated context
+  changes keep parent layouts mounted.
+
 ## 0.2.0
 
 ### Minor Changes
