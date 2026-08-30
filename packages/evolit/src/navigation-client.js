@@ -194,6 +194,79 @@ function syncDocumentState(nextState, documentRef) {
   if (script) script.textContent = JSON.stringify(nextState);
 }
 
+function readElementAttributes(element) {
+  return Object.fromEntries([...element.attributes].map((attribute) => [
+    attribute.name,
+    attribute.value,
+  ]));
+}
+
+function isRootBodyProjection(segment, projection) {
+  return segment?.kind === "layout"
+    && segment?.depth === 0
+    && typeof projection?.html === "string"
+    && /<body(?:\s|>)/iu.test(projection.html);
+}
+
+function parseRootBodyProjection(projectionHtml, documentRef) {
+  const DOMParserConstructor = documentRef.defaultView?.DOMParser ?? globalThis.DOMParser;
+  if (typeof DOMParserConstructor !== "function") return null;
+  return new DOMParserConstructor().parseFromString(projectionHtml, "text/html").body;
+}
+
+function collectRouteRuntimeScripts(root) {
+  const scripts = [...root.querySelectorAll("script")];
+  return scripts.filter((script) =>
+    script.id === "__EVOLIT_ROUTE__"
+    || script.id === "__EVOLIT_DOCUMENT__"
+    || script.id === "__LITSX_HYDRATION__"
+    || script.hasAttribute("data-evolit-live-reload")
+    || (script.type === "module" && (
+      script.textContent?.includes("getNavigation")
+      || script.textContent?.includes("hydratePage")
+    )),
+  );
+}
+
+function replaceRootBodyProjection({
+  bodyProjection,
+  delta,
+  documentRef,
+  fragment,
+  target,
+}) {
+  const body = documentRef.body;
+  if (!body || !bodyProjection) return false;
+
+  const authoredAttributes = readElementAttributes(bodyProjection);
+  const managedAttributes = normalizeManagedAttributes(delta.document?.bodyAttributes);
+  syncElementAttributes(
+    body,
+    readElementAttributes(body),
+    { ...authoredAttributes, ...managedAttributes },
+  );
+
+  const runtimeScripts = collectRouteRuntimeScripts(documentRef);
+  body.replaceChildren(target.start, fragment, target.end, ...runtimeScripts);
+
+  // HTML parsing can leave nodes from an authored root <body> beside the live
+  // body. Once the stable body owns the committed projection and runtime
+  // scripts, discard only those invalid element siblings.
+  for (const element of [...documentRef.documentElement.children]) {
+    if (element !== documentRef.head && element !== body) element.remove();
+  }
+  return true;
+}
+
+function syncRouteStateScripts(delta, documentRef) {
+  const routeScript = documentRef.getElementById("__EVOLIT_ROUTE__");
+  if (routeScript) routeScript.textContent = JSON.stringify(delta.route);
+  const hydrationScript = documentRef.getElementById("__LITSX_HYDRATION__");
+  if (hydrationScript && delta.hydrationData) {
+    hydrationScript.textContent = JSON.stringify(delta.hydrationData);
+  }
+}
+
 function versionClientImport(specifier, version) {
   if (!version || typeof specifier !== "string") return specifier;
   const url = new URL(specifier, globalThis.location?.href ?? "http://evolit.local/");
@@ -260,9 +333,18 @@ async function applyRouteDelta(delta, documentRef = document, signal, options = 
     throwIfAborted(signal);
     const projection = next.projections[offset] ?? next.projections[0];
     if (!projection) continue;
-    const template = documentRef.createElement("template");
-    template.innerHTML = projection.html;
-    const fragment = template.content;
+    const bodyProjection = isRootBodyProjection(next, projection)
+      ? parseRootBodyProjection(projection.html, documentRef)
+      : null;
+    const fragment = documentRef.createDocumentFragment();
+    if (bodyProjection) {
+      for (const script of collectRouteRuntimeScripts(bodyProjection)) script.remove();
+      fragment.append(...bodyProjection.childNodes);
+    } else {
+      const template = documentRef.createElement("template");
+      template.innerHTML = projection.html;
+      fragment.append(template.content);
+    }
     materializeDeclarativeShadowDom(fragment);
     // Restore opaque SSR forwarded refs while the fragment is detached, before
     // its custom elements upgrade on insertion.
@@ -279,11 +361,19 @@ async function applyRouteDelta(delta, documentRef = document, signal, options = 
       roots.map(({ root, element }) => ({ ...root, element })),
       delta.hydrationData,
     );
-    const range = documentRef.createRange();
-    range.setStartAfter(target.start);
-    range.setEndBefore(target.end);
-    range.deleteContents();
-    range.insertNode(fragment);
+    if (!replaceRootBodyProjection({
+      bodyProjection,
+      delta,
+      documentRef,
+      fragment,
+      target,
+    })) {
+      const range = documentRef.createRange();
+      range.setStartAfter(target.start);
+      range.setEndBefore(target.end);
+      range.deleteContents();
+      range.insertNode(fragment);
+    }
     insertedRoots.push(...roots);
     target.start.data = `evolit:segment:start:${next.id}`;
     target.end.data = `evolit:segment:end:${next.id}`;
@@ -292,8 +382,7 @@ async function applyRouteDelta(delta, documentRef = document, signal, options = 
   // document to point persistent layout refs at the new target, or clear them
   // when the replacement page no longer exposes one.
   prepareForwardedRefs(documentRef);
-  const script = documentRef.getElementById("__EVOLIT_ROUTE__");
-  if (script) script.textContent = JSON.stringify(delta.route);
+  syncRouteStateScripts(delta, documentRef);
   if (delta.title) documentRef.title = delta.title;
   for (const { root, element } of insertedRoots) {
     throwIfAborted(signal);

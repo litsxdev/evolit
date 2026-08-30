@@ -175,7 +175,10 @@ export function getRouteState() {
     },
     navigationContext: {
       enumerable: true,
-      value: context.navigationContext,
+      get() {
+        trackedState?.trackNavigationContext?.();
+        return routeState.navigationContext;
+      },
     },
   });
 

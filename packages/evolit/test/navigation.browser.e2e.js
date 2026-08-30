@@ -8,6 +8,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { scaffoldSite } from "../src/scaffold.js";
+import {
+  EVOLIT_NAVIGATION_CONTEXT_HEADER,
+  encodeNavigationContext,
+} from "../src/navigation-context.js";
 
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const frameworkNodeModules = path.resolve(frameworkRoot, "..", "..", "node_modules");
@@ -576,6 +580,161 @@ test("incremental navigation preserves unaffected nested layouts", async ({ page
     await navigate(page, "/nested/b/two?view=list&page=2");
     await expect(page.locator('[data-outer="b"]')).toHaveText("b:two:2");
     expect(await page.locator('[data-outer="b"]').evaluate((element) => element === window.__evolitOuterLayout)).toBe(false);
+  } finally {
+    if (child?.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("navigation context deltas preserve a root body and track segment dependencies", async ({ page }, testInfo) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-navigation-root-body-"));
+  const projectRoot = path.join(tempRoot, "app");
+  const port = 4200 + testInfo.workerIndex;
+  const origin = `http://127.0.0.1:${port}`;
+  const pageErrors = [];
+  let serverOutput = "";
+  let child;
+
+  try {
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await scaffoldSite(projectRoot);
+    await fs.symlink(frameworkNodeModules, path.join(projectRoot, "node_modules"), "dir");
+    await fs.writeFile(path.join(projectRoot, "app", "layout.jsx"), [
+      "export default async function RootLayout(props) {",
+      "  const { children, searchParams } = props;",
+      '  const rootTheme = searchParams.root === "active" ? (props.navigationContext?.rootTheme ?? "none") : "none";',
+      '  return <body data-root-body="yes"><storefront-shell data-root-shell data-root-theme={rootTheme}>{children}</storefront-shell></body>;',
+      "}",
+      "",
+    ].join("\n"));
+    await fs.mkdir(path.join(projectRoot, "app", "context"), { recursive: true });
+    await fs.writeFile(path.join(projectRoot, "app", "context", "layout.jsx"), [
+      "export default async function ContextLayout({ children, navigationContext }) {",
+      '  return <section data-context-layout={navigationContext?.nested ?? "none"}>{children}</section>;',
+      "}",
+      "",
+    ].join("\n"));
+    await fs.writeFile(path.join(projectRoot, "app", "context", "status.jsx"), [
+      'import { useHost, useOnConnect } from "@litsx/core";',
+      "export default function RouteStatus() {",
+      "  const host = useHost();",
+      '  useOnConnect(() => host.setAttribute("data-hydrated", "yes"), []);',
+      '  return <span data-status-content>ready</span>;',
+      "}",
+      "",
+    ].join("\n"));
+    await fs.writeFile(path.join(projectRoot, "app", "context", "page.jsx"), [
+      'import RouteStatus from "./status.jsx";',
+      "export default async function ContextPage() {",
+      "  return <main data-context-page><RouteStatus /></main>;",
+      "}",
+      "",
+    ].join("\n"));
+    child = spawn(process.execPath, [path.join(frameworkRoot, "src", "cli.js"), "dev", "--port", String(port)], {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout.on("data", (chunk) => { serverOutput += String(chunk); });
+    child.stderr.on("data", (chunk) => { serverOutput += String(chunk); });
+    try {
+      await waitForServer(`${origin}/context?root=passive`);
+    } catch (error) {
+      throw new Error(`${error.message}\n${serverOutput.slice(-8_000)}`, { cause: error });
+    }
+    const initialContext = { nested: "zero" };
+    await page.setExtraHTTPHeaders({
+      [EVOLIT_NAVIGATION_CONTEXT_HEADER]: encodeNavigationContext(initialContext),
+    });
+    await page.goto(`${origin}/context?root=passive`, { waitUntil: "networkidle", timeout: 20_000 });
+    await page.evaluate(async (context) => {
+      const bootstrap = [...document.scripts].filter((script) => script.type === "module")
+        .map((script) => script.textContent ?? "")
+        .find((source) => source.includes("getNavigation"));
+      const { getNavigation } = await import(bootstrap.match(/import \{ getNavigation \} from "([^"]+)"/)[1]);
+      await getNavigation().replaceContext(context);
+      window.__evolitInitialBody = document.body;
+      window.__evolitInitialRootShell = document.querySelector("[data-root-shell]");
+    }, initialContext);
+    await page.setExtraHTTPHeaders({});
+
+    const pushContext = (context, target = null) => page.evaluate(async ({ nextContext, nextTarget }) => {
+      const bootstrap = [...document.scripts].filter((script) => script.type === "module")
+        .map((script) => script.textContent ?? "")
+        .find((source) => source.includes("getNavigation"));
+      const { getNavigation } = await import(bootstrap.match(/import \{ getNavigation \} from "([^"]+)"/)[1]);
+      await getNavigation().push(nextTarget ?? `${location.pathname}${location.search}`, { context: nextContext });
+    }, { nextContext: context, nextTarget: target });
+
+    await pushContext({ nested: "one" });
+    await expect(page.locator('[data-context-layout="one"]')).toHaveCount(1);
+    expect(await page.evaluate(() => document.querySelector("[data-root-shell]") === window.__evolitInitialRootShell)).toBe(true);
+
+    await pushContext({ nested: "two" });
+    await expect(page.locator('[data-context-layout="two"]')).toHaveCount(1);
+    expect(await page.evaluate(() => document.querySelector("[data-root-shell]") === window.__evolitInitialRootShell)).toBe(true);
+
+    await pushContext({ nested: "two", rootTheme: "dark" }, "/context?root=active");
+    await expect(page.locator("body")).toHaveAttribute("data-root-body", "yes");
+    await expect(page.locator("body > storefront-shell")).toHaveAttribute("data-root-theme", "dark");
+    await page.locator("[data-root-shell]").evaluate((element) => { window.__evolitDarkRootShell = element; });
+    await pushContext({ nested: "two", rootTheme: "light" });
+    await expect(page.locator("body > storefront-shell")).toHaveAttribute("data-root-theme", "light");
+    expect(await page.evaluate(() => document.querySelector("[data-root-shell]") === window.__evolitDarkRootShell)).toBe(false);
+    await expect(page.locator("body > storefront-shell")).toHaveCount(1);
+    await expect(page.locator("body route-status")).toHaveCount(1);
+    await expect(page.locator("body route-status")).toHaveAttribute("data-hydrated", "yes");
+    expect(await page.evaluate(() => ({
+      bodyConnected: document.body.isConnected,
+      bodyPreserved: document.body === window.__evolitInitialBody,
+      headCount: document.documentElement.querySelectorAll(":scope > head").length,
+      bodyCount: document.documentElement.querySelectorAll(":scope > body").length,
+      invalidElementSiblings: document.documentElement.querySelectorAll(":scope > :not(head):not(body)").length,
+      routeScriptsInBody: document.body.querySelectorAll("#__EVOLIT_ROUTE__, #__EVOLIT_DOCUMENT__, #__LITSX_HYDRATION__").length,
+      bootstrapCount: [...document.body.querySelectorAll('script[type="module"]')]
+        .filter((script) => script.textContent.includes("getNavigation")).length,
+      liveReloadCount: document.body.querySelectorAll("script[data-evolit-live-reload]").length,
+      statusCount: document.body.querySelectorAll("route-status").length,
+      stateContext: window.history.state.__evolitNavigationContext,
+    }))).toEqual({
+      bodyConnected: true,
+      bodyPreserved: true,
+      headCount: 1,
+      bodyCount: 1,
+      invalidElementSiblings: 0,
+      routeScriptsInBody: 3,
+      bootstrapCount: 1,
+      liveReloadCount: 1,
+      statusCount: 1,
+      stateContext: { nested: "two", rootTheme: "light" },
+    });
+
+    await page.goBack();
+    await expect(page.locator('[data-context-layout="two"]')).toHaveCount(1);
+    await expect(page.locator("body > storefront-shell")).toHaveAttribute("data-root-theme", "dark");
+    await page.goBack();
+    await expect(page.locator('[data-context-layout="two"]')).toHaveCount(1);
+    await expect(page.locator("body > storefront-shell")).toHaveAttribute("data-root-theme", "none");
+    await page.goBack();
+    await expect(page.locator('[data-context-layout="one"]')).toHaveCount(1);
+    await page.goForward();
+    await expect(page.locator('[data-context-layout="two"]')).toHaveCount(1);
+    expect(await page.evaluate(() => ({
+      url: `${location.pathname}${location.search}`,
+      context: window.history.state.__evolitNavigationContext,
+      bodyPreserved: document.body === window.__evolitInitialBody,
+      statusCount: document.body.querySelectorAll("route-status").length,
+      invalidElementSiblings: document.documentElement.querySelectorAll(":scope > :not(head):not(body)").length,
+    }))).toEqual({
+      url: "/context?root=passive",
+      context: { nested: "two" },
+      bodyPreserved: true,
+      statusCount: 1,
+      invalidElementSiblings: 0,
+    });
+    expect(pageErrors).toEqual([]);
   } finally {
     if (child?.exitCode === null) {
       child.kill();

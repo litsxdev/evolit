@@ -162,9 +162,10 @@ from a connected client component.
 
 Navigation context is intended for compact UI state that must survive back/forward navigation but
 does not belong in the public URL. It must be a JSON-safe object and is limited to 8 KiB after UTF-8
-serialization. Evolit includes it in browser, response, and segment cache identity so the same URL
-cannot reuse markup rendered for a different context. Invalid context is rejected at the client
-boundary; malformed context received by the server is ignored.
+serialization. Evolit includes it in browser and response-cache identity. Segment caching and delta
+identity track only the top-level context keys each layout or page reads, so unrelated context
+changes preserve mounted layouts while consumers still update. Invalid context is rejected at the
+client boundary; malformed context received by the server is ignored.
 
 Client components can also read the active route state with browser-only hooks:
 

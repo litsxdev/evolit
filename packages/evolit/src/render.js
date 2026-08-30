@@ -295,6 +295,67 @@ function createTrackedRouteValues(values) {
   };
 }
 
+function createTrackedNavigationContext(values) {
+  const tracked = createTrackedRouteValues(values ?? {});
+  let accessed = false;
+
+  return {
+    value: values == null ? null : tracked.value,
+    read() {
+      accessed = true;
+      return values == null ? null : tracked.value;
+    },
+    profile() {
+      return { accessed, ...tracked.profile() };
+    },
+  };
+}
+
+function createTrackedSegmentProps(
+  trackedParams,
+  trackedSearchParams,
+  trackedNavigationContext,
+  props,
+) {
+  const result = {
+    params: trackedParams.value,
+    searchParams: trackedSearchParams.value,
+    ...props,
+  };
+  Object.defineProperty(result, "navigationContext", {
+    enumerable: true,
+    get: () => trackedNavigationContext.read(),
+  });
+  return result;
+}
+
+function createSegmentDependencyProfile(
+  trackedParams,
+  trackedSearchParams,
+  trackedNavigationContext,
+) {
+  return {
+    params: trackedParams.profile(),
+    searchParams: trackedSearchParams.profile(),
+    navigationContext: trackedNavigationContext.profile(),
+  };
+}
+
+function selectTrackedValues(profile, values) {
+  const normalized = profile ?? { all: false, keys: [] };
+  return Object.fromEntries(
+    (normalized.all ? Object.keys(values ?? {}) : normalized.keys ?? [])
+      .sort()
+      .map((key) => [key, values?.[key]]),
+  );
+}
+
+function selectTrackedNavigationContext(profile, navigationContext) {
+  if (!profile?.accessed) return undefined;
+  if (navigationContext == null) return null;
+  return selectTrackedValues(profile, navigationContext);
+}
+
 function createSegmentCacheKey(
   segment,
   idPrefix,
@@ -303,30 +364,26 @@ function createSegmentCacheKey(
   searchParams,
   navigationContext,
 ) {
-  const select = (values) => Object.fromEntries(
-    (profile.all ? Object.keys(values) : profile.keys)
-      .sort()
-      .map((key) => [key, values[key]]),
-  );
   return JSON.stringify({
     modulePath: segment.modulePath,
     idPrefix,
-    params: select(params),
-    searchParams: select(searchParams),
-    navigationContext: navigationContext ?? null,
+    params: selectTrackedValues(profile.params, params),
+    searchParams: selectTrackedValues(profile.searchParams, searchParams),
+    navigationContext: selectTrackedNavigationContext(
+      profile.navigationContext,
+      navigationContext,
+    ),
   });
 }
 
 function createSegmentInputKey(profile, params, searchParams, navigationContext) {
-  const select = (values) => Object.fromEntries(
-    (profile.all ? Object.keys(values) : profile.keys)
-      .sort()
-      .map((key) => [key, values[key]]),
-  );
   return JSON.stringify({
-    params: select(params),
-    searchParams: select(searchParams),
-    navigationContext: navigationContext ?? null,
+    params: selectTrackedValues(profile.params, params),
+    searchParams: selectTrackedValues(profile.searchParams, searchParams),
+    navigationContext: selectTrackedNavigationContext(
+      profile.navigationContext,
+      navigationContext,
+    ),
   });
 }
 
@@ -457,18 +514,37 @@ async function renderSegmentedComponentTree(
     const idPrefix = `${segment.id}-p${projectionPath.join("-") || "0"}`;
 
     if (index === layoutComponents.length) {
-      const pageValue = await component({
-        params: requestContext.params,
-        searchParams: requestContext.searchParams,
-        navigationContext: requestContext.navigationContext,
-        request,
-        ...extraProps,
-      }, incomingRef);
+      const trackedParams = createTrackedRouteValues(requestContext.params);
+      const trackedSearchParams = createTrackedRouteValues(requestContext.searchParams);
+      const trackedNavigationContext = createTrackedNavigationContext(
+        requestContext.navigationContext,
+      );
+      const pageValue = await runWithRouteState(requestContext, {
+        params: trackedParams.value,
+        searchParams: trackedSearchParams.value,
+        navigationContext: trackedNavigationContext.value,
+        trackNavigationContext: () => trackedNavigationContext.read(),
+      }, () => component(createTrackedSegmentProps(
+        trackedParams,
+        trackedSearchParams,
+        trackedNavigationContext,
+        { request, ...extraProps },
+      ), incomingRef));
       const pageResult = await renderToString(wrapRouteSegment(segment, pageValue), {
         assetResolver: options.assetResolver,
         context: { idPrefix },
       });
       pageResult.segmentModulePath = segment.modulePath;
+      segment.inputKey = createSegmentInputKey(
+        createSegmentDependencyProfile(
+          trackedParams,
+          trackedSearchParams,
+          trackedNavigationContext,
+        ),
+        requestContext.params,
+        requestContext.searchParams,
+        requestContext.navigationContext,
+      );
       results.push(pageResult);
       return pageResult.html;
     }
@@ -486,31 +562,36 @@ async function renderSegmentedComponentTree(
     if (!layoutResult) {
       const trackedParams = createTrackedRouteValues(requestContext.params);
       const trackedSearchParams = createTrackedRouteValues(requestContext.searchParams);
+      const trackedNavigationContext = createTrackedNavigationContext(
+        requestContext.navigationContext,
+      );
       const didUseDynamicRequestData = requestContext.didUseDynamicRequestData;
       layoutResult = await runWithRouteState(requestContext, {
         params: trackedParams.value,
         searchParams: trackedSearchParams.value,
+        navigationContext: trackedNavigationContext.value,
+        trackNavigationContext: () => trackedNavigationContext.read(),
       }, async () => {
-        const layoutValue = await layoutComponents[index]({
-          params: trackedParams.value,
-          searchParams: trackedSearchParams.value,
-          navigationContext: requestContext.navigationContext,
-          request,
-          children: withForwardedChildRef(html`${unsafeHTML(childrenMarker)}`, childRef),
-        }, incomingRef);
+        const layoutValue = await layoutComponents[index](createTrackedSegmentProps(
+          trackedParams,
+          trackedSearchParams,
+          trackedNavigationContext,
+          {
+            request,
+            children: withForwardedChildRef(html`${unsafeHTML(childrenMarker)}`, childRef),
+          },
+        ), incomingRef);
         return renderToString(wrapRouteSegment(segment, layoutValue), {
           assetResolver: options.assetResolver,
           context: { idPrefix },
         });
       });
       layoutResult.segmentModulePath = segment.modulePath;
-      profile = {
-        all: trackedParams.profile().all || trackedSearchParams.profile().all,
-        keys: [...new Set([
-          ...trackedParams.profile().keys,
-          ...trackedSearchParams.profile().keys,
-        ])].sort(),
-      };
+      profile = createSegmentDependencyProfile(
+        trackedParams,
+        trackedSearchParams,
+        trackedNavigationContext,
+      );
       if (!didUseDynamicRequestData && !requestContext.didUseDynamicRequestData) {
         options.segmentCache?.set(
           segment,
