@@ -155,6 +155,87 @@ test("compiler preserves LitSX side-effect imports for asset discovery", async (
   }
 });
 
+test("compiler accepts verified external LitSX hooks from JavaScript modules without JSX", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-external-hook-"));
+  const packageRoot = path.join(projectRoot, "node_modules", "fixture-navigation");
+  const sourcePath = path.join(projectRoot, "feature.jsx");
+
+  try {
+    await fs.mkdir(packageRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(projectRoot, "package.json"),
+      JSON.stringify({
+        type: "module",
+        dependencies: { "fixture-navigation": "1.0.0" },
+      }),
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          module: "ESNext",
+          moduleResolution: "Bundler",
+          customConditions: ["browser"],
+          jsx: "react-jsx",
+          jsxImportSource: "@litsx/core",
+        },
+      }),
+    );
+    await fs.writeFile(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "fixture-navigation",
+        version: "1.0.0",
+        type: "module",
+        exports: {
+          "./navigation": {
+            browser: "./navigation-client.js",
+            default: "./navigation-server.js",
+          },
+        },
+      }),
+    );
+    await fs.writeFile(
+      path.join(packageRoot, "navigation-client.js"),
+      [
+        'import { useHost } from "@litsx/core";',
+        "export function useNavigation() {",
+        "  return useHost();",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    await fs.writeFile(
+      path.join(packageRoot, "navigation-server.js"),
+      'export function useNavigation() { throw new Error("server only"); }\n',
+    );
+    await fs.writeFile(
+      sourcePath,
+      [
+        'import { useNavigation } from "fixture-navigation/navigation";',
+        "export default function FeatureCard() {",
+        "  const navigation = useNavigation();",
+        "  return <span>{String(Boolean(navigation))}</span>;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    const { entrypoint } = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: false,
+      target: "client",
+    });
+
+    const output = await fs.readFile(entrypoint, "utf8");
+    assert.match(output, /fixture-navigation\/navigation/);
+    assert.match(output, /useNavigation/);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("compiler composes imported .jsx Server Components during SSR", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-server-composition-"));
   const childPath = path.join(projectRoot, "catalog-fragment.jsx");

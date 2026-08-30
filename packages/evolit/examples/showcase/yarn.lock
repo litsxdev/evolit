@@ -518,9 +518,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@litsx/babel-preset-litsx@npm:^1.0.0-next.8":
-  version: 1.0.0-next.8
-  resolution: "@litsx/babel-preset-litsx@npm:1.0.0-next.8"
+"@litsx/babel-preset-litsx@npm:^1.0.0-next.9":
+  version: 1.0.0-next.9
+  resolution: "@litsx/babel-preset-litsx@npm:1.0.0-next.9"
   dependencies:
     "@babel/helper-plugin-utils": "npm:^8.0.1"
     "@babel/parser": "npm:^8.0.4"
@@ -533,7 +533,7 @@ __metadata:
     "@litsx/typescript-session": "npm:^1.0.0-next.0"
   peerDependencies:
     "@babel/core": ^8.0.0
-  checksum: 10c0/32c59aa149d605bfa06492f4e802e16d810feac825d004595688c4ea18ec8f89ae45c49b6676fa84d6f7c80d48ee0544dbdaeee02882359b13f06fe2513db48e
+  checksum: 10c0/3a9376d8883db1dc464886d3316c19539ddbbc2c328d0f59b0be975a6797880c117b0f0bbe5a536ace0a92b06c71bbc4023b398dbff40ae5b6d9e10f199e840e
   languageName: node
   linkType: hard
 
@@ -554,9 +554,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@litsx/compiler@npm:1.0.0-next.12, @litsx/compiler@npm:^1.0.0-next.11":
-  version: 1.0.0-next.12
-  resolution: "@litsx/compiler@npm:1.0.0-next.12"
+"@litsx/compiler@npm:1.0.0-next.13, @litsx/compiler@npm:^1.0.0-next.11":
+  version: 1.0.0-next.13
+  resolution: "@litsx/compiler@npm:1.0.0-next.13"
   dependencies:
     "@babel/core": "npm:^8.0.1"
     "@babel/parser": "npm:^8.0.4"
@@ -564,11 +564,11 @@ __metadata:
     "@babel/types": "npm:^8.0.4"
     "@litsx/authoring": "npm:^1.0.0-next.5"
     "@litsx/babel-plugin-transform-jsx-html-template": "npm:^1.0.0-next.6"
-    "@litsx/babel-preset-litsx": "npm:^1.0.0-next.8"
+    "@litsx/babel-preset-litsx": "npm:^1.0.0-next.9"
     "@litsx/babel-preset-react-compat": "npm:^1.0.0-next.4"
     "@litsx/typescript-session": "npm:^1.0.0-next.0"
     source-map-js: "npm:^1.2.1"
-  checksum: 10c0/bfe13fe5a88654ef4abfae56e29b62281c73b115ebe53dfc3daed060c85045c3d7336373dcff980aae5c4afcca56b6087fbce248dadb58248aa236b93c6cacbf
+  checksum: 10c0/22c01232e2adfbe6a460d6c5f31923468872a742073fd286805e029c861cebafeb97d2443a974e737cc1c89e24ac6658f75198272935480dafb627813f5f3304
   languageName: node
   linkType: hard
 
@@ -1052,7 +1052,7 @@ __metadata:
   resolution: "evolit@portal:../..::locator=evolit-showcase%40workspace%3A."
   dependencies:
     "@jridgewell/remapping": "npm:^2.3.5"
-    "@litsx/compiler": "npm:1.0.0-next.12"
+    "@litsx/compiler": "npm:1.0.0-next.13"
     "@litsx/core": "npm:1.0.0-next.8"
     "@litsx/ssr": "npm:1.0.0-next.5"
     "@rollup/plugin-commonjs": "npm:^29.0.0"
