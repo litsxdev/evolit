@@ -1,5 +1,12 @@
 # evolit
 
+## 0.1.8
+
+### Patch Changes
+
+- 981f7d9: Update the LitSX compiler so applications can consume verified external LitSX
+  hooks published from JavaScript or TypeScript modules without JSX.
+
 ## 0.1.7
 
 ### Patch Changes
