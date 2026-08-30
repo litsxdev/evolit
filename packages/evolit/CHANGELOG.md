@@ -1,5 +1,13 @@
 # evolit
 
+## 0.2.0
+
+### Minor Changes
+
+- 865364d: Add `getRouteState()` as a request-scoped, read-only server API for accessing
+  the active URL, params, search params, and navigation context without exposing
+  browser history methods.
+
 ## 0.1.8
 
 ### Patch Changes
