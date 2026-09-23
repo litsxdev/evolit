@@ -46,6 +46,26 @@ Generated applications declare `"@/*": ["./*"]` in `jsconfig.json`, so editors a
 use the same convention. An explicit `@/*` mapping in `jsconfig.json` or `tsconfig.json` takes
 priority when an application needs a different source root.
 
+### Interpolated dynamic imports
+
+Relative dynamic imports may use a template literal when every possible module can be discovered
+from the literal path at build time:
+
+```tsx
+const module = await import(`./templates/${locale}/${name}.tsx`);
+```
+
+Evolit treats each interpolation as one wildcard that matches a single path segment. The example
+above discovers `./templates/*/*.tsx`, compiles every matching module, and emits a finite runtime
+dispatcher whose cases preserve the original source specifiers. Interpolations never cross a `/`,
+and there is no framework-imposed candidate limit.
+
+The template must be relative, end in a supported authored module extension, and match at least one
+module during compilation. A runtime value that was not among the discovered candidates rejects the
+import. Development watches the matched directory tree, so adding a new candidate invalidates the
+affected graph. Arbitrary computed specifiers that do not use this template-literal form remain
+outside the statically discoverable graph.
+
 ### Package CSS and static assets
 
 Applications can import stylesheets exposed through package `exports` in the same way as local
