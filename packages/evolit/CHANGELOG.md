@@ -1,5 +1,14 @@
 # evolit
 
+## 0.3.0
+
+### Minor Changes
+
+- 4ec58e3: Support relative dynamic imports with interpolated template literals by discovering and compiling
+  matching modules for the server and client graphs, emitting a finite runtime dispatcher, and
+  invalidating development builds when candidates are added.
+- 776335c: Add a one-time server setup hook and pass request-scoped HTTP context through the optional LitSX URQL SSR lifecycle, including response headers and safe dynamic-cache tracking.
+
 ## 0.2.1
 
 ### Patch Changes
