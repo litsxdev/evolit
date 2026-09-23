@@ -20,6 +20,7 @@ import { ensureDirectory } from "./fs-utils.js";
 const MODULE_SPECIFIER_PATTERN =
   /\b(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 const CSS_DEPENDENCY_PATTERN = /(?:@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?|url\(\s*["']?([^"')]+)["']?\s*\))/g;
+const DYNAMIC_IMPORT_WILDCARD = "\u0000EVOLIT_DYNAMIC_IMPORT_WILDCARD\u0000";
 const RESOLVABLE_IMPORT_EXTENSIONS = [
   ...MODULE_EXTENSIONS,
   ...STATIC_ASSET_EXTENSIONS,
@@ -388,17 +389,30 @@ function getCompiledServerComponentExports(code, sourcePath) {
   return exports;
 }
 
-function collectImportedNamesBySpecifier(code, sourcePath) {
-  const sourceFile = ts.createSourceFile(sourcePath, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+function analyzeModuleReferences(code, sourcePath, scriptKind = ts.ScriptKind.JS) {
+  const sourceFile = ts.createSourceFile(sourcePath, code, ts.ScriptTarget.Latest, true, scriptKind);
   const bySpecifier = new Map();
+  const staticReferences = [];
+  const dynamicReferences = [];
   const add = (specifier, name) => {
     const names = bySpecifier.get(specifier) ?? new Set();
     names.add(name);
     bySpecifier.set(specifier, names);
   };
+  const addStaticReference = (node, importedName = null) => {
+    const specifier = node.text;
+    staticReferences.push({
+      specifier,
+      start: node.getStart(sourceFile) + 1,
+      end: node.end - 1,
+    });
+    if (importedName) add(specifier, importedName);
+  };
+
   for (const statement of sourceFile.statements) {
-    if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+    if (ts.isImportDeclaration(statement) && ts.isStringLiteralLike(statement.moduleSpecifier)) {
       const specifier = statement.moduleSpecifier.text;
+      addStaticReference(statement.moduleSpecifier);
       if (statement.importClause?.name) add(specifier, "default");
       if (statement.importClause?.namedBindings && ts.isNamedImports(statement.importClause.namedBindings)) {
         for (const element of statement.importClause.namedBindings.elements) {
@@ -408,9 +422,10 @@ function collectImportedNamesBySpecifier(code, sourcePath) {
     } else if (
       ts.isExportDeclaration(statement)
       && statement.moduleSpecifier
-      && ts.isStringLiteral(statement.moduleSpecifier)
+      && ts.isStringLiteralLike(statement.moduleSpecifier)
     ) {
       const specifier = statement.moduleSpecifier.text;
+      addStaticReference(statement.moduleSpecifier);
       if (!statement.exportClause) add(specifier, "*");
       else if (ts.isNamedExports(statement.exportClause)) {
         for (const element of statement.exportClause.elements) add(specifier, element.propertyName?.text ?? element.name.text);
@@ -421,13 +436,119 @@ function collectImportedNamesBySpecifier(code, sourcePath) {
     if (
       ts.isCallExpression(node)
       && node.expression.kind === ts.SyntaxKind.ImportKeyword
-      && node.arguments.length === 1
-      && ts.isStringLiteral(node.arguments[0])
-    ) add(node.arguments[0].text, "*");
+      && node.arguments.length >= 1
+    ) {
+      const argument = node.arguments[0];
+      if (ts.isStringLiteralLike(argument)) {
+        addStaticReference(argument, "*");
+      } else if (ts.isTemplateExpression(argument)) {
+        const staticParts = [
+          argument.head.text,
+          ...argument.templateSpans.map((span) => span.literal.text),
+        ];
+        dynamicReferences.push({
+          pattern: staticParts.join(DYNAMIC_IMPORT_WILDCARD),
+          displayPattern: staticParts.join("*"),
+          expressionText: code.slice(argument.getStart(sourceFile), argument.end),
+          optionsText: node.arguments.length > 1
+            ? code.slice(node.arguments[1].getStart(sourceFile), node.arguments.at(-1).end)
+            : null,
+          start: node.getStart(sourceFile),
+          end: node.end,
+        });
+      }
+    }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  return bySpecifier;
+
+  return {
+    importedNamesBySpecifier: bySpecifier,
+    staticReferences,
+    dynamicReferences,
+  };
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function createDynamicImportSegmentPattern(segment) {
+  return new RegExp(
+    `^${segment.split(DYNAMIC_IMPORT_WILDCARD).map(escapeRegExp).join("[^/]+")}$`,
+  );
+}
+
+async function discoverDynamicImportCandidates({
+  projectRoot,
+  sourcePath,
+  pattern,
+  displayPattern,
+  managedSourceRoots,
+}) {
+  const normalizedPattern = pattern.replaceAll("\\", "/");
+  if (!isRelativeSpecifier(normalizedPattern)) {
+    throw new Error(
+      `Dynamic import pattern ${JSON.stringify(displayPattern)} in ${sourcePath} must be relative.`,
+    );
+  }
+  if (!MODULE_EXTENSIONS.some((extension) => normalizedPattern.endsWith(extension))) {
+    throw new Error(
+      `Dynamic import pattern ${JSON.stringify(displayPattern)} in ${sourcePath} must end in a supported module extension.`,
+    );
+  }
+
+  const segments = normalizedPattern.split("/");
+  const firstDynamicSegment = segments.findIndex((segment) => segment.includes(DYNAMIC_IMPORT_WILDCARD));
+  if (firstDynamicSegment < 0) return { candidates: [], watchedDirectories: [] };
+
+  const scanRoot = path.resolve(path.dirname(sourcePath), ...segments.slice(0, firstDynamicSegment));
+  if (isPathOutsideManagedRoots(projectRoot, managedSourceRoots, scanRoot)) {
+    throw new Error(
+      `Dynamic import pattern ${JSON.stringify(displayPattern)} in ${sourcePath} resolves outside the managed source roots.`,
+    );
+  }
+
+  const segmentPatterns = segments
+    .slice(firstDynamicSegment)
+    .map(createDynamicImportSegmentPattern);
+  const candidates = [];
+  const watchedDirectories = new Set();
+
+  async function visitDirectory(directory, segmentIndex) {
+    watchedDirectories.add(directory);
+    let entries;
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return;
+      throw error;
+    }
+
+    const matcher = segmentPatterns[segmentIndex];
+    const isFinalSegment = segmentIndex === segmentPatterns.length - 1;
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!matcher.test(entry.name)) continue;
+      const candidatePath = path.join(directory, entry.name);
+      if (isFinalSegment) {
+        if (entry.isFile()) candidates.push(candidatePath);
+      } else if (entry.isDirectory()) {
+        await visitDirectory(candidatePath, segmentIndex + 1);
+      }
+    }
+  }
+
+  await visitDirectory(scanRoot, 0);
+  if (candidates.length === 0) {
+    throw new Error(
+      `Dynamic import pattern ${JSON.stringify(displayPattern)} in ${sourcePath} did not match any modules.`,
+    );
+  }
+
+  return {
+    candidates,
+    watchedDirectories: [...watchedDirectories],
+  };
 }
 
 function createClientServerComponentImportError(entryPath, sourcePath, parents) {
@@ -841,18 +962,17 @@ async function rewriteRelativeSpecifiers({
   managedSourceRoots,
   serverExportsByModule,
   packageImports,
+  dynamicImportDirectories,
 }) {
   const magicSource = new MagicString(code);
   let didRewrite = false;
+  const moduleReferences = analyzeModuleReferences(code, sourcePath);
   const importedNamesBySpecifier = target === "client"
-    ? collectImportedNamesBySpecifier(code, sourcePath)
+    ? moduleReferences.importedNamesBySpecifier
     : new Map();
 
-  for (const match of code.matchAll(MODULE_SPECIFIER_PATTERN)) {
-    const specifier = match[1] ?? match[2] ?? null;
-    if (!specifier) {
-      continue;
-    }
+  for (const reference of moduleReferences.staticReferences) {
+    const { specifier } = reference;
 
     const aliasedImportPath = isBareSpecifier(specifier)
       ? await resolveProjectMappedImport(projectRoot, sourcePath, specifier)
@@ -996,16 +1116,97 @@ async function rewriteRelativeSpecifiers({
     ) {
       normalizedReplacement = `${normalizedReplacement}?${serverImportQuery}`;
     }
-    const quotedSpecifierIndex = match.index + match[0].indexOf(specifier);
     const replacementValue = normalizedReplacement.split(path.sep).join("/");
     if (replacementValue !== specifier) {
       didRewrite = true;
       magicSource.update(
-        quotedSpecifierIndex,
-        quotedSpecifierIndex + specifier.length,
+        reference.start,
+        reference.end,
         replacementValue,
       );
     }
+  }
+
+  const dynamicImportHelpers = [];
+  for (const [index, reference] of moduleReferences.dynamicReferences.entries()) {
+    const discovery = await discoverDynamicImportCandidates({
+      projectRoot,
+      sourcePath,
+      pattern: reference.pattern,
+      displayPattern: reference.displayPattern,
+      managedSourceRoots,
+    });
+    discovery.watchedDirectories.forEach((directory) => dynamicImportDirectories.add(directory));
+
+    const cases = [];
+    for (const resolvedImportPath of discovery.candidates) {
+      const compiledImportPath = await compileModule(resolvedImportPath);
+      const serverExports = serverExportsByModule?.get(resolvedImportPath) ?? new Set();
+      if (target === "client" && serverExports.size > 0) {
+        throw new Error(
+          `Client module ${sourcePath} dynamically imports Server Component export(s) from ${resolvedImportPath}: `
+          + `${[...serverExports].join(", ")}. Split the server exports into a separate module.`,
+        );
+      }
+
+      const importerOutputPath = toOutputPath(projectRoot, outputRoot, sourcePath);
+      let replacementPath = path.relative(path.dirname(importerOutputPath), compiledImportPath);
+      if (!replacementPath.startsWith(".")) replacementPath = `./${replacementPath}`;
+      replacementPath = replacementPath.split(path.sep).join("/");
+      if (
+        target === "server"
+        && mode === "development"
+        && typeof serverImportQuery === "string"
+        && serverImportQuery.length > 0
+      ) {
+        replacementPath = `${replacementPath}?${serverImportQuery}`;
+      }
+
+      let sourceSpecifier = path.relative(path.dirname(sourcePath), resolvedImportPath)
+        .split(path.sep)
+        .join("/");
+      if (!sourceSpecifier.startsWith(".")) sourceSpecifier = `./${sourceSpecifier}`;
+      cases.push(
+        `    case ${JSON.stringify(sourceSpecifier)}: return import(${JSON.stringify(replacementPath)}${reference.optionsText ? ", options" : ""});`,
+      );
+
+      if (target === "client") {
+        const sourceMetadata = moduleMetadata.get(sourcePath) ?? {
+          moduleImports: new Set(),
+          vendorImports: new Set(),
+          styleImports: new Set(),
+          assetImports: new Set(),
+        };
+        sourceMetadata.moduleImports.add(
+          path.relative(outputRoot, compiledImportPath).split(path.sep).join("/"),
+        );
+        moduleMetadata.set(sourcePath, sourceMetadata);
+      }
+    }
+
+    let helperName = `__evolit_dynamic_import_${index}`;
+    while (code.includes(helperName)) helperName = `_${helperName}`;
+    const sourceModuleId = path.relative(projectRoot, sourcePath).split(path.sep).join("/");
+    const unknownImportPrefix = `Unknown dynamic import in ${sourceModuleId}: `;
+    dynamicImportHelpers.push([
+      `function ${helperName}(specifier${reference.optionsText ? ", options" : ""}) {`,
+      "  switch (specifier) {",
+      ...cases,
+      "    default:",
+      `      return Promise.reject(new Error(${JSON.stringify(unknownImportPrefix)} + specifier));`,
+      "  }",
+      "}",
+    ].join("\n"));
+    magicSource.update(
+      reference.start,
+      reference.end,
+      `${helperName}(${reference.expressionText}${reference.optionsText ? `, ${reference.optionsText}` : ""})`,
+    );
+    didRewrite = true;
+  }
+
+  if (dynamicImportHelpers.length > 0) {
+    magicSource.append(`\n\n${dynamicImportHelpers.join("\n\n")}\n`);
   }
 
   const rewrittenCode = magicSource.toString();
@@ -1131,7 +1332,10 @@ export function invalidateDevelopmentCompilationCache(projectRoot, changedPaths 
     const shouldInvalidate =
       normalizedChangedPaths == null ||
       !dependencies ||
-      [...dependencies].some((dependency) => normalizedChangedPaths.has(dependency));
+      [...dependencies.files].some((dependency) => normalizedChangedPaths.has(dependency)) ||
+      [...dependencies.directories].some((directory) =>
+        [...normalizedChangedPaths].some((changedPath) => !isPathOutsideProject(directory, changedPath))
+      );
     if (shouldInvalidate) {
       developmentGraphCache.delete(key);
       developmentGraphDependencies.delete(key);
@@ -1163,6 +1367,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
   const moduleMetadata = new Map();
   const serverExportsByModule = new Map();
   const packageImports = new Set();
+  const dynamicImportDirectories = new Set();
   const serverImportQuery = target === "server" && mode === "development"
     ? `t=${Date.now()}`
     : null;
@@ -1233,6 +1438,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
       managedSourceRoots,
       serverExportsByModule,
       packageImports,
+      dynamicImportDirectories,
     });
 
     await fs.writeFile(outputPath, rewritten.code, "utf8");
@@ -1262,6 +1468,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
     entrypoint: await compileModule(entryPath),
     outputRoot,
     sourceFiles: [...new Set([...visited.keys(), ...staticAssetFiles])],
+    watchedDirectories: [...dynamicImportDirectories],
     packageImports: [...packageImports].sort(),
   };
 }
@@ -1286,7 +1493,10 @@ export async function compileModuleGraph(entryPath, options = {}) {
     developmentGraphCache.set(cacheKey, pendingCompile);
     pendingCompile.then((result) => {
       if (developmentGraphCache.get(cacheKey) === pendingCompile) {
-        developmentGraphDependencies.set(cacheKey, new Set(result.sourceFiles));
+        developmentGraphDependencies.set(cacheKey, {
+          files: new Set(result.sourceFiles),
+          directories: new Set(result.watchedDirectories ?? []),
+        });
       }
     }, () => {});
   }
@@ -1425,15 +1635,15 @@ export async function collectClientGraphInventory(entryPaths, options = {}) {
     if (isComponent && isServer) boundaries.add(sourcePath);
     if (!traverseNonBoundary) return;
     const componentImportSpecifiers = collectComponentImportSpecifiers(source, sourcePath);
-    for (const match of source.matchAll(MODULE_SPECIFIER_PATTERN)) {
-      const specifier = match[1] ?? match[2];
-      if (!specifier) continue;
+    const moduleReferences = analyzeModuleReferences(source, sourcePath, ts.ScriptKind.TSX);
+
+    async function visitResolvedSpecifier(specifier) {
       const aliasResolved = isBareSpecifier(specifier)
         ? await resolveProjectMappedImport(projectRoot, sourcePath, specifier)
         : null;
       const resolved = aliasResolved
         ?? await resolveProjectModuleSpecifier(projectRoot, sourcePath, specifier);
-      if (!resolved) continue;
+      if (!resolved) return;
       if (shouldCompileModule(resolved)) {
         if (isBareSpecifier(specifier) && aliasResolved == null) {
           if (componentImportSpecifiers.has(specifier)) {
@@ -1448,6 +1658,21 @@ export async function collectClientGraphInventory(entryPaths, options = {}) {
       else if (isStaticAssetPath(resolved)) {
         visited.add(resolved);
         assets.add(resolved);
+      }
+    }
+
+    for (const reference of moduleReferences.staticReferences) {
+      await visitResolvedSpecifier(reference.specifier);
+    }
+    for (const reference of moduleReferences.dynamicReferences) {
+      const discovery = await discoverDynamicImportCandidates({
+        projectRoot,
+        sourcePath,
+        pattern: reference.pattern,
+        displayPattern: reference.displayPattern,
+      });
+      for (const candidate of discovery.candidates) {
+        await visit(candidate, true);
       }
     }
   }

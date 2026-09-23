@@ -407,6 +407,35 @@ before(async () => {
     'export default function DynamicCard() { return <aside>Dynamic card</aside>; }\n',
     "utf8",
   );
+  await Promise.all([
+    fs.mkdir(path.join(fixtureRoot, "app", "template-probe"), { recursive: true }),
+    fs.mkdir(path.join(fixtureRoot, "src", "template-probe"), { recursive: true }),
+  ]);
+  await Promise.all([
+    fs.writeFile(
+      path.join(fixtureRoot, "app", "template-probe", "page.jsx"),
+      [
+        'import { requestUrl } from "evolit/server";',
+        "export default async function TemplateProbePage() {",
+        '  const requestedTemplate = requestUrl().searchParams.get("template") || "alpha";',
+        "  const templateModule = await import(`../../src/template-probe/${requestedTemplate}.tsx`);",
+        "  return templateModule.renderTemplate({ requestedTemplate });",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    ),
+    fs.writeFile(
+      path.join(fixtureRoot, "src", "template-probe", "alpha.tsx"),
+      'export function renderTemplate({ requestedTemplate }: { requestedTemplate: string }) { return <main data-template-probe="alpha">SSR template alpha: {requestedTemplate}</main>; }\n',
+      "utf8",
+    ),
+    fs.writeFile(
+      path.join(fixtureRoot, "src", "template-probe", "beta.tsx"),
+      'export function renderTemplate({ requestedTemplate }: { requestedTemplate: string }) { return <main data-template-probe="beta">SSR template beta: {requestedTemplate}</main>; }\n',
+      "utf8",
+    ),
+  ]);
   await fs.writeFile(
     path.join(fixtureRoot, "evolit.config.js"),
     'export default { clientBoundaries: ["./src/dynamic-card.jsx"] };\n',
@@ -575,6 +604,7 @@ test("build manifest classifies entry and chunk client assets with structured me
       { pathname: "/docs/*slug", cache: { revalidate: 60 } },
       { pathname: "/optional/**slug", cache: { revalidate: 60 } },
       { pathname: "/server-graph", cache: { revalidate: 60 } },
+      { pathname: "/template-probe", cache: { revalidate: 60 } },
     ],
   );
   assert.deepEqual(buildManifest.prerenderedRoutes, [
@@ -701,6 +731,14 @@ test("build emits deploy route and asset manifests for external deployment pipel
         pathname: "/server-graph",
         cache: { revalidate: 60 },
         cacheKey: "/server-graph",
+        prerendered: false,
+        prerenderedPaths: [],
+        responsePath: null,
+      },
+      {
+        pathname: "/template-probe",
+        cache: { revalidate: 60 },
+        cacheKey: "/template-probe",
         prerendered: false,
         prerenderedPaths: [],
         responsePath: null,
@@ -1007,6 +1045,26 @@ test("start server keeps dynamic routes uncached", async () => {
   assert.equal(secondResponse.headers.get("x-evolit-cache"), "SKIP");
   assert.match(firstHtml, /dynamic:1/);
   assert.match(secondHtml, /dynamic:2/);
+});
+
+test("start server renders modules selected by an interpolated dynamic import", async () => {
+  for (const template of ["alpha", "beta"]) {
+    const response = await fetch(`${baseUrl}/template-probe?template=${template}`);
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, new RegExp(`data-template-probe="${template}"`));
+    assert.match(html, new RegExp(`SSR template ${template}: [\\s\\S]*${template}`));
+    await assert.doesNotReject(fs.access(path.join(
+      fixtureRoot,
+      ".evolit",
+      "build",
+      "server",
+      "src",
+      "template-probe",
+      `${template}.mjs`,
+    )));
+  }
 });
 
 test("start server resolves single dynamic segments", async () => {

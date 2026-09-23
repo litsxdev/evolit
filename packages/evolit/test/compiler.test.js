@@ -75,6 +75,129 @@ for (const mode of ["development", "production"]) {
   });
 }
 
+test("compiler expands interpolated dynamic imports into a finite module dispatcher", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-dynamic-import-"));
+  const sourceRoot = path.join(projectRoot, "src");
+  const templatesRoot = path.join(sourceRoot, "templates");
+  const sourcePath = path.join(sourceRoot, "entry.js");
+
+  try {
+    await Promise.all([
+      fs.mkdir(path.join(templatesRoot, "en"), { recursive: true }),
+      fs.mkdir(path.join(templatesRoot, "es"), { recursive: true }),
+    ]);
+    await Promise.all([
+      fs.writeFile(
+        path.join(templatesRoot, "en", "alpha.tsx"),
+        'export const value: string = "en-alpha";\n',
+        "utf8",
+      ),
+      fs.writeFile(
+        path.join(templatesRoot, "es", "beta.tsx"),
+        'export const value: string = "es-beta";\n',
+        "utf8",
+      ),
+      fs.writeFile(
+        sourcePath,
+        'export const load = (locale, name) => import(`./templates/${locale}/${name}.tsx`);\n',
+        "utf8",
+      ),
+    ]);
+
+    const result = await compileModuleGraph(sourcePath, {
+      projectRoot,
+      mode: "production",
+      sourceMaps: false,
+      target: "server",
+    });
+    const output = await fs.readFile(result.entrypoint, "utf8");
+
+    assert.match(output, /function __evolit_dynamic_import_0/);
+    assert.match(output, /case "\.\/templates\/en\/alpha\.tsx": return import\("\.\/templates\/en\/alpha\.mjs"\)/);
+    assert.match(output, /case "\.\/templates\/es\/beta\.tsx": return import\("\.\/templates\/es\/beta\.mjs"\)/);
+    assert.doesNotMatch(output, /import\(`\.\/templates\/\$\{locale\}/);
+    await assert.doesNotReject(fs.access(path.join(
+      projectRoot,
+      ".evolit",
+      "build",
+      "server",
+      "src",
+      "templates",
+      "en",
+      "alpha.mjs",
+    )));
+
+    const moduleRecord = await import(`${pathToFileURL(result.entrypoint).href}?test=${Date.now()}`);
+    assert.equal((await moduleRecord.load("en", "alpha")).value, "en-alpha");
+    assert.equal((await moduleRecord.load("es", "beta")).value, "es-beta");
+    await assert.rejects(moduleRecord.load("en", "missing"), /Unknown dynamic import/);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("compiler invalidates a dynamic import graph when a new candidate is added", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-dynamic-watch-"));
+  const templatesRoot = path.join(projectRoot, "templates");
+  const sourcePath = path.join(projectRoot, "entry.js");
+  const betaPath = path.join(templatesRoot, "beta.js");
+
+  try {
+    await fs.mkdir(templatesRoot, { recursive: true });
+    await fs.writeFile(path.join(templatesRoot, "alpha.js"), 'export const value = "alpha";\n', "utf8");
+    await fs.writeFile(
+      sourcePath,
+      'export const load = (name) => import(`./templates/${name}.js`);\n',
+      "utf8",
+    );
+    const options = {
+      projectRoot,
+      mode: "development",
+      sourceMaps: false,
+      target: "server",
+    };
+
+    const first = await compileModuleGraph(sourcePath, options);
+    assert.doesNotMatch(await fs.readFile(first.entrypoint, "utf8"), /templates\/beta\.js/);
+
+    await fs.writeFile(betaPath, 'export const value = "beta";\n', "utf8");
+    assert.equal(invalidateDevelopmentCompilationCache(projectRoot, [betaPath]), true);
+
+    const rebuilt = await compileModuleGraph(sourcePath, options);
+    assert.match(await fs.readFile(rebuilt.entrypoint, "utf8"), /templates\/beta\.js/);
+    const moduleRecord = await import(`${pathToFileURL(rebuilt.entrypoint).href}?test=${Date.now()}`);
+    assert.equal((await moduleRecord.load("beta")).value, "beta");
+  } finally {
+    invalidateDevelopmentCompilationCache(projectRoot);
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("compiler rejects dynamic import patterns without build-time candidates", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-dynamic-empty-"));
+  const sourcePath = path.join(projectRoot, "entry.js");
+
+  try {
+    await fs.mkdir(path.join(projectRoot, "templates"), { recursive: true });
+    await fs.writeFile(
+      sourcePath,
+      'export const load = (name) => import(`./templates/${name}.tsx`);\n',
+      "utf8",
+    );
+    await assert.rejects(
+      compileModuleGraph(sourcePath, {
+        projectRoot,
+        mode: "production",
+        sourceMaps: false,
+        target: "server",
+      }),
+      /did not match any modules/,
+    );
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("compiler preserves plain route-handler exports outside the LitSX authoring pipeline", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-plain-route-handler-"));
   const sourcePath = path.join(projectRoot, "route.js");
@@ -461,6 +584,28 @@ test("collects client boundaries through arbitrary Server Component modules", as
     await fs.writeFile(entry, 'import { ServerFragment } from "./src/fragment.jsx"; export default async function RoutePage() { return <ServerFragment />; }\n');
     assert.deepEqual(await collectClientBoundaryModules([entry], { projectRoot }), [path.join(projectRoot, "src", "card.jsx")]);
   } finally { await fs.rm(projectRoot, { recursive: true, force: true }); }
+});
+
+test("collects client boundaries reached through interpolated dynamic imports", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-dynamic-server-boundaries-"));
+  try {
+    await fs.mkdir(path.join(projectRoot, "src", "fragments"), { recursive: true });
+    const cardPath = path.join(projectRoot, "src", "card.jsx");
+    await fs.writeFile(cardPath, "export function FeatureCard() { return <button>client</button>; }\n");
+    await fs.writeFile(
+      path.join(projectRoot, "src", "fragments", "alpha.jsx"),
+      'import { FeatureCard } from "../card.jsx"; export async function ServerFragment() { return <FeatureCard />; }\n',
+    );
+    const entry = path.join(projectRoot, "entry.jsx");
+    await fs.writeFile(
+      entry,
+      'export default async function RoutePage({ name }) { const { ServerFragment } = await import(`./src/fragments/${name}.jsx`); return <ServerFragment />; }\n',
+    );
+
+    assert.deepEqual(await collectClientBoundaryModules([entry], { projectRoot }), [cardPath]);
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
 });
 
 test("keeps Server Component assets public without emitting the server module as client JS", async () => {
