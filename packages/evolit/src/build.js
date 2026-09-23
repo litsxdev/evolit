@@ -51,7 +51,13 @@ import {
 import { serializeRouteCachePolicy } from "./route-config.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 import { ensureDirectory, writeJson } from "./fs-utils.js";
-import { appendSsrUrqlData, runWithOptionalSsrUrqlScope } from "./urql-ssr.js";
+import {
+  appendSsrUrqlData,
+  applySsrUrqlRequestContext,
+  createSsrUrqlRequestContext,
+  runWithOptionalSsrUrqlScope,
+} from "./urql-ssr.js";
+import { runServerSetup } from "./server-setup.js";
 
 const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -157,6 +163,11 @@ async function writeDeploymentRuntimeEntry(buildRoot) {
 
 export async function buildProject(projectRoot, options = {}) {
   const evolitConfig = await loadEvolitConfig(projectRoot);
+  const serverSetupCleanup = await runServerSetup({
+    projectRoot,
+    mode: "production",
+    evolitConfig,
+  });
   const extensions = resolveEvolitExtensions(evolitConfig);
   const extensionClientDescriptors = getExtensionClientDescriptors(extensions);
   const packageClientSpecifiers = new Set(
@@ -541,21 +552,30 @@ export async function buildProject(projectRoot, options = {}) {
       seenPrerenderTargets.add(targetPathname);
 
       const targetRequest = new Request(`http://evolit.local${targetPathname}`);
-      const { routeResult, response } = await runWithOptionalSsrUrqlScope(async (urqlAdapter) => {
+      const urqlRequestContext = createSsrUrqlRequestContext(targetRequest);
+      const { routeResult, response } = await runWithOptionalSsrUrqlScope(urqlRequestContext, async (urqlAdapter) => {
         const resolvedRouteResult = await routeResolver.resolveRequest(targetRequest);
         if (resolvedRouteResult.type !== "route" || resolvedRouteResult.cachePolicy.mode === "dynamic") {
           return { routeResult: resolvedRouteResult, response: null };
         }
 
         const renderedResponse = await renderRouteTreeWithAdapter(resolvedRouteResult, ssrAdapter);
+        const responseWithData = urqlAdapter
+          ? appendSsrUrqlData(renderedResponse, await urqlAdapter.getUrqlSsrData())
+          : renderedResponse;
         return {
           routeResult: resolvedRouteResult,
-          response: urqlAdapter
-            ? appendSsrUrqlData(renderedResponse, await urqlAdapter.getUrqlSsrData())
-            : renderedResponse,
+          response: applySsrUrqlRequestContext(
+            resolvedRouteResult,
+            responseWithData,
+            urqlRequestContext,
+          ),
         };
       });
       if (!response) {
+        continue;
+      }
+      if (routeResult.cachePolicy.mode === "dynamic") {
         continue;
       }
       if (response.status !== 200) {
@@ -655,6 +675,8 @@ export async function buildProject(projectRoot, options = {}) {
   await writeJson(path.join(buildRoot, DEPLOY_ROUTES_MANIFEST_FILENAME), deployRoutes);
   await writeJson(path.join(buildRoot, DEPLOY_ASSETS_MANIFEST_FILENAME), deployAssets);
   await writeJson(path.join(buildRoot, DEPLOY_SERVER_MANIFEST_FILENAME), deployServer);
+
+  await serverSetupCleanup?.();
 
   return manifestPath;
 }

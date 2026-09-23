@@ -1677,7 +1677,7 @@ __metadata:
     vite: "npm:^8.1.5"
     ws: "npm:^8.18.3"
   peerDependencies:
-    "@litsx/urql": ^0.3.0
+    "@litsx/urql": ^0.4.0
   peerDependenciesMeta:
     "@litsx/urql":
       optional: true

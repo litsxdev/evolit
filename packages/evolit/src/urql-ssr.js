@@ -26,7 +26,18 @@ export async function getSsrUrqlAdapter() {
  * Evolit owns only lifecycle here; client creation and URQL configuration stay
  * entirely in the application and @litsx/urql.
  */
-export async function runWithOptionalSsrUrqlScope(callback, options = {}) {
+export async function runWithOptionalSsrUrqlScope(
+  contextOrCallback,
+  callbackOrOptions = {},
+  maybeOptions = {},
+) {
+  const hasRequestContext = typeof contextOrCallback !== "function";
+  const requestContext = hasRequestContext ? contextOrCallback : null;
+  const callback = hasRequestContext ? callbackOrOptions : contextOrCallback;
+  const options = hasRequestContext ? maybeOptions : callbackOrOptions;
+  if (typeof callback !== "function") {
+    throw new TypeError("runWithOptionalSsrUrqlScope() expects a render callback.");
+  }
   const adapter = Object.hasOwn(options, "adapter")
     ? options.adapter
     : await getSsrUrqlAdapter();
@@ -34,7 +45,61 @@ export async function runWithOptionalSsrUrqlScope(callback, options = {}) {
     return callback(null);
   }
 
-  return adapter.runWithUrqlScope(() => callback(adapter));
+  return hasRequestContext
+    ? adapter.runWithUrqlScope(requestContext, () => callback(adapter))
+    : adapter.runWithUrqlScope(() => callback(adapter));
+}
+
+/** Creates the HTTP context passed to a request-scoped URQL resource factory. */
+export function createSsrUrqlRequestContext(request) {
+  let didUseRequestData = false;
+  const trackedRequest = new Proxy(request, {
+    get(target, property) {
+      if (property !== "constructor" && property !== Symbol.toStringTag) {
+        didUseRequestData = true;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const responseHeaders = new Headers();
+  return {
+    request: trackedRequest,
+    responseHeaders,
+    didUseDynamicRequestData() {
+      return didUseRequestData || !responseHeaders.entries().next().done;
+    },
+  };
+}
+
+function responseHeadersToObject(headers) {
+  const values = Object.fromEntries(headers.entries());
+  if (typeof headers.getSetCookie === "function") {
+    const cookies = headers.getSetCookie();
+    if (cookies.length > 0) values["set-cookie"] = cookies;
+  }
+  return values;
+}
+
+/** Applies request-resource response state before Evolit caches the render. */
+export function applySsrUrqlRequestContext(routeResult, response, context) {
+  if (!context) return response;
+  const urqlHeaders = responseHeadersToObject(context.responseHeaders);
+  if (context.didUseDynamicRequestData()) {
+    routeResult.cachePolicy = { mode: "dynamic" };
+  }
+  if (Object.keys(urqlHeaders).length === 0) return response;
+  routeResult.responseHeaders = {
+    ...(routeResult.responseHeaders ?? {}),
+    ...urqlHeaders,
+  };
+  return {
+    ...response,
+    headers: {
+      ...(response.headers ?? {}),
+      ...urqlHeaders,
+    },
+  };
 }
 
 function escapeJsonForHtml(value) {

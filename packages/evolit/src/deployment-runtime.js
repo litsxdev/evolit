@@ -41,12 +41,18 @@ import {
 } from "./response-cache.js";
 import { createSsrAdapter, renderRouteTreeWithAdapter } from "./ssr-adapter.js";
 import { createNavigationResponseFromDocument } from "./route-segments.js";
-import { appendSsrUrqlData, runWithOptionalSsrUrqlScope } from "./urql-ssr.js";
+import {
+  appendSsrUrqlData,
+  applySsrUrqlRequestContext,
+  createSsrUrqlRequestContext,
+  runWithOptionalSsrUrqlScope,
+} from "./urql-ssr.js";
 import {
   getExtensionClientDescriptors,
   resolveEvolitExtensions,
   runRequestExtensions,
 } from "./extensions.js";
+import { runServerSetup } from "./server-setup.js";
 
 function isBarePackageModuleId(value) {
   return typeof value === "string"
@@ -882,7 +888,8 @@ export async function createRequestRenderer({
       return effectiveRouteResolver.resolveRoutePolicy(request, options);
     },
     async renderRoute(request, routePolicyResult = null, options = {}) {
-      return runWithOptionalSsrUrqlScope(async (urqlAdapter) => {
+      const urqlRequestContext = createSsrUrqlRequestContext(request);
+      return runWithOptionalSsrUrqlScope(urqlRequestContext, async (urqlAdapter) => {
         const shouldPrepareBeforeResolve = mode === "development" && !currentAssetManifest;
         let resolvedRoutePolicyResult = routePolicyResult;
         if (shouldPrepareBeforeResolve) {
@@ -895,9 +902,14 @@ export async function createRequestRenderer({
           await this.prepareRouteClientArtifacts(routeResult);
         }
         const renderedResponse = await renderRouteTreeWithAdapter(routeResult, ssrAdapter);
-        const response = urqlAdapter
+        const responseWithData = urqlAdapter
           ? appendSsrUrqlData(renderedResponse, await urqlAdapter.getUrqlSsrData())
           : renderedResponse;
+        const response = applySsrUrqlRequestContext(
+          routeResult,
+          responseWithData,
+          urqlRequestContext,
+        );
         return {
           routeResult,
           response,
@@ -921,8 +933,10 @@ export async function createDeploymentRuntime({
   routeResolver,
   onDevelopmentEvent,
   managedSourceRoots,
+  evolitConfig: configuredEvolitConfig,
 } = {}) {
-  const evolitConfig = await loadEvolitConfig(projectRoot);
+  const evolitConfig = configuredEvolitConfig ?? await loadEvolitConfig(projectRoot);
+  const serverSetupCleanup = await runServerSetup({ projectRoot, mode, evolitConfig });
   const extensions = resolveEvolitExtensions(evolitConfig);
   const extensionClientSpecifiers = getExtensionClientDescriptors(extensions).map((descriptor) => descriptor.module);
   const effectiveManagedSourceRoots = managedSourceRoots
@@ -1072,6 +1086,7 @@ export async function createDeploymentRuntime({
       if (revalidationTasks) {
         await Promise.all(revalidationTasks.values());
       }
+      await serverSetupCleanup?.();
     },
   };
 }
