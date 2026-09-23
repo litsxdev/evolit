@@ -321,6 +321,32 @@ server components and helpers that do not receive route props directly. It retur
 Reading `getRouteState().url` has the same dynamic-rendering semantics as `requestUrl()`; reading
 `params` and `searchParams` participates in the normal segment-cache key tracking.
 
+## Server Setup
+
+Server integrations that need one-time application setup can be registered with
+`server.setup`. A module specifier is compiled as part of the server graph, so the
+setup may be authored in JavaScript or TypeScript:
+
+```js
+// evolit.config.js
+export default {
+  server: {
+    setup: "./src/server/setup.ts",
+  },
+};
+```
+
+The module exports `setup` (or a default function). Evolit invokes it once per
+runtime and once before build-time prerendering with `{ projectRoot, mode }`.
+It may return a cleanup function or `{ dispose() }`; runtime cleanup runs from
+`runtime.close()`.
+
+When `@litsx/urql` is installed, Evolit opens its SSR resource around the whole
+route render and supplies `{ request, responseHeaders }`. Request-derived URQL
+configuration therefore stays isolated per render, extracted SSR data is read
+before the scope closes, and integration response headers are included before
+the response is cached.
+
 ## Extensions
 
 Optional integrations are configured explicitly in `evolit.config.js`. Core only coordinates their

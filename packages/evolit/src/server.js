@@ -214,6 +214,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
     responseCacheRuntime,
     onDevelopmentEvent: reportDevelopmentEvent,
     managedSourceRoots,
+    evolitConfig,
   });
   const port = getPort(explicitPort);
   const liveReloadServer = mode === "development" ? new WebSocketServer({ noServer: true }) : null;
