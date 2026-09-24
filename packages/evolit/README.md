@@ -321,6 +321,67 @@ server components and helpers that do not receive route props directly. It retur
 Reading `getRouteState().url` has the same dynamic-rendering semantics as `requestUrl()`; reading
 `params` and `searchParams` participates in the normal segment-cache key tracking.
 
+## LitSX compiler integrations
+
+`evolit.config.js` can configure the native LitSX compiler and register build-tool-neutral LitSX
+integrations. The same declaration is used by development, SSR, hydration, production builds and
+the standalone runtime:
+
+```js
+import { litsxUnoCss } from "@litsx/unocss";
+
+export default {
+  litsx: {
+    compiler: {
+      sourceMaps: true,
+    },
+    integrations: [litsxUnoCss()],
+  },
+};
+```
+
+This is the complete Evolit + UnoCSS setup. The application does not coordinate compiler plugins,
+virtual modules, generation, finalization or global CSS links, and it does not need Vite or
+PostCSS. `@litsx/unocss` remains the owner of candidate extraction and CSS generation; Evolit only
+executes its neutral LitSX lifecycle.
+
+`compiler` accepts the public `TransformLitsxOptions` surface except the values Evolit must own for
+correct server and browser graphs. Evolit always supplies the current `filename`, selects `ssr` per
+target and forces native lowering with `reactCompat: false`; `compiler.sourceMaps` can override the
+existing per-pipeline default without changing applications that omit `litsx`.
+Authoring and output plugins contributed by the application and integrations are composed in
+declaration order rather than replacing framework invariants.
+
+An integration is a descriptor with a unique `name` and `create(context)` method. Each call to
+`create` belongs to exactly one development server, build or standalone runtime, so mutable caches
+must live on the returned instance, never on the descriptor. An instance can contribute:
+
+- `compiler`: native compiler options, including authoring and output plugins.
+- `resolveModule`: sources for integration-owned virtual modules in both server and browser graphs.
+- `processModule`: post-processing, observable dependencies and preliminary outputs for a compiled
+  module.
+- `finalize`: graph-wide assets, styles or modules after every reachable module is known.
+- `invalidate` and `forget`: configuration/dependency refresh and removal of stale module state.
+- `dispose`: idempotent cleanup when the owning server, build or runtime closes.
+
+Declared outputs use stable IDs unique within the pipeline and one of `asset`, `module` or `style`. A module
+may expose a safe `virtual:` specifier; a style with `document: true` is content-hashed, included in
+the client asset manifest and linked once in the document. Evolit publishes a generation only after
+every integration finalizes successfully, so a failed generation cannot expose a partial mix of
+old and new assets.
+
+In development, dependencies reported by compiler plugins and lifecycle hooks are watched together
+with application modules. Invalidating a dependency advances the integration generation, evicts
+affected compiled modules and calls `forget` for modules that leave the graph. Configuration reload
+therefore removes obsolete results instead of accumulating them. Hook failures identify the
+integration, lifecycle phase and relevant module in development; production errors keep the same
+context while redacting project-local absolute paths.
+
+For native Shadow DOM, `@litsx/unocss` serializes component preflight inside each Declarative Shadow
+Root, preserves authored `Component.styles` before generated utilities, and emits the document
+theme/custom-property layers once. Those document variables inherit through Shadow Roots and the
+browser hydrates the server result without switching to `react-compat`.
+
 ## Server Setup
 
 Server integrations that need one-time application setup can be registered with

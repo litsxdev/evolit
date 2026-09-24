@@ -193,13 +193,13 @@ async function transformModuleSource(source, {
       source,
       sourcePath,
       await transformLitsx(source, compilerOptions),
-      sourceMaps,
+      compilerOptions.sourceMaps === true,
     );
     return litsxPipeline
       ? litsxPipeline.processModule(transformed, {
         source,
         sourcePath,
-        sourceMaps: sourceMaps === true,
+        sourceMaps: compilerOptions.sourceMaps === true,
         ssr: ssr === true,
         target,
       })

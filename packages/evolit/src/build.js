@@ -372,16 +372,17 @@ export async function buildProject(projectRoot, options = {}) {
   const staticAssetPublicUrls = createStaticAssetPublicUrlMap(clientAssets);
   await rewriteServerAssetPlaceholders(projectRoot, clientAssets);
 
-  const routeResolver = await createRouteResolver(projectRoot, "production", {
-    staticAssetPublicUrls,
-    litsxPipeline,
-  });
   const sharedRuntime = await buildSharedVendorRuntime(projectRoot, "production", sharedVendorOptions);
   clientAssets.sharedImports = { ...sharedRuntime.imports };
   const packageImports = sharedRuntime.imports;
   const assetResolver = createAssetResolver(projectRoot, {
     assetManifest: clientAssets,
     packageImports,
+  });
+  const routeResolver = await createRouteResolver(projectRoot, "production", {
+    staticAssetPublicUrls,
+    assetResolver,
+    litsxPipeline,
   });
   const hydrationModuleUrl = await resolveSharedVendorModuleUrl(
     projectRoot,
@@ -442,7 +443,21 @@ export async function buildProject(projectRoot, options = {}) {
           }
           continue;
         }
-        if (assetResolver(moduleId) || clientAssets.byPublicPath?.[moduleId]) continue;
+        const directPublicUrl = assetResolver(moduleId)
+          ?? (clientAssets.byPublicPath?.[moduleId] ? moduleId : null);
+        if (directPublicUrl) {
+          if (Array.isArray(result.clientImports)) {
+            result.clientImports = result.clientImports.map((value) => (
+              value === moduleId ? directPublicUrl : value
+            ));
+          }
+          if (Array.isArray(result.hydrationData?.clientImports)) {
+            result.hydrationData.clientImports = result.hydrationData.clientImports.map((value) => (
+              value === moduleId ? directPublicUrl : value
+            ));
+          }
+          continue;
+        }
         const importerPath = routeResult.boundaryModule
           ?? routeResult.route?.page
           ?? path.join(projectRoot, "app", "page.jsx");

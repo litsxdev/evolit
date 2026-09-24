@@ -1029,8 +1029,10 @@ export async function createDeploymentRuntime({
         return;
       }
 
-      await litsxPipeline?.invalidate(changedPaths);
-      const invalidationResult = await renderer.invalidateDevelopmentState(changedPaths);
+      const litsxInvalidated = await litsxPipeline?.invalidate(changedPaths);
+      const invalidationResult = await renderer.invalidateDevelopmentState(
+        litsxInvalidated ? null : changedPaths,
+      );
       if (typeof effectiveResponseCacheRuntime.store.clear === "function") {
         await effectiveResponseCacheRuntime.store.clear();
       }

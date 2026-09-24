@@ -51,7 +51,7 @@ test("composes compiler options in declaration order while preserving Evolit inv
       ssr: true,
     });
     assert.equal(options.filename, path.join(projectRoot, "app/page.jsx"));
-    assert.equal(options.sourceMaps, true);
+    assert.equal(options.sourceMaps, false);
     assert.equal(options.ssr, true);
     assert.equal(options.reactCompat, false);
     assert.equal(options.defaultDomMode, "shadow");

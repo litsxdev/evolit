@@ -362,7 +362,7 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
         ...options,
         filename,
         ssr: ssr === true,
-        sourceMaps: sourceMaps === true,
+        sourceMaps: options.sourceMaps ?? (sourceMaps === true),
         reactCompat: false,
       };
     },
@@ -379,6 +379,7 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
       }
       for (const { descriptor, instance } of instances) {
         if (typeof instance.resolveModule !== "function") continue;
+        if (declaredOutput?.integrationName === descriptor.name) continue;
         try {
           const value = await instance.resolveModule(Object.freeze({
             ...context,
