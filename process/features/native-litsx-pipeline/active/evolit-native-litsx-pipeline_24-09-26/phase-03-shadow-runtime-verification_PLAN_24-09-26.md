@@ -9,7 +9,7 @@ metadata: { node_type: memory, type: phase-plan, feature: native-litsx-pipeline,
 
 **Date**: 24-09-26  
 **Complexity**: COMPLEX  
-**Status**: ⏳ PLANNED
+**Status**: ✅ VERIFIED
 
 ## Context and Goals
 
@@ -33,18 +33,18 @@ Build the direct fixture and prove development invalidation, SSR, hydration, pro
 
 ## Implementation Checklist
 
-- [ ] Add a direct integration fixture with two native Shadow DOM components and every required candidate form.
-- [ ] Assert utility/preflight ownership, authored-style ordering, DSD markup and hydrated equivalence.
-- [ ] Assert one global theme/custom-property asset and inheritance into shadow roots.
-- [ ] Test add/remove class, config change, stale removal and deduplication in development.
-- [ ] Test repeated/concurrent builds, standalone serving, asset links and project isolation.
-- [ ] Run routing, SSR, hydration, source-map, asset, cache and URQL regressions.
+- [x] Add a direct integration fixture with two native Shadow DOM components and every required candidate form.
+- [x] Assert utility/preflight ownership, authored-style ordering, DSD markup and hydrated equivalence.
+- [x] Assert one global theme/custom-property asset and inheritance into shadow roots.
+- [x] Test add/remove class, config change, stale removal and deduplication in development.
+- [x] Test repeated/concurrent builds, standalone serving, asset links and project isolation.
+- [x] Run routing, SSR, hydration, source-map, asset, cache and URQL regressions.
 
 ## Acceptance Criteria
 
-- [ ] Required utility forms and preflight are owned by the correct Shadow DOM component.
-- [ ] Global theme output appears once and hydrates without drift.
-- [ ] Development removes stale CSS and production/concurrent builds remain isolated.
+- [x] Required utility forms and preflight are owned by the correct Shadow DOM component.
+- [x] Global theme output appears once and hydrates without drift.
+- [x] Development removes stale CSS and production/concurrent builds remain isolated.
 
 ## Exit Gate
 
