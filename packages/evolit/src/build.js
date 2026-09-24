@@ -58,6 +58,7 @@ import {
   runWithOptionalSsrUrqlScope,
 } from "./urql-ssr.js";
 import { runServerSetup } from "./server-setup.js";
+import { createLitsxPipeline, mergeLitsxAssetsIntoManifest } from "./litsx-pipeline.js";
 
 const CONTENT_TYPE_BY_EXTENSION = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -163,11 +164,20 @@ async function writeDeploymentRuntimeEntry(buildRoot) {
 
 export async function buildProject(projectRoot, options = {}) {
   const evolitConfig = await loadEvolitConfig(projectRoot);
-  const serverSetupCleanup = await runServerSetup({
+  const litsxPipeline = await createLitsxPipeline({
     projectRoot,
     mode: "production",
-    evolitConfig,
+    config: evolitConfig,
   });
+  let serverSetupCleanup = null;
+  let buildError = null;
+  try {
+    serverSetupCleanup = await runServerSetup({
+      projectRoot,
+      mode: "production",
+      evolitConfig,
+      litsxPipeline,
+    });
   const extensions = resolveEvolitExtensions(evolitConfig);
   const extensionClientDescriptors = getExtensionClientDescriptors(extensions);
   const packageClientSpecifiers = new Set(
@@ -194,6 +204,7 @@ export async function buildProject(projectRoot, options = {}) {
       sourceMaps: false,
       ssr: true,
       target: "server",
+      litsxPipeline,
     });
     result.packageImports.forEach((specifier) => ssrPackageImports.add(specifier));
     return result;
@@ -202,7 +213,7 @@ export async function buildProject(projectRoot, options = {}) {
   function getEntryInventory(entryPath) {
     let inventory = inventoriesBySourceEntry.get(entryPath);
     if (!inventory) {
-      inventory = collectClientGraphInventory([entryPath], { projectRoot });
+      inventory = collectClientGraphInventory([entryPath], { projectRoot, litsxPipeline });
       inventoriesBySourceEntry.set(entryPath, inventory);
     }
     return inventory;
@@ -216,6 +227,7 @@ export async function buildProject(projectRoot, options = {}) {
       mode: "production",
       sourceMaps: true,
       target: "client",
+      litsxPipeline,
     });
     clientModule = path.relative(clientBuild.outputRoot, clientBuild.entrypoint)
       .split(path.sep)
@@ -235,6 +247,7 @@ export async function buildProject(projectRoot, options = {}) {
       mode: "production",
       ssr: true,
       target: "server",
+      litsxPipeline,
     });
     const methods = Object.keys(handlerModule)
       .filter((name) => /^[A-Z]+$/.test(name) && typeof handlerModule[name] === "function")
@@ -345,24 +358,31 @@ export async function buildProject(projectRoot, options = {}) {
   }
 
   sharedVendorOptions.additionalEntrySpecifiers = [...packageClientSpecifiers].sort();
-  const clientAssets = await emitBundledClientAssets(projectRoot, {
+  let clientAssets = await emitBundledClientAssets(projectRoot, {
     entryClientModules,
     additionalVendorSpecifiers: sharedVendorOptions.additionalEntrySpecifiers,
     serverAssetImportsByEntry,
     clientBoundariesByEntry,
   });
+  const integrationOutputs = await litsxPipeline?.finalize({
+    routes,
+    routeHandlers,
+  });
+  clientAssets = mergeLitsxAssetsIntoManifest(clientAssets, integrationOutputs);
   const staticAssetPublicUrls = createStaticAssetPublicUrlMap(clientAssets);
   await rewriteServerAssetPlaceholders(projectRoot, clientAssets);
 
-  const routeResolver = await createRouteResolver(projectRoot, "production", {
-    staticAssetPublicUrls,
-  });
   const sharedRuntime = await buildSharedVendorRuntime(projectRoot, "production", sharedVendorOptions);
   clientAssets.sharedImports = { ...sharedRuntime.imports };
   const packageImports = sharedRuntime.imports;
   const assetResolver = createAssetResolver(projectRoot, {
     assetManifest: clientAssets,
     packageImports,
+  });
+  const routeResolver = await createRouteResolver(projectRoot, "production", {
+    staticAssetPublicUrls,
+    assetResolver,
+    litsxPipeline,
   });
   const hydrationModuleUrl = await resolveSharedVendorModuleUrl(
     projectRoot,
@@ -423,7 +443,21 @@ export async function buildProject(projectRoot, options = {}) {
           }
           continue;
         }
-        if (assetResolver(moduleId) || clientAssets.byPublicPath?.[moduleId]) continue;
+        const directPublicUrl = assetResolver(moduleId)
+          ?? (clientAssets.byPublicPath?.[moduleId] ? moduleId : null);
+        if (directPublicUrl) {
+          if (Array.isArray(result.clientImports)) {
+            result.clientImports = result.clientImports.map((value) => (
+              value === moduleId ? directPublicUrl : value
+            ));
+          }
+          if (Array.isArray(result.hydrationData?.clientImports)) {
+            result.hydrationData.clientImports = result.hydrationData.clientImports.map((value) => (
+              value === moduleId ? directPublicUrl : value
+            ));
+          }
+          continue;
+        }
         const importerPath = routeResult.boundaryModule
           ?? routeResult.route?.page
           ?? path.join(projectRoot, "app", "page.jsx");
@@ -473,6 +507,7 @@ export async function buildProject(projectRoot, options = {}) {
         ])]
         : [];
       const styleUrls = [...new Set([
+        ...(clientAssets.documentStyles ?? []),
         ...collectTransitiveStyleUrls(clientImports, clientAssets),
         ...resolveServerStyleUrls(routeResult, projectRoot, clientAssets),
       ])];
@@ -650,6 +685,11 @@ export async function buildProject(projectRoot, options = {}) {
         cache: sortedRouteCache.find((entry) => entry.pathname === artifact.routePathname)?.cache
           ?? "static",
       })),
+      ...(integrationOutputs?.assets ?? []).map((asset) => ({
+        kind: asset.kind,
+        outputPath: toBuildRelativePath(projectRoot, asset.outputPath),
+        integration: asset.integration,
+      })),
     ],
   };
   const manifestPath = path.join(buildRoot, MANIFEST_FILENAME);
@@ -676,7 +716,22 @@ export async function buildProject(projectRoot, options = {}) {
   await writeJson(path.join(buildRoot, DEPLOY_ASSETS_MANIFEST_FILENAME), deployAssets);
   await writeJson(path.join(buildRoot, DEPLOY_SERVER_MANIFEST_FILENAME), deployServer);
 
-  await serverSetupCleanup?.();
-
   return manifestPath;
+  } catch (error) {
+    buildError = error;
+    throw error;
+  } finally {
+    let cleanupError = null;
+    try {
+      await serverSetupCleanup?.();
+    } catch (error) {
+      cleanupError = error;
+    }
+    try {
+      await litsxPipeline?.dispose();
+    } catch (error) {
+      cleanupError ??= error;
+    }
+    if (!buildError && cleanupError) throw cleanupError;
+  }
 }

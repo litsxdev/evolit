@@ -147,6 +147,7 @@ function createRouteModuleOptions(projectRoot, mode, options = {}) {
     staticAssetPublicUrls: resolvedStaticAssetPublicUrls,
     onDevelopmentEvent: options.onDevelopmentEvent,
     managedSourceRoots: options.managedSourceRoots,
+    litsxPipeline: options.litsxPipeline,
   };
 }
 

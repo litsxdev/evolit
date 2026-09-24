@@ -21,7 +21,7 @@ function normalizeCleanup(result) {
 }
 
 /** Runs the application server bootstrap once for a build or runtime instance. */
-export async function runServerSetup({ projectRoot, mode, evolitConfig = {} }) {
+export async function runServerSetup({ projectRoot, mode, evolitConfig = {}, litsxPipeline = null }) {
   const serverConfig = evolitConfig.server;
   if (serverConfig == null) return null;
   if (!serverConfig || typeof serverConfig !== "object" || Array.isArray(serverConfig)) {
@@ -49,6 +49,7 @@ export async function runServerSetup({ projectRoot, mode, evolitConfig = {} }) {
       mode,
       sourceMaps: mode === "development",
       target: "server",
+      litsxPipeline,
     });
     setup = resolveSetupExport(moduleRecord, configuredSetup);
   }

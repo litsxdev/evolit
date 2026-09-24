@@ -65,6 +65,47 @@ async function navigate(page, href) {
   }, href);
 }
 
+async function writeUnoCssBrowserFixture(projectRoot) {
+  await scaffoldSite(projectRoot);
+  await linkFrameworkDependencies(projectRoot);
+  await fs.writeFile(path.join(projectRoot, "evolit.config.js"), [
+    'import { litsxUnoCss } from "@litsx/unocss";',
+    'export default { litsx: { compiler: { sourceMaps: true }, integrations: [litsxUnoCss()] } };',
+    "",
+  ].join("\n"));
+  await fs.writeFile(path.join(projectRoot, "uno.config.mjs"), [
+    'import { presetWind3 } from "unocss";',
+    "export default {",
+    "  presets: [presetWind3()],",
+    "  preflights: [",
+    '    { layer: "theme", getCSS: () => ":root{--browser-brand:rgb(12 34 56)}" },',
+    '    { layer: "preflights", getCSS: () => ":host{box-sizing:border-box}" },',
+    "  ],",
+    "};",
+    "",
+  ].join("\n"));
+  await fs.writeFile(path.join(projectRoot, "app", "components", "uno-card.jsx"), [
+    'import { css } from "lit";',
+    "export default function UnoCard() {",
+    '  return <article class="m-7 w-[37px] data-[state=open]:border-green-500" data-state="open">Card</article>;',
+    "}",
+    'UnoCard.styles = css`:host{display:block;color:var(--browser-brand)}.authored{--order:1}`;',
+    "",
+  ].join("\n"));
+  await fs.writeFile(path.join(projectRoot, "app", "components", "uno-badge.jsx"), [
+    "export default function UnoBadge() {",
+    '  return <strong className="font-bold rounded-full">Ready</strong>;',
+    "}",
+    "",
+  ].join("\n"));
+  await fs.writeFile(path.join(projectRoot, "app", "page.jsx"), [
+    'import UnoCard from "./components/uno-card.jsx";',
+    'import UnoBadge from "./components/uno-badge.jsx";',
+    "export default async function SitePage() { return <section><UnoCard /><UnoBadge /></section>; }",
+    "",
+  ].join("\n"));
+}
+
 test("browser can load an Evolit SSR document with route segment metadata", async ({ page }, testInfo) => {
   const port = 3500 + testInfo.workerIndex;
   const origin = `http://127.0.0.1:${port}`;
@@ -271,6 +312,82 @@ test("development refresh applies server deltas and hot-swaps changed client cod
     expect(await page.evaluate(() => window.__evolitDocumentIdentity ?? null)).toBe("initial-document");
     await expect(page.locator(".eyebrow")).toHaveText("Incrementally refreshed on the server");
     expect(browserDeltaRequests).toBe(0);
+  } finally {
+    if (child?.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("direct UnoCSS integration hydrates Shadow DOM and refreshes source and config", async ({ page }, testInfo) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-unocss-browser-"));
+  const projectRoot = path.join(tempRoot, "site");
+  const port = 4300 + testInfo.workerIndex;
+  const origin = `http://127.0.0.1:${port}`;
+  let child;
+  let childOutput = "";
+  try {
+    await writeUnoCssBrowserFixture(projectRoot);
+    child = spawn(process.execPath, [path.join(frameworkRoot, "src", "cli.js"), "dev", "--port", String(port)], {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout.on("data", (chunk) => { childOutput += String(chunk); });
+    child.stderr.on("data", (chunk) => { childOutput += String(chunk); });
+    try {
+      await waitForServer(origin);
+    } catch (error) {
+      throw new Error(`${error.message}\n${childOutput}`, { cause: error });
+    }
+    const ssr = await (await fetch(origin)).text();
+    expect(ssr).toContain('shadowrootmode="open"');
+    expect((ssr.match(/\/integrations\/unocss\/global\.[a-f0-9]{8}\.css/g) ?? []).length).toBe(1);
+
+    await page.goto(origin, { waitUntil: "networkidle", timeout: 20_000 });
+    await expect.poll(() => page.evaluate(() => {
+      const card = document.querySelector("uno-card");
+      const badge = document.querySelector("uno-badge");
+      return {
+        cardUpgraded: card?.constructor.name !== "HTMLElement",
+        badgeUpgraded: badge?.constructor.name !== "HTMLElement",
+        margin: card?.shadowRoot ? getComputedStyle(card.shadowRoot.querySelector("article")).margin : null,
+        width: card?.shadowRoot ? getComputedStyle(card.shadowRoot.querySelector("article")).width : null,
+        weight: badge?.shadowRoot ? getComputedStyle(badge.shadowRoot.querySelector("strong")).fontWeight : null,
+        color: card ? getComputedStyle(card).color : null,
+      };
+    })).toEqual({
+      cardUpgraded: true,
+      badgeUpgraded: true,
+      margin: "28px",
+      width: "37px",
+      weight: "700",
+      color: "rgb(12, 34, 56)",
+    });
+    const initialGlobalHref = await page.locator('link[href*="/integrations/unocss/global."]').getAttribute("href");
+
+    const cardPath = path.join(projectRoot, "app", "components", "uno-card.jsx");
+    const cardSource = await fs.readFile(cardPath, "utf8");
+    await fs.writeFile(cardPath, cardSource.replace("m-7", "m-9"));
+    await expect.poll(() => page.locator("uno-card").evaluate((card) => (
+      getComputedStyle(card.shadowRoot.querySelector("article")).margin
+    )), { timeout: 10_000 }).toBe("36px");
+
+    const configPath = path.join(projectRoot, "uno.config.mjs");
+    const configSource = await fs.readFile(configPath, "utf8");
+    await fs.writeFile(configPath, configSource.replace("rgb(12 34 56)", "rgb(98 76 54)"));
+    try {
+      await expect.poll(() => page.locator('link[href*="/integrations/unocss/global."]').getAttribute("href"), {
+        timeout: 10_000,
+      }).not.toBe(initialGlobalHref);
+      await expect.poll(() => page.locator("uno-card").evaluate((card) => getComputedStyle(card).color), {
+        timeout: 10_000,
+      }).toBe("rgb(98, 76, 54)");
+    } catch (error) {
+      throw new Error(`${error.message}\n${childOutput}`, { cause: error });
+    }
+    expect(await page.locator('link[href*="/integrations/unocss/global."]').count()).toBe(1);
   } finally {
     if (child?.exitCode === null) {
       child.kill();

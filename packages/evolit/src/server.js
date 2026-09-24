@@ -268,6 +268,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
           const response = await deploymentRuntime.handle(
             createDevelopmentNavigationRequest(subscription, origin),
           );
+          syncLitsxDependencyWatchers();
           const navigationResponse = createNavigationResponseFromDocument(response);
           if (!getResponseHeader(navigationResponse.headers, "content-type")
             ?.includes("application/vnd.evolit.navigation+json")) return null;
@@ -342,6 +343,39 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       { shouldIgnorePath: createSourceWatchIgnorePath(sourceRoot) },
     )))
     : [];
+  const litsxDependencyWatchers = new Map();
+
+  function syncLitsxDependencyWatchers() {
+    if (mode !== "development") return;
+    const activeDependencies = new Set(
+      (deploymentRuntime.litsxDependencies ?? []).map((dependency) => path.resolve(dependency)),
+    );
+    for (const [dependency, watcher] of litsxDependencyWatchers) {
+      if (activeDependencies.has(dependency)) continue;
+      watcher.close();
+      litsxDependencyWatchers.delete(dependency);
+    }
+    for (const resolvedDependency of activeDependencies) {
+      const relativePath = path.relative(projectRoot, resolvedDependency);
+      if (relativePath.split(path.sep).includes(INTERNAL_DIRECTORY)) continue;
+      const isAlreadyManaged = managedSourceRoots.some((sourceRoot) => {
+        const managedRelativePath = path.relative(sourceRoot, resolvedDependency);
+        return managedRelativePath === ""
+          || (managedRelativePath !== ".."
+            && !managedRelativePath.startsWith(`..${path.sep}`)
+            && !path.isAbsolute(managedRelativePath));
+      });
+      if (isAlreadyManaged) continue;
+      if (litsxDependencyWatchers.has(resolvedDependency)) continue;
+      try {
+        const watcher = watch(resolvedDependency, () => scheduleDevelopmentInvalidation(resolvedDependency));
+        watcher.on("error", () => {});
+        litsxDependencyWatchers.set(resolvedDependency, watcher);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+  }
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -357,6 +391,7 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
       });
       const requestStartedAt = performance.now();
       const response = await deploymentRuntime.handle(request);
+      syncLitsxDependencyWatchers();
       const navigationResponse = String(req.headers.accept ?? "").includes("application/vnd.evolit.navigation+json")
         ? createNavigationResponseFromDocument(response)
         : response;
@@ -385,7 +420,9 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         error,
       });
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-      res.end(error instanceof Error ? error.stack ?? error.message : String(error));
+      res.end(mode === "development"
+        ? error instanceof Error ? error.stack ?? error.message : String(error)
+        : "Internal Server Error");
     }
   });
 
@@ -417,6 +454,8 @@ async function createServer(projectRoot, mode, explicitPort, options = {}) {
         clearTimeout(invalidationTimer);
       }
       for (const watcher of watchers) watcher.close();
+      for (const watcher of litsxDependencyWatchers.values()) watcher.close();
+      litsxDependencyWatchers.clear();
       for (const socket of liveReloadSockets.keys()) {
         socket.close();
       }

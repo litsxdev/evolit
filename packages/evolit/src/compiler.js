@@ -182,14 +182,28 @@ async function transformModuleSource(source, {
   sourcePath,
   sourceMaps,
   ssr = false,
+  target = ssr ? "server" : "client",
+  litsxPipeline = null,
 }) {
   if (isLitsxAuthoredModule(sourcePath, source)) {
-    const transformed = await transformLitsx(source, {
-      filename: sourcePath,
-      sourceMaps,
-      ssr,
-    });
-    return restoreSideEffectImports(source, sourcePath, transformed, sourceMaps);
+    const compilerOptions = litsxPipeline
+      ? litsxPipeline.getCompilerOptions({ filename: sourcePath, sourceMaps, ssr })
+      : { filename: sourcePath, sourceMaps, ssr };
+    const transformed = restoreSideEffectImports(
+      source,
+      sourcePath,
+      await transformLitsx(source, compilerOptions),
+      compilerOptions.sourceMaps === true,
+    );
+    return litsxPipeline
+      ? litsxPipeline.processModule(transformed, {
+        source,
+        sourcePath,
+        sourceMaps: compilerOptions.sourceMaps === true,
+        ssr: ssr === true,
+        target,
+      })
+      : transformed;
   }
 
   if (sourcePath.endsWith(".ts")) {
@@ -963,6 +977,7 @@ async function rewriteRelativeSpecifiers({
   serverExportsByModule,
   packageImports,
   dynamicImportDirectories,
+  litsxPipeline,
 }) {
   const magicSource = new MagicString(code);
   let didRewrite = false;
@@ -974,10 +989,19 @@ async function rewriteRelativeSpecifiers({
   for (const reference of moduleReferences.staticReferences) {
     const { specifier } = reference;
 
-    const aliasedImportPath = isBareSpecifier(specifier)
+    const virtualImportPath = litsxPipeline
+      ? await litsxPipeline.resolveModule(specifier, {
+        importer: sourcePath,
+        target,
+        ssr: target === "server",
+        sourceMaps,
+      })
+      : null;
+
+    const aliasedImportPath = !virtualImportPath && isBareSpecifier(specifier)
       ? await resolveProjectMappedImport(projectRoot, sourcePath, specifier)
       : null;
-    const packageImportPath = isBareSpecifier(specifier) && !aliasedImportPath
+    const packageImportPath = !virtualImportPath && isBareSpecifier(specifier) && !aliasedImportPath
       ? await resolveProjectPackageImport(projectRoot, sourcePath, specifier)
       : null;
     const packageAssetPath = packageImportPath && isStaticAssetPath(packageImportPath)
@@ -987,6 +1011,7 @@ async function rewriteRelativeSpecifiers({
     if (
       target === "server"
       && isBareSpecifier(specifier)
+      && !virtualImportPath
       && !aliasedImportPath
       && !packageAssetPath
     ) {
@@ -996,6 +1021,7 @@ async function rewriteRelativeSpecifiers({
     if (
       target === "client"
       && isBareSpecifier(specifier)
+      && !virtualImportPath
       && !aliasedImportPath
       && !packageAssetPath
     ) {
@@ -1010,11 +1036,12 @@ async function rewriteRelativeSpecifiers({
       continue;
     }
 
-    if (!isRelativeSpecifier(specifier) && !aliasedImportPath && !packageAssetPath) {
+    if (!virtualImportPath && !isRelativeSpecifier(specifier) && !aliasedImportPath && !packageAssetPath) {
       continue;
     }
 
-    const resolvedImportPath = packageAssetPath
+    const resolvedImportPath = virtualImportPath
+      ?? packageAssetPath
       ?? aliasedImportPath
       ?? await resolveImportPath(sourcePath, specifier);
     if (!resolvedImportPath) {
@@ -1033,6 +1060,9 @@ async function rewriteRelativeSpecifiers({
 
     if (shouldCompileModule(resolvedImportPath)) {
       compiledImportPath = await compileModule(resolvedImportPath);
+      if (virtualImportPath) {
+        litsxPipeline?.registerResolvedModule(specifier, resolvedImportPath, compiledImportPath);
+      }
       const serverExports = serverExportsByModule?.get(resolvedImportPath) ?? new Set();
       const importedNames = importedNamesBySpecifier.get(specifier) ?? new Set();
       if (
@@ -1245,6 +1275,7 @@ function getDevelopmentGraphCacheKey(entryPath, options) {
     options.target ?? "server",
     options.ssr === true ? "ssr" : "client",
     options.sourceMaps === false ? "without-maps" : "with-maps",
+    options.litsxPipeline?.identity?.id ?? "default-litsx",
   ].join("::");
 }
 
@@ -1358,6 +1389,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
     staticAssetPublicUrls = null,
     onDevelopmentEvent,
     managedSourceRoots,
+    litsxPipeline,
   } = options;
 
   const outputRoot = getTypedOutputRoot(projectRoot, mode, target);
@@ -1394,6 +1426,8 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
       sourcePath,
       sourceMaps,
       ssr,
+      target,
+      litsxPipeline,
     });
     const isServerComponentModule = isCompiledServerComponentModule(transformed.code);
     const isMixedComponentModule = isServerComponentModule
@@ -1439,6 +1473,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
       serverExportsByModule,
       packageImports,
       dynamicImportDirectories,
+      litsxPipeline,
     });
 
     await fs.writeFile(outputPath, rewritten.code, "utf8");
@@ -1467,7 +1502,12 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
   return {
     entrypoint: await compileModule(entryPath),
     outputRoot,
-    sourceFiles: [...new Set([...visited.keys(), ...staticAssetFiles])],
+    sourceFiles: [...new Set([
+      ...visited.keys(),
+      ...staticAssetFiles,
+      ...(litsxPipeline?.dependencies ?? []),
+    ])],
+    integrationDependencies: litsxPipeline?.dependencies ?? [],
     watchedDirectories: [...dynamicImportDirectories],
     packageImports: [...packageImports].sort(),
   };
@@ -1625,6 +1665,8 @@ export async function collectClientGraphInventory(entryPaths, options = {}) {
       projectRoot,
       sourcePath,
       sourceMaps: false,
+      target: "client",
+      litsxPipeline: options.litsxPipeline,
     });
     const isServer = isCompiledServerComponentModule(transformed.code);
     const isComponent = isCompiledClientBoundaryModule(transformed.code);
