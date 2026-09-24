@@ -237,6 +237,30 @@ async function transformModuleSource(source, {
   };
 }
 
+function stabilizeIntegrationSourceMap(result, litsxPipeline) {
+  if (!result?.map || !Array.isArray(result.map.sources) || !litsxPipeline) {
+    return result;
+  }
+
+  let didChange = false;
+  const sources = result.map.sources.map((sourcePath) => {
+    if (typeof sourcePath !== "string" || !path.isAbsolute(sourcePath)) return sourcePath;
+    const outputRelativePath = litsxPipeline.getOutputRelativePath(sourcePath);
+    if (!outputRelativePath) return sourcePath;
+    didChange = true;
+    return `/${outputRelativePath.split(path.sep).join("/")}`;
+  });
+
+  if (!didChange) return result;
+  return {
+    ...result,
+    map: {
+      ...result.map,
+      sources,
+    },
+  };
+}
+
 function isStaticAssetPath(filePath) {
   return STATIC_ASSET_EXTENSIONS.some((extension) => filePath.endsWith(extension));
 }
@@ -1422,14 +1446,14 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
 
     await ensureDirectory(path.dirname(outputPath));
     const source = await fs.readFile(sourcePath, "utf8");
-    const transformed = await transformModuleSource(source, {
+    const transformed = stabilizeIntegrationSourceMap(await transformModuleSource(source, {
       projectRoot,
       sourcePath,
       sourceMaps,
       ssr,
       target,
       litsxPipeline,
-    });
+    }), litsxPipeline);
     const isServerComponentModule = isCompiledServerComponentModule(transformed.code);
     const isMixedComponentModule = isServerComponentModule
       && isCompiledClientBoundaryModule(transformed.code);

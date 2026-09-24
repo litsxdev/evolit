@@ -187,7 +187,8 @@ test("concurrent production builds isolate integration state and emit determinis
       buildProject(firstRoot),
       buildProject(secondRoot),
     ]);
-    const firstManifest = JSON.parse(await fs.readFile(firstManifestPath, "utf8"));
+    const firstManifestText = await fs.readFile(firstManifestPath, "utf8");
+    const firstManifest = JSON.parse(firstManifestText);
     const secondManifest = JSON.parse(await fs.readFile(secondManifestPath, "utf8"));
     const firstAsset = integrationStyleAsset(firstManifest);
     const secondAsset = integrationStyleAsset(secondManifest);
@@ -208,7 +209,8 @@ test("concurrent production builds isolate integration state and emit determinis
       /virtual[\\/][0-9a-f]{8}-[0-9a-f-]{27}/i,
     );
     const rebuiltManifestPath = await buildProject(firstRoot);
-    const rebuiltManifest = JSON.parse(await fs.readFile(rebuiltManifestPath, "utf8"));
+    const rebuiltManifestText = await fs.readFile(rebuiltManifestPath, "utf8");
+    const rebuiltManifest = JSON.parse(rebuiltManifestText);
     const rebuiltAsset = integrationStyleAsset(rebuiltManifest);
     const rebuiltPublicUrl = rebuiltManifest.clientAssets.assets.find((asset) => (
       asset.integration === "unocss" && asset.integrationOutputId === "global.css"
@@ -216,6 +218,17 @@ test("concurrent production builds isolate integration state and emit determinis
     assert.equal(rebuiltPublicUrl, firstPublicUrl);
     assert.equal(await fs.readFile(rebuiltAsset.outputPath, "utf8"), firstCss);
     assert.deepEqual(rebuiltManifest.clientAssets, firstManifest.clientAssets);
+    const { builtAt: _firstBuiltAt, ...firstDeterministicManifest } = JSON.parse(firstManifestText);
+    const { builtAt: _rebuiltAt, ...rebuiltDeterministicManifest } = JSON.parse(rebuiltManifestText);
+    assert.deepEqual(rebuiltDeterministicManifest, firstDeterministicManifest);
+
+    const virtualSourceMaps = rebuiltManifest.clientAssets.assets
+      .filter((asset) => asset.outputPath.includes("__litsx_virtual__") && asset.outputPath.endsWith(".map"));
+    for (const sourceMapAsset of virtualSourceMaps) {
+      const sourceMap = await fs.readFile(sourceMapAsset.outputPath, "utf8");
+      assert.doesNotMatch(sourceMap, /virtual[\\/][0-9a-f]{8}-[0-9a-f-]{27}/i);
+      assert.match(sourceMap, /__litsx_virtual__/);
+    }
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
