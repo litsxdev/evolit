@@ -1,5 +1,13 @@
 # evolit
 
+## 0.4.1
+
+### Patch Changes
+
+- c59ba4d: Emit LitSX virtual modules through stable client paths so repeated production
+  builds have deterministic manifests and do not retain obsolete per-instance
+  virtual assets.
+
 ## 0.4.0
 
 ### Minor Changes
