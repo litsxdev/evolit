@@ -1,5 +1,11 @@
 # evolit
 
+## 0.4.2
+
+### Patch Changes
+
+- 0610ad0: Normalize isolated LitSX virtual module paths inside source maps so repeated production builds emit byte-identical maps and manifests.
+
 ## 0.4.1
 
 ### Patch Changes
