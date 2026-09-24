@@ -124,6 +124,9 @@ export { getRequestContext } from "./request-context.js";
 /** Defines an Evolit extension for use in evolit.config.js. */
 export { defineEvolitPlugin } from "./extensions.js";
 
+/** Defines a typed Evolit configuration, including the native LitSX pipeline. */
+export { defineEvolitConfig, defineLitsxIntegration } from "./litsx-pipeline.js";
+
 /**
  * Returns the incoming request URL. Reading it makes the current route dynamic.
  *

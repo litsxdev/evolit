@@ -2483,6 +2483,7 @@ export function normalizeClientAssetManifest(manifest) {
       manifest.clientBoundariesByEntry && typeof manifest.clientBoundariesByEntry === "object"
         ? manifest.clientBoundariesByEntry
         : {},
+    documentStyles: Array.isArray(manifest.documentStyles) ? manifest.documentStyles : [],
     assets: manifest.assets,
   };
 }

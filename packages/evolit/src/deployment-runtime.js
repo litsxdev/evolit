@@ -53,6 +53,7 @@ import {
   runRequestExtensions,
 } from "./extensions.js";
 import { runServerSetup } from "./server-setup.js";
+import { createLitsxPipeline, mergeLitsxAssetsIntoManifest } from "./litsx-pipeline.js";
 
 function isBarePackageModuleId(value) {
   return typeof value === "string"
@@ -259,6 +260,7 @@ export async function createRequestRenderer({
   onDevelopmentEvent,
   managedSourceRoots,
   extensions = [],
+  litsxPipeline = null,
 }) {
   let currentAssetManifest = normalizeClientAssetManifest(assetManifest);
   const extensionClientDescriptors = getExtensionClientDescriptors(extensions);
@@ -325,7 +327,11 @@ export async function createRequestRenderer({
   function getDevelopmentEntryInventory(entryPath) {
     let inventory = devInventoryByEntry.get(entryPath);
     if (!inventory) {
-      inventory = collectClientGraphInventory([entryPath], { projectRoot, managedSourceRoots });
+      inventory = collectClientGraphInventory([entryPath], {
+        projectRoot,
+        managedSourceRoots,
+        litsxPipeline,
+      });
       devInventoryByEntry.set(entryPath, inventory);
       inventory.catch(() => {
         if (devInventoryByEntry.get(entryPath) === inventory) devInventoryByEntry.delete(entryPath);
@@ -337,6 +343,7 @@ export async function createRequestRenderer({
     const resolver = await createRouteResolver(projectRoot, mode, {
       onDevelopmentEvent,
       managedSourceRoots,
+      litsxPipeline,
       segmentRenderCache: sharedSegmentRenderCache,
       getStaticAssetPublicUrls() {
         return createStaticAssetPublicUrlMap(currentAssetManifest);
@@ -359,6 +366,7 @@ export async function createRequestRenderer({
       target: "client",
       onDevelopmentEvent,
       managedSourceRoots,
+      litsxPipeline,
     });
     devPreparedClientModules.add(clientModuleKey);
     devClientModuleDependencies.set(
@@ -387,7 +395,13 @@ export async function createRequestRenderer({
       clientBoundariesByEntry: devClientBoundariesByEntry,
       additionalVendorSpecifiers: [...packageClientSpecifiers],
     });
-    currentAssetManifest = bundledClientAssets.manifest;
+    const integrationOutputs = await litsxPipeline?.finalize({
+      assetManifest: bundledClientAssets.manifest,
+    });
+    currentAssetManifest = mergeLitsxAssetsIntoManifest(
+      bundledClientAssets.manifest,
+      integrationOutputs,
+    );
     devPreviousAssetOutputPaths = new Set();
     currentAssetResolver = createAssetResolver(projectRoot, {
       assetManifest: currentAssetManifest,
@@ -625,6 +639,7 @@ export async function createRequestRenderer({
         : [];
       const styleUrls = currentAssetManifest
         ? [...new Set([
+          ...(currentAssetManifest.documentStyles ?? []),
           ...collectTransitiveStyleUrls(clientImports, currentAssetManifest),
           ...resolveServerStyleUrls(routeResult, projectRoot, currentAssetManifest),
         ])]
@@ -857,6 +872,7 @@ export async function createRequestRenderer({
             target: "client",
             onDevelopmentEvent,
             managedSourceRoots,
+            litsxPipeline,
           });
         }
         return;
@@ -936,7 +952,10 @@ export async function createDeploymentRuntime({
   evolitConfig: configuredEvolitConfig,
 } = {}) {
   const evolitConfig = configuredEvolitConfig ?? await loadEvolitConfig(projectRoot);
-  const serverSetupCleanup = await runServerSetup({ projectRoot, mode, evolitConfig });
+  const litsxPipeline = await createLitsxPipeline({ projectRoot, mode, config: evolitConfig });
+  let serverSetupCleanup = null;
+  try {
+  serverSetupCleanup = await runServerSetup({ projectRoot, mode, evolitConfig, litsxPipeline });
   const extensions = resolveEvolitExtensions(evolitConfig);
   const extensionClientSpecifiers = getExtensionClientDescriptors(extensions).map((descriptor) => descriptor.module);
   const effectiveManagedSourceRoots = managedSourceRoots
@@ -994,17 +1013,23 @@ export async function createDeploymentRuntime({
     onDevelopmentEvent,
     managedSourceRoots: effectiveManagedSourceRoots,
     extensions,
+    litsxPipeline,
   });
+  let closed = false;
 
   return {
     assets,
     cache: renderer.responseCacheController,
     renderer,
+    get litsxDependencies() {
+      return litsxPipeline?.dependencies ?? [];
+    },
     async invalidateDevelopmentState(changedPaths = null) {
       if (mode !== "development") {
         return;
       }
 
+      await litsxPipeline?.invalidate(changedPaths);
       const invalidationResult = await renderer.invalidateDevelopmentState(changedPaths);
       if (typeof effectiveResponseCacheRuntime.store.clear === "function") {
         await effectiveResponseCacheRuntime.store.clear();
@@ -1075,6 +1100,7 @@ export async function createDeploymentRuntime({
       const { routeResult, response } = await renderer.renderRoute(resolvedRequest, routePolicyResult, {
         extensionState: extensionResult,
       });
+      await litsxPipeline?.finalize({ routeResult, assetManifest: renderer.assetManifest });
       runtimeState.assetManifest = normalizeClientAssetManifest(renderer.assetManifest);
       return formatResponseForRequest(
         request,
@@ -1082,13 +1108,39 @@ export async function createDeploymentRuntime({
       );
     },
     async close() {
+      if (closed) return;
+      closed = true;
+      let cleanupError = null;
       const revalidationTasks = this.revalidationTasks;
       if (revalidationTasks) {
-        await Promise.all(revalidationTasks.values());
+        try {
+          await Promise.all(revalidationTasks.values());
+        } catch (error) {
+          cleanupError = error;
+        }
       }
-      await serverSetupCleanup?.();
+      try {
+        await serverSetupCleanup?.();
+      } catch (error) {
+        cleanupError = error;
+      }
+      try {
+        await litsxPipeline?.dispose();
+      } catch (error) {
+        cleanupError ??= error;
+      }
+      if (cleanupError) throw cleanupError;
     },
   };
+  } catch (error) {
+    try {
+      await serverSetupCleanup?.();
+    } catch {}
+    try {
+      await litsxPipeline?.dispose();
+    } catch {}
+    throw error;
+  }
 }
 
 function addNavigationVaryHeader(response) {
