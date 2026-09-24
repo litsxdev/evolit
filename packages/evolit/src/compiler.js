@@ -928,8 +928,9 @@ function getTypedOutputRoot(projectRoot, mode, target = "server") {
   );
 }
 
-function toOutputPath(projectRoot, outputRoot, sourcePath) {
-  const relativePath = toOutputRelativePath(projectRoot, sourcePath);
+function toOutputPath(projectRoot, outputRoot, sourcePath, litsxPipeline = null) {
+  const relativePath = litsxPipeline?.getOutputRelativePath?.(sourcePath)
+    ?? toOutputRelativePath(projectRoot, sourcePath);
   const extension = path.extname(relativePath);
   if (!extension) {
     return path.join(outputRoot, `${relativePath}.mjs`);
@@ -1416,7 +1417,7 @@ async function compileModuleGraphUncached(entryPath, options = {}) {
       return visited.get(sourcePath);
     }
 
-    const outputPath = toOutputPath(projectRoot, outputRoot, sourcePath);
+    const outputPath = toOutputPath(projectRoot, outputRoot, sourcePath, litsxPipeline);
     visited.set(sourcePath, outputPath);
 
     await ensureDirectory(path.dirname(outputPath));

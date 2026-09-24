@@ -217,6 +217,7 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
   const virtualRoot = virtualModuleRoot(resolvedProjectRoot, mode, identity);
   const virtualModulesByImporter = new Map();
   const virtualTargetsBySpecifier = new Map();
+  const virtualOutputRelativePaths = new Map();
 
   function rebuildDependencies() {
     dependencies.clear();
@@ -337,6 +338,9 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
     get dependencies() {
       return [...dependencies].sort();
     },
+    getOutputRelativePath(sourcePath) {
+      return virtualOutputRelativePaths.get(path.resolve(sourcePath)) ?? null;
+    },
     getCompilerOptions({ filename, ssr, sourceMaps }) {
       assertActive();
       let options = { ...compiler };
@@ -418,6 +422,10 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
         .digest("hex");
       const integrationName = resolved.integrationName.replace(/[^a-z\d._-]+/giu, "-");
       resolved.sourcePath = path.join(virtualRoot, integrationName, `${moduleKey}.mjs`);
+      virtualOutputRelativePaths.set(
+        path.resolve(resolved.sourcePath),
+        path.join("__litsx_virtual__", integrationName, `${moduleKey}.mjs`),
+      );
       await ensureDirectory(path.dirname(resolved.sourcePath));
       await fs.writeFile(resolved.sourcePath, resolved.code, "utf8");
       const targets = virtualTargetsBySpecifier.get(specifier) ?? new Set();

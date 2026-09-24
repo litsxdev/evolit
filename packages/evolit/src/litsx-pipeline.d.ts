@@ -105,6 +105,7 @@ export type EvolitLitsxPipeline = {
   readonly identity: Readonly<{ id: string }>;
   readonly generation: number;
   readonly dependencies: string[];
+  getOutputRelativePath(sourcePath: string): string | null;
   getCompilerOptions(context: { filename: string; ssr: boolean; sourceMaps: boolean }): TransformLitsxOptions;
   resolveModule(specifier: string, context: {
     importer: string;
