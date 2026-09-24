@@ -203,6 +203,10 @@ test("concurrent production builds isolate integration state and emit determinis
     const firstPublicUrl = firstManifest.clientAssets.assets.find((asset) => (
       asset.integration === "unocss" && asset.integrationOutputId === "global.css"
     )).publicUrl;
+    assert.doesNotMatch(
+      JSON.stringify(firstManifest.clientAssets),
+      /virtual[\\/][0-9a-f]{8}-[0-9a-f-]{27}/i,
+    );
     const rebuiltManifestPath = await buildProject(firstRoot);
     const rebuiltManifest = JSON.parse(await fs.readFile(rebuiltManifestPath, "utf8"));
     const rebuiltAsset = integrationStyleAsset(rebuiltManifest);
@@ -211,6 +215,7 @@ test("concurrent production builds isolate integration state and emit determinis
     )).publicUrl;
     assert.equal(rebuiltPublicUrl, firstPublicUrl);
     assert.equal(await fs.readFile(rebuiltAsset.outputPath, "utf8"), firstCss);
+    assert.deepEqual(rebuiltManifest.clientAssets, firstManifest.clientAssets);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
