@@ -106,6 +106,46 @@ async function writeUnoCssBrowserFixture(projectRoot) {
   ].join("\n"));
 }
 
+async function writeTailwindBrowserFixture(projectRoot) {
+  await scaffoldSite(projectRoot);
+  await linkFrameworkDependencies(projectRoot);
+  await fs.writeFile(path.join(projectRoot, "evolit.config.js"), [
+    'import { litsxTailwind } from "@litsx/tailwind";',
+    'export default { litsx: { compiler: { sourceMaps: true }, integrations: [litsxTailwind({ integration: { entry: "./tailwind.css" } })] } };',
+    "",
+  ].join("\n"));
+  await fs.writeFile(path.join(projectRoot, "tailwind.css"), [
+    '@config "./tailwind.config.mjs";',
+    '@import "tailwindcss" source(none);',
+    '@theme static { --color-browser-theme: rgb(12 34 56); }',
+    "",
+  ].join("\n"));
+  await fs.writeFile(path.join(projectRoot, "tailwind.config.mjs"), [
+    'export default { theme: { extend: { colors: { brand: "#123456" } } } };',
+    "",
+  ].join("\n"));
+  await fs.writeFile(path.join(projectRoot, "app", "components", "tailwind-card.jsx"), [
+    'import { css } from "lit";',
+    "export default function TailwindCard() {",
+    '  return <article class="m-7 w-[37px] bg-brand data-[state=open]:border-green-500" data-state="open"><span class="theme-probe">Card</span></article>;',
+    "}",
+    'TailwindCard.styles = css`:host{display:block}.theme-probe{color:var(--color-browser-theme)}.authored{--order:1}`;',
+    "",
+  ].join("\n"));
+  await fs.writeFile(path.join(projectRoot, "app", "components", "tailwind-badge.jsx"), [
+    "export default function TailwindBadge() {",
+    '  return <strong className="font-bold rounded-full">Ready</strong>;',
+    "}",
+    "",
+  ].join("\n"));
+  await fs.writeFile(path.join(projectRoot, "app", "page.jsx"), [
+    'import TailwindCard from "./components/tailwind-card.jsx";',
+    'import TailwindBadge from "./components/tailwind-badge.jsx";',
+    "export default async function SitePage() { return <section><TailwindCard /><TailwindBadge /></section>; }",
+    "",
+  ].join("\n"));
+}
+
 test("browser can load an Evolit SSR document with route segment metadata", async ({ page }, testInfo) => {
   const port = 3500 + testInfo.workerIndex;
   const origin = `http://127.0.0.1:${port}`;
@@ -388,6 +428,80 @@ test("direct UnoCSS integration hydrates Shadow DOM and refreshes source and con
       throw new Error(`${error.message}\n${childOutput}`, { cause: error });
     }
     expect(await page.locator('link[href*="/integrations/unocss/global."]').count()).toBe(1);
+  } finally {
+    if (child?.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("direct Tailwind integration hydrates Shadow DOM and refreshes source and config", async ({ page }, testInfo) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-tailwind-browser-"));
+  const projectRoot = path.join(tempRoot, "site");
+  const port = 4400 + testInfo.workerIndex;
+  const origin = `http://127.0.0.1:${port}`;
+  let child;
+  let childOutput = "";
+  try {
+    await writeTailwindBrowserFixture(projectRoot);
+    child = spawn(process.execPath, [path.join(frameworkRoot, "src", "cli.js"), "dev", "--port", String(port)], {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout.on("data", (chunk) => { childOutput += String(chunk); });
+    child.stderr.on("data", (chunk) => { childOutput += String(chunk); });
+    try {
+      await waitForServer(origin);
+    } catch (error) {
+      throw new Error(`${error.message}\n${childOutput}`, { cause: error });
+    }
+    const ssr = await (await fetch(origin)).text();
+    expect(ssr).toContain('shadowrootmode="open"');
+    expect((ssr.match(/\/integrations\/tailwind\/global\.[a-f0-9]{8}\.css/g) ?? []).length).toBe(1);
+
+    await page.goto(origin, { waitUntil: "networkidle", timeout: 20_000 });
+    await expect.poll(() => page.evaluate(() => {
+      const card = document.querySelector("tailwind-card");
+      const badge = document.querySelector("tailwind-badge");
+      return {
+        cardUpgraded: card?.constructor.name !== "HTMLElement",
+        badgeUpgraded: badge?.constructor.name !== "HTMLElement",
+        margin: card?.shadowRoot ? getComputedStyle(card.shadowRoot.querySelector("article")).margin : null,
+        width: card?.shadowRoot ? getComputedStyle(card.shadowRoot.querySelector("article")).width : null,
+        background: card?.shadowRoot ? getComputedStyle(card.shadowRoot.querySelector("article")).backgroundColor : null,
+        weight: badge?.shadowRoot ? getComputedStyle(badge.shadowRoot.querySelector("strong")).fontWeight : null,
+        color: card?.shadowRoot ? getComputedStyle(card.shadowRoot.querySelector(".theme-probe")).color : null,
+      };
+    })).toEqual({
+      cardUpgraded: true,
+      badgeUpgraded: true,
+      margin: "28px",
+      width: "37px",
+      background: "rgb(18, 52, 86)",
+      weight: "700",
+      color: "rgb(12, 34, 56)",
+    });
+
+    const cardPath = path.join(projectRoot, "app", "components", "tailwind-card.jsx");
+    const cardSource = await fs.readFile(cardPath, "utf8");
+    await fs.writeFile(cardPath, cardSource.replace("m-7", "m-9"));
+    await expect.poll(() => page.locator("tailwind-card").evaluate((card) => (
+      getComputedStyle(card.shadowRoot.querySelector("article")).margin
+    )), { timeout: 10_000 }).toBe("36px");
+
+    const configPath = path.join(projectRoot, "tailwind.config.mjs");
+    const configSource = await fs.readFile(configPath, "utf8");
+    await fs.writeFile(configPath, configSource.replace("#123456", "#654321"));
+    try {
+      await expect.poll(() => page.locator("tailwind-card").evaluate((card) => (
+        getComputedStyle(card.shadowRoot.querySelector("article")).backgroundColor
+      )), { timeout: 10_000 }).toBe("rgb(101, 67, 33)");
+    } catch (error) {
+      throw new Error(`${error.message}\n${childOutput}`, { cause: error });
+    }
+    expect(await page.locator('link[href*="/integrations/tailwind/global."]').count()).toBe(1);
   } finally {
     if (child?.exitCode === null) {
       child.kill();
