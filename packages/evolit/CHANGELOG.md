@@ -1,5 +1,11 @@
 # evolit
 
+## 0.4.3
+
+### Patch Changes
+
+- 2090dc5: Document and certify direct `@litsx/tailwind` integration through the native LitSX pipeline, including Shadow DOM SSR, hydration, invalidation, deterministic production assets, and isolated concurrent builds.
+
 ## 0.4.2
 
 ### Patch Changes
