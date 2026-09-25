@@ -83,6 +83,7 @@
     }
   },
   "devDependencies": {
+    "@litsx/tailwind": "1.0.0-next.8",
     "@litsx/unocss": "1.0.0-next.8",
     "@playwright/test": "^1.62.0",
     "@webcomponents/scoped-custom-element-registry": "^0.0.10",

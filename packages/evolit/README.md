@@ -346,6 +346,36 @@ virtual modules, generation, finalization or global CSS links, and it does not n
 PostCSS. `@litsx/unocss` remains the owner of candidate extraction and CSS generation; Evolit only
 executes its neutral LitSX lifecycle.
 
+Tailwind CSS uses the same neutral integration contract, without an Evolit adapter or application
+owned Vite/PostCSS pipeline:
+
+```js
+import { litsxTailwind } from "@litsx/tailwind";
+import { defineEvolitConfig } from "evolit/litsx";
+
+export default defineEvolitConfig({
+  litsx: {
+    compiler: { sourceMaps: true },
+    integrations: [
+      litsxTailwind({ integration: { entry: "./tailwind.css" } }),
+    ],
+  },
+});
+```
+
+```css
+/* tailwind.css */
+@import "tailwindcss" source(none);
+
+@theme {
+  --color-brand: oklch(62% 0.18 255);
+}
+```
+
+`source(none)` is recommended because LitSX owns candidate discovery and routes each finite class
+to its component. `@litsx/tailwind` owns Tailwind compilation, virtual modules, dependency
+invalidation, stale-candidate removal and the single document stylesheet.
+
 `compiler` accepts the public `TransformLitsxOptions` surface except the values Evolit must own for
 correct server and browser graphs. Evolit always supplies the current `filename`, selects `ssr` per
 target and forces native lowering with `reactCompat: false`; `compiler.sourceMaps` can override the
@@ -382,6 +412,11 @@ For native Shadow DOM, `@litsx/unocss` serializes component preflight inside eac
 Root, preserves authored `Component.styles` before generated utilities, and emits the document
 theme/custom-property layers once. Those document variables inherit through Shadow Roots and the
 browser hydrates the server result without switching to `react-compat`.
+
+`@litsx/tailwind` follows the same ordering and ownership rules: Shadow Root preflight, authored
+`Component.styles`, then component-owned utilities. Its `global.css` output contains theme/custom
+properties, document preflight, Tailwind property registrations and light-DOM utilities exactly
+once. Component utilities are not copied into that document asset.
 
 ## Server Setup
 
