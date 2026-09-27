@@ -930,7 +930,7 @@ export async function createRequestRenderer({
           routeResult,
           response,
         };
-      });
+      }, { projectRoot });
     },
     get assetManifest() {
       return currentAssetManifest;

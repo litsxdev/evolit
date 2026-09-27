@@ -581,7 +581,22 @@ function createSharedChunkGroup(id) {
     return "vendor-litsx";
   }
 
-  return "vendor-misc";
+  return undefined;
+}
+
+function createBrowserEnvironmentPlugin(mode) {
+  const nodeEnvironment = mode === "production" ? "production" : "development";
+  const replacement = JSON.stringify(nodeEnvironment);
+  return {
+    name: "evolit-browser-environment",
+    transform(code) {
+      if (!code.includes("process.env.NODE_ENV")) return null;
+      return {
+        code: code.replaceAll("process.env.NODE_ENV", replacement),
+        map: null,
+      };
+    },
+  };
 }
 
 function isClientAssetStubModule(relativePath) {
@@ -746,6 +761,7 @@ export async function buildSharedVendorRuntime(
         .map((group) => buildSharedVendorRuntime(projectRoot, mode, {
           ...options,
           additionalEntrySpecifiers: group.specifiers,
+          externalSpecifiers: developmentGroups.baseSpecifiers,
           vendorGroup: group.vendorGroup,
           includeBase: false,
         })),
@@ -790,9 +806,16 @@ export async function buildSharedVendorRuntime(
     const specifierByEntryName = new Map(
       specifiers.map((specifier) => [createSharedEntryName(specifier), specifier]),
     );
+    const externalSpecifiers = new Set(
+      Array.isArray(options.externalSpecifiers) ? options.externalSpecifiers : [],
+    );
     const bundle = await rollup({
       input: inputEntries,
+      external(source) {
+        return externalSpecifiers.has(source);
+      },
       plugins: [
+        createBrowserEnvironmentPlugin(mode),
         {
           name: "evolit-browser-exports",
           resolveId(source) {
@@ -814,10 +837,6 @@ export async function buildSharedVendorRuntime(
       ],
       preserveEntrySignatures: "strict",
       onwarn(warning, warn) {
-        if (warning.code === "CIRCULAR_DEPENDENCY") {
-          return;
-        }
-
         warn(warning);
       },
     });
@@ -835,6 +854,10 @@ export async function buildSharedVendorRuntime(
           : "chunks/[name]-[hash].mjs",
         manualChunks(id) {
           return createSharedChunkGroup(id);
+        },
+        paths(id) {
+          if (!externalSpecifiers.has(id)) return id;
+          return `/_evolit/shared/base/${createSharedEntryName(id)}.mjs`;
         },
       });
 
