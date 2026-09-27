@@ -937,20 +937,126 @@ test("compiler shares one production compile and import across concurrent caller
       "utf8",
     );
 
-    const modules = await Promise.all(Array.from(
+    const flights = Array.from(
       { length: 10 },
       () => importCompiledModule(sourcePath, {
         projectRoot,
         mode: "production",
         sourceMaps: false,
       }),
-    ));
+    );
+    assert.ok(flights.every((flight) => flight === flights[0]));
+    const modules = await Promise.all(flights);
 
     assert.equal(new Set(modules).size, 1);
     assert.equal(modules[0].default, "production-module");
     assert.equal(modules[0].evaluations, 1);
   } finally {
     delete globalThis.__evolitProductionModuleEvaluations;
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("compiler scopes production module namespaces to the LitSX generation", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-production-generation-"));
+  const sourcePath = path.join(projectRoot, "entry.js");
+  const litsxPipeline = { identity: { id: `generation-${path.basename(projectRoot)}` }, generation: 0 };
+  const options = {
+    projectRoot,
+    mode: "production",
+    sourceMaps: false,
+    litsxPipeline,
+  };
+
+  try {
+    await fs.writeFile(sourcePath, "export default 'generation-zero';\n", "utf8");
+    const firstFlights = Array.from({ length: 10 }, () => importCompiledModule(sourcePath, options));
+    assert.ok(firstFlights.every((flight) => flight === firstFlights[0]));
+    const firstModules = await Promise.all(firstFlights);
+    assert.equal(new Set(firstModules).size, 1);
+    assert.equal(firstModules[0].default, "generation-zero");
+
+    await fs.writeFile(sourcePath, "export default 'generation-one';\n", "utf8");
+    litsxPipeline.generation = 1;
+    const nextFlights = Array.from({ length: 10 }, () => importCompiledModule(sourcePath, options));
+    assert.ok(nextFlights.every((flight) => flight === nextFlights[0]));
+    const nextModules = await Promise.all(nextFlights);
+    assert.equal(new Set(nextModules).size, 1);
+    assert.notEqual(nextModules[0], firstModules[0]);
+    assert.equal(nextModules[0].default, "generation-one");
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("compiler shares production import failures and permits a clean retry", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-production-retry-"));
+  const sourcePath = path.join(projectRoot, "entry.js");
+  const options = {
+    projectRoot,
+    mode: "production",
+    sourceMaps: false,
+    litsxPipeline: {
+      identity: { id: `retry-${path.basename(projectRoot)}` },
+      generation: 0,
+    },
+  };
+
+  try {
+    await fs.writeFile(
+      sourcePath,
+      "throw new Error('production import failed');\nexport default 'unreachable';\n",
+      "utf8",
+    );
+    const failedFlights = Array.from({ length: 10 }, () => importCompiledModule(sourcePath, options));
+    assert.ok(failedFlights.every((flight) => flight === failedFlights[0]));
+    const failures = await Promise.all(failedFlights.map((flight) => flight.catch((error) => error)));
+    assert.ok(failures.every((error) => error === failures[0]));
+    assert.match(failures[0].message, /production import failed/);
+
+    await fs.writeFile(sourcePath, "export default 'retried';\n", "utf8");
+    const retried = await importCompiledModule(sourcePath, options);
+    assert.equal(retried.default, "retried");
+
+    const generatedPaths = await fs.readdir(path.join(projectRoot, ".evolit"), { recursive: true });
+    assert.deepEqual(
+      generatedPaths.filter((entry) => entry.includes(".staging-") || entry.includes(".previous-")),
+      [],
+    );
+  } finally {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("compiler separates production namespaces by resolution conditions", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-production-conditions-"));
+  const sourcePath = path.join(projectRoot, "entry.js");
+  const litsxPipeline = {
+    identity: { id: `conditions-${path.basename(projectRoot)}` },
+    generation: 0,
+  };
+
+  try {
+    await fs.writeFile(sourcePath, "export default 'server-condition';\n", "utf8");
+    const serverModule = await importCompiledModule(sourcePath, {
+      projectRoot,
+      mode: "production",
+      conditions: ["node", "import"],
+      litsxPipeline,
+    });
+
+    await fs.writeFile(sourcePath, "export default 'alternate-condition';\n", "utf8");
+    const alternateModule = await importCompiledModule(sourcePath, {
+      projectRoot,
+      mode: "production",
+      conditions: ["alternate", "import"],
+      litsxPipeline,
+    });
+
+    assert.equal(serverModule.default, "server-condition");
+    assert.equal(alternateModule.default, "alternate-condition");
+    assert.notEqual(alternateModule, serverModule);
+  } finally {
     await fs.rm(projectRoot, { recursive: true, force: true });
   }
 });

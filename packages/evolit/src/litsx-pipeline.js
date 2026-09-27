@@ -296,6 +296,15 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
     if (closing || disposed) throw new Error("This LitSX pipeline has already been disposed.");
   }
 
+  function beginCompilation() {
+    assertActive();
+    if (finalizedGeneration === generation) {
+      generation += 1;
+      finalizedGeneration = -1;
+    }
+    return generation;
+  }
+
   function recordContribution(integrationName, moduleId, contribution) {
     if (contribution.dependencies.length > 0) {
       let owned = moduleDependencies.get(moduleId);
@@ -340,6 +349,7 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
     get generation() {
       return generation;
     },
+    beginCompilation,
     get dependencies() {
       return [...dependencies].sort();
     },
@@ -455,11 +465,7 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
       virtualTargetsBySpecifier.set(specifier, targets);
     },
     async processModule(result, context) {
-      assertActive();
-      if (finalizedGeneration === generation) {
-        generation += 1;
-        finalizedGeneration = -1;
-      }
+      beginCompilation();
       const moduleId = path.resolve(context.sourcePath);
       processedModules.add(moduleId);
       if (moduleDependencies.delete(moduleId)) rebuildDependencies();

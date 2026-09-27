@@ -542,6 +542,8 @@ test("opens incremental generations, replaces graph dependencies, and forgets ch
     assert.deepEqual(pipeline.dependencies, [firstConfig]);
 
     dependency = secondConfig;
+    assert.equal(pipeline.beginCompilation(), 1);
+    assert.equal(pipeline.beginCompilation(), 1);
     await pipeline.processModule({ code: "", map: null, metadata: {} }, context(secondSource));
     const second = await pipeline.finalize();
     assert.equal(await fs.readFile(second.assets[0].outputPath, "utf8"), "2");

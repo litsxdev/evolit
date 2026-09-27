@@ -61,27 +61,33 @@ async function linkFrameworkDependencies(projectRoot) {
   }
 }
 
-async function writeUrqlFixture(projectRoot) {
+async function writeUrqlFixture(projectRoot, integrationName) {
   await scaffoldSite(projectRoot);
   await linkFrameworkDependencies(projectRoot);
   const packageJsonPath = path.join(projectRoot, "package.json");
   const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
   packageJson.dependencies["@litsx/urql"] = "^0.4.2";
   await fs.writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+  const integrationFactory = integrationName === "tailwind"
+    ? 'litsxTailwind({ integration: { entry: "./tailwind.css" } })'
+    : "litsxUnoCss()";
+  const integrationImport = integrationName === "tailwind"
+    ? 'import { litsxTailwind } from "@litsx/tailwind";'
+    : 'import { litsxUnoCss } from "@litsx/unocss";';
   await fs.writeFile(path.join(projectRoot, "evolit.config.js"), [
     'import fs from "node:fs/promises";',
     'import path from "node:path";',
-    'import { litsxUnoCss } from "@litsx/unocss";',
+    integrationImport,
     "",
-    "const unoCss = litsxUnoCss();",
-    "const instrumentedUnoCss = {",
-    "  ...unoCss,",
+    `const integration = ${integrationFactory};`,
+    "const instrumentedIntegration = {",
+    "  ...integration,",
     "  async create(context) {",
-    "    const instance = await unoCss.create(context);",
+    "    const instance = await integration.create(context);",
     "    return {",
     "      ...instance,",
     "      async finalize(finalizeContext) {",
-    '        await fs.appendFile(path.join(context.projectRoot, ".uno-finalize.log"), `${finalizeContext.generation}\\n`);',
+    `        await fs.appendFile(path.join(context.projectRoot, ".${integrationName}-finalize.log"), \`${"${finalizeContext.generation}"}\\n\`);`,
     "        await new Promise((resolve) => setTimeout(resolve, 25));",
     "        return instance.finalize?.(finalizeContext);",
     "      },",
@@ -92,12 +98,19 @@ async function writeUrqlFixture(projectRoot) {
     "export default {",
     "  litsx: {",
     "    compiler: { sourceMaps: true },",
-    "    integrations: [instrumentedUnoCss],",
+    "    integrations: [instrumentedIntegration],",
     "  },",
     '  server: { setup: "./server/setup.js" },',
     "};",
     "",
   ].join("\n"));
+  if (integrationName === "tailwind") {
+    await fs.writeFile(path.join(projectRoot, "tailwind.css"), [
+      '@import "tailwindcss" source(none);',
+      '@source "./app/**/*.{js,jsx,ts,tsx}";',
+      "",
+    ].join("\n"));
+  }
   await fs.mkdir(path.join(projectRoot, "server"), { recursive: true });
   await fs.writeFile(path.join(projectRoot, "server", "setup.js"), [
     'import { cacheExchange, createClient, fetchExchange, ssrExchange } from "@urql/core";',
@@ -195,14 +208,32 @@ function readUrqlData(html) {
   return JSON.parse(match[1]);
 }
 
-function readUnoCssAssets(html) {
-  return [...new Set(html.match(/\/_evolit\/static\/integrations\/unocss\/[^"']+/gu) ?? [])].sort();
+function readIntegrationAssets(html, integrationName) {
+  const prefix = `/_evolit/static/integrations/${integrationName}/`;
+  return [...new Set((html.match(/\/_evolit\/static\/integrations\/[^/]+\/[^"']+/gu) ?? [])
+    .filter((asset) => asset.startsWith(prefix)))].sort();
 }
 
-async function readFinalizeGenerations(projectRoot) {
-  return (await fs.readFile(path.join(projectRoot, ".uno-finalize.log"), "utf8"))
+async function readFinalizeGenerations(projectRoot, integrationName) {
+  return (await fs.readFile(path.join(projectRoot, `.${integrationName}-finalize.log`), "utf8"))
     .trim()
     .split("\n");
+}
+
+async function readPublishedIntegrationOutputs(projectRoot, mode, integrationName) {
+  const root = path.join(
+    projectRoot,
+    ".evolit",
+    mode === "dev" ? "dev" : "build",
+    "integrations",
+    integrationName,
+  );
+  try {
+    return (await fs.readdir(root, { recursive: true })).sort();
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
 }
 
 async function readPublicationTemps(projectRoot, mode) {
@@ -221,14 +252,14 @@ async function readPublicationTemps(projectRoot, mode) {
   }
 }
 
-test("URQL SSR and UnoCSS publication stay isolated under concurrent lifecycle pressure", async ({ page }, testInfo) => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-urql-browser-"));
+async function runUrqlIntegrationScenario({ page }, testInfo, integrationName) {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), `evolit-urql-${integrationName}-browser-`));
   const projectRoot = path.join(tempRoot, "app");
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   try {
-    await writeUrqlFixture(projectRoot);
+    await writeUrqlFixture(projectRoot, integrationName);
     await page.addInitScript({
       path: path.join(
         frameworkNodeModules,
@@ -247,7 +278,7 @@ test("URQL SSR and UnoCSS publication stay isolated under concurrent lifecycle p
 
       const port = 4900 + (testInfo.workerIndex * 4) + index;
       const origin = `http://127.0.0.1:${port}`;
-      await fs.writeFile(path.join(projectRoot, ".uno-finalize.log"), "");
+      await fs.writeFile(path.join(projectRoot, `.${integrationName}-finalize.log`), "");
       const child = spawn(
         process.execPath,
         [path.join(frameworkRoot, "src", "cli.js"), mode === "dev" ? "dev" : "start", "--port", String(port)],
@@ -262,7 +293,7 @@ test("URQL SSR and UnoCSS publication stay isolated under concurrent lifecycle p
         const values = Array.from({ length: 10 }, (_, requestIndex) => `cold-${requestIndex}`);
         const responses = await Promise.all(values.map((value) => fetch(`${origin}/?value=${value}`)));
         const htmlDocuments = await Promise.all(responses.map((response) => response.text()));
-        const unoCssAssets = htmlDocuments.map(readUnoCssAssets);
+        const integrationAssets = htmlDocuments.map((html) => readIntegrationAssets(html, integrationName));
         for (const [requestIndex, response] of responses.entries()) {
           const value = values[requestIndex];
           expect(response.status, `${mode} request ${value} failed:\n${htmlDocuments[requestIndex]}\n${serverOutput}`).toBe(200);
@@ -273,11 +304,15 @@ test("URQL SSR and UnoCSS publication stay isolated under concurrent lifecycle p
             if (otherValue !== value) expect(requestData).not.toContain(`server:${otherValue}`);
           }
           if (mode === "production") {
-            expect(unoCssAssets[requestIndex]).toEqual(unoCssAssets[0]);
+            expect(integrationAssets[requestIndex]).toEqual(integrationAssets[0]);
           }
         }
-        expect(unoCssAssets.some((assets) => assets.length > 0)).toBe(true);
-        expect(await readFinalizeGenerations(projectRoot)).toEqual(["0"]);
+        expect(integrationAssets.some((assets) => assets.length > 0)).toBe(true);
+        expect(await readFinalizeGenerations(projectRoot, integrationName)).toEqual(["0"]);
+        if (integrationName === "tailwind") {
+          expect(await readPublishedIntegrationOutputs(projectRoot, mode, integrationName))
+            .toEqual(expect.arrayContaining(["global.css", "preflight.js"]));
+        }
         expect(await readPublicationTemps(projectRoot, mode)).toEqual([]);
 
         await page.goto(`${origin}/?value=hydrate`, { waitUntil: "networkidle" });
@@ -296,7 +331,7 @@ test("URQL SSR and UnoCSS publication stay isolated under concurrent lifecycle p
           const probeSource = await fs.readFile(probePath, "utf8");
           await fs.writeFile(probePath, probeSource.replace("text-red-500", "text-blue-500"));
           await expect.poll(
-            () => readFinalizeGenerations(projectRoot),
+            () => readFinalizeGenerations(projectRoot, integrationName),
             { timeout: 10_000 },
           ).toEqual(["0", "1"]);
 
@@ -306,16 +341,16 @@ test("URQL SSR and UnoCSS publication stay isolated under concurrent lifecycle p
           );
           expect(nextResponses.every((response) => response.status === 200)).toBe(true);
           const nextDocuments = await Promise.all(nextResponses.map((response) => response.text()));
-          const nextAssets = nextDocuments.map(readUnoCssAssets);
+          const nextAssets = nextDocuments.map((html) => readIntegrationAssets(html, integrationName));
           for (const [requestIndex, document] of nextDocuments.entries()) {
             expect(JSON.stringify(readUrqlData(document))).toContain(`server:${nextValues[requestIndex]}`);
             expect(nextAssets[requestIndex]).toEqual(nextAssets[0]);
           }
           expect(nextAssets[0].length).toBeGreaterThan(0);
-          expect(await readFinalizeGenerations(projectRoot)).toEqual(["0", "1"]);
+          expect(await readFinalizeGenerations(projectRoot, integrationName)).toEqual(["0", "1"]);
           expect(await readPublicationTemps(projectRoot, mode)).toEqual([]);
         } else {
-          expect(await readFinalizeGenerations(projectRoot)).toEqual(["0", "1"]);
+          expect(await readFinalizeGenerations(projectRoot, integrationName)).toEqual(["0", "1"]);
           expect(await readPublicationTemps(projectRoot, mode)).toEqual([]);
         }
         expect(serverOutput).not.toMatch(/Circular chunk:.*vendor-(?:litsx|misc)/i);
@@ -329,4 +364,10 @@ test("URQL SSR and UnoCSS publication stay isolated under concurrent lifecycle p
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
-});
+}
+
+for (const integrationName of ["unocss", "tailwind"]) {
+  test(`URQL SSR and ${integrationName} publication stay isolated under concurrent lifecycle pressure`, async ({ page }, testInfo) => {
+    await runUrqlIntegrationScenario({ page }, testInfo, integrationName);
+  });
+}
