@@ -920,3 +920,37 @@ test("compiler reuses evaluated development modules until they are invalidated",
     await fs.rm(projectRoot, { recursive: true, force: true });
   }
 });
+
+test("compiler shares one production compile and import across concurrent callers", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-compiler-production-flight-"));
+  const sourcePath = path.join(projectRoot, "entry.js");
+
+  try {
+    await fs.writeFile(
+      sourcePath,
+      [
+        "globalThis.__evolitProductionModuleEvaluations = (globalThis.__evolitProductionModuleEvaluations ?? 0) + 1;",
+        "export const evaluations = globalThis.__evolitProductionModuleEvaluations;",
+        "export default 'production-module';",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const modules = await Promise.all(Array.from(
+      { length: 10 },
+      () => importCompiledModule(sourcePath, {
+        projectRoot,
+        mode: "production",
+        sourceMaps: false,
+      }),
+    ));
+
+    assert.equal(new Set(modules).size, 1);
+    assert.equal(modules[0].default, "production-module");
+    assert.equal(modules[0].evaluations, 1);
+  } finally {
+    delete globalThis.__evolitProductionModuleEvaluations;
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});

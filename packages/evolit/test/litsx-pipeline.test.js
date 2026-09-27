@@ -12,6 +12,28 @@ import {
   mergeLitsxAssetsIntoManifest,
 } from "../src/litsx-pipeline.js";
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+async function listIntegrationPublicationTemps(projectRoot, integrationName) {
+  const integrationsRoot = path.join(projectRoot, ".evolit", "build", "integrations");
+  try {
+    return (await fs.readdir(integrationsRoot))
+      .filter((entry) => entry.startsWith(`${integrationName}.staging-`)
+        || entry.startsWith(`${integrationName}.previous-`));
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 test("composes compiler options in declaration order while preserving Evolit invariants", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-litsx-options-"));
   const firstAuthoring = { name: "first-authoring" };
@@ -181,6 +203,174 @@ test("processes compiled modules, tracks dependencies, publishes outputs, invali
     assert.equal(calls.filter(([name]) => name === "dispose").length, 1);
     await fs.rm(projectRoot, { recursive: true, force: true });
   }
+});
+
+test("shares one finalization flight per generation across concurrent callers", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-litsx-single-flight-"));
+  const entered = createDeferred();
+  const release = createDeferred();
+  let finalizeCalls = 0;
+  const pipeline = await createLitsxPipeline({
+    projectRoot,
+    mode: "production",
+    config: { litsx: { integrations: [{
+      name: "single-flight",
+      create: () => ({
+        async finalize({ generation }) {
+          finalizeCalls += 1;
+          entered.resolve();
+          await release.promise;
+          return {
+            outputs: [{ id: "generation.txt", kind: "asset", content: String(generation) }],
+          };
+        },
+      }),
+    }] } },
+  });
+
+  try {
+    const flights = Array.from({ length: 10 }, () => pipeline.finalize());
+    await entered.promise;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(finalizeCalls, 1);
+    assert.ok(flights.every((flight) => flight === flights[0]));
+    release.resolve();
+    const manifests = await Promise.all(flights);
+    assert.ok(manifests.every((manifest) => manifest === manifests[0]));
+    assert.equal(await fs.readFile(manifests[0].assets[0].outputPath, "utf8"), "0");
+    assert.deepEqual(await listIntegrationPublicationTemps(projectRoot, "single-flight"), []);
+  } finally {
+    release.resolve();
+    await pipeline.dispose();
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("queues one next-generation flight when invalidation overlaps finalization", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-litsx-invalidate-flight-"));
+  const firstEntered = createDeferred();
+  const releaseFirst = createDeferred();
+  const finalizedGenerations = [];
+  const pipeline = await createLitsxPipeline({
+    projectRoot,
+    mode: "production",
+    config: { litsx: { integrations: [{
+      name: "epochs",
+      create: () => ({
+        async finalize({ generation }) {
+          finalizedGenerations.push(generation);
+          if (generation === 0) {
+            firstEntered.resolve();
+            await releaseFirst.promise;
+          }
+          return {
+            outputs: [{ id: "generation.txt", kind: "asset", content: String(generation) }],
+          };
+        },
+      }),
+    }] } },
+  });
+
+  try {
+    const firstFlight = pipeline.finalize();
+    await firstEntered.promise;
+    const invalidation = pipeline.invalidate();
+    const nextFlights = Array.from({ length: 10 }, () => pipeline.finalize());
+    releaseFirst.resolve();
+    const firstManifest = await firstFlight;
+    assert.equal(await fs.readFile(firstManifest.assets[0].outputPath, "utf8"), "0");
+    assert.equal(await invalidation, true);
+    const nextManifests = await Promise.all(nextFlights);
+    assert.deepEqual(finalizedGenerations, [0, 1]);
+    assert.ok(nextFlights.every((flight) => flight === nextFlights[0]));
+    assert.ok(nextManifests.every((manifest) => manifest === nextManifests[0]));
+    assert.equal(await fs.readFile(nextManifests[0].assets[0].outputPath, "utf8"), "1");
+    assert.deepEqual(await listIntegrationPublicationTemps(projectRoot, "epochs"), []);
+  } finally {
+    releaseFirst.resolve();
+    await pipeline.dispose();
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("shares finalization failures, cleans publication temps, and permits retry", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-litsx-retry-flight-"));
+  const original = new Error("finalizer failed once");
+  let finalizeCalls = 0;
+  let fail = true;
+  const pipeline = await createLitsxPipeline({
+    projectRoot,
+    mode: "production",
+    config: { litsx: { integrations: [{
+      name: "retryable",
+      create: () => ({
+        async finalize({ generation }) {
+          finalizeCalls += 1;
+          await new Promise((resolve) => setImmediate(resolve));
+          if (fail) throw original;
+          return {
+            outputs: [{ id: "generation.txt", kind: "asset", content: String(generation) }],
+          };
+        },
+      }),
+    }] } },
+  });
+
+  try {
+    const failedFlights = Array.from({ length: 10 }, () => pipeline.finalize());
+    const failures = await Promise.all(failedFlights.map((flight) => flight.catch((error) => error)));
+    assert.equal(finalizeCalls, 1);
+    assert.ok(failedFlights.every((flight) => flight === failedFlights[0]));
+    assert.ok(failures.every((error) => error === failures[0]));
+    assert.equal(failures[0].cause, original);
+    assert.deepEqual(await listIntegrationPublicationTemps(projectRoot, "retryable"), []);
+
+    fail = false;
+    const manifest = await pipeline.finalize();
+    assert.equal(finalizeCalls, 2);
+    assert.equal(await fs.readFile(manifest.assets[0].outputPath, "utf8"), "0");
+    assert.deepEqual(await listIntegrationPublicationTemps(projectRoot, "retryable"), []);
+  } finally {
+    await pipeline.dispose();
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("disposal waits for an active publication before disposing integrations", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-litsx-dispose-flight-"));
+  const entered = createDeferred();
+  const release = createDeferred();
+  let disposeCalls = 0;
+  const pipeline = await createLitsxPipeline({
+    projectRoot,
+    mode: "production",
+    config: { litsx: { integrations: [{
+      name: "closing",
+      create: () => ({
+        async finalize() {
+          entered.resolve();
+          await release.promise;
+          return { outputs: [{ id: "ready.txt", kind: "asset", content: "ready" }] };
+        },
+        dispose() {
+          disposeCalls += 1;
+        },
+      }),
+    }] } },
+  });
+
+  const finalization = pipeline.finalize();
+  await entered.promise;
+  const disposal = pipeline.dispose();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(disposeCalls, 0);
+  assert.throws(() => pipeline.finalize(), /already been disposed/);
+  release.resolve();
+  await finalization;
+  await disposal;
+  assert.equal(disposeCalls, 1);
+  assert.deepEqual(await listIntegrationPublicationTemps(projectRoot, "closing"), []);
+  await fs.rm(projectRoot, { recursive: true, force: true });
 });
 
 test("isolates mutable integration state across concurrent pipeline instances", async () => {
@@ -394,6 +584,15 @@ test("keeps the previous generation when preparing a later integration fails", a
     await pipeline.invalidate();
     await assert.rejects(pipeline.finalize(), /phase="publish"/);
     assert.equal(await fs.readFile(firstOutput, "utf8"), "old");
+    assert.deepEqual(await listIntegrationPublicationTemps(projectRoot, "first"), []);
+    assert.deepEqual(await listIntegrationPublicationTemps(projectRoot, "second"), []);
+
+    broken = false;
+    const retried = await pipeline.finalize();
+    const retriedOutput = retried.assets.find((asset) => asset.integration === "first").outputPath;
+    assert.equal(await fs.readFile(retriedOutput, "utf8"), "old");
+    assert.deepEqual(await listIntegrationPublicationTemps(projectRoot, "first"), []);
+    assert.deepEqual(await listIntegrationPublicationTemps(projectRoot, "second"), []);
   } finally {
     await pipeline.dispose();
     await fs.rm(projectRoot, { recursive: true, force: true });

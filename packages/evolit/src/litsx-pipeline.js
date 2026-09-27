@@ -206,8 +206,13 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
   const instances = [];
   const names = new Set();
   let disposed = false;
+  let closing = false;
   let generation = 0;
   let finalizedGeneration = -1;
+  let finalizationFlight = null;
+  let invalidationFlight = null;
+  let queuedFinalization = null;
+  let disposalPromise = null;
   const dependencies = new Set();
   const processedModules = new Set();
   const moduleDependencies = new Map();
@@ -288,7 +293,7 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
   }
 
   function assertActive() {
-    if (disposed) throw new Error("This LitSX pipeline has already been disposed.");
+    if (closing || disposed) throw new Error("This LitSX pipeline has already been disposed.");
   }
 
   function recordContribution(integrationName, moduleId, contribution) {
@@ -496,16 +501,43 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
         evolitDependencies: [...(moduleDependencies.get(moduleId) ?? [])].sort(),
       };
     },
-    async finalize(context = {}) {
+    finalize(context = {}) {
       assertActive();
-      if (finalizedGeneration === generation) return null;
+      if (invalidationFlight) {
+        if (queuedFinalization) return queuedFinalization.promise;
+        const awaitedInvalidation = invalidationFlight.promise;
+        const promise = awaitedInvalidation.then(() => {
+          if (queuedFinalization?.promise === promise) queuedFinalization = null;
+          return pipeline.finalize(context);
+        });
+        queuedFinalization = { promise };
+        promise.then(
+          () => {
+            if (queuedFinalization?.promise === promise) queuedFinalization = null;
+          },
+          () => {
+            if (queuedFinalization?.promise === promise) queuedFinalization = null;
+          },
+        );
+        return promise;
+      }
+      if (finalizedGeneration === generation) return Promise.resolve(null);
+      if (finalizationFlight?.generation === generation) return finalizationFlight.promise;
+      if (finalizationFlight) {
+        return finalizationFlight.promise.then(
+          () => pipeline.finalize(context),
+          () => pipeline.finalize(context),
+        );
+      }
+      const targetGeneration = generation;
+      const publishGeneration = async () => {
       if (moduleDependencies.delete("<graph>")) rebuildDependencies();
       removeOwnedContributions("<graph>");
       for (const { descriptor, instance } of instances) {
         if (typeof instance.finalize !== "function") continue;
         try {
           const contribution = normalizeContribution(
-            await instance.finalize(Object.freeze({ ...context, generation, mode })),
+            await instance.finalize(Object.freeze({ ...context, generation: targetGeneration, mode })),
             descriptor.name,
             resolvedProjectRoot,
           );
@@ -539,6 +571,7 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
             hadPreviousRoot: false,
             installed: false,
           };
+          rootOperations.push(operation);
           if (outputs.length > 0) {
             operation.stagingRoot = `${root}.staging-${randomUUID()}`;
             await ensureDirectory(operation.stagingRoot);
@@ -558,7 +591,6 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
               if (output.kind === "style" && output.document) manifest.documentStyles.push(record);
             }
           }
-          rootOperations.push(operation);
         }
 
         for (const { output, integrationName } of pendingOutputs.values()) {
@@ -634,10 +666,22 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
         if (operation.stagingRoot) publishedRoots.set(operation.integrationName, operation.root);
         else publishedRoots.delete(operation.integrationName);
       }
-      finalizedGeneration = generation;
+      finalizedGeneration = targetGeneration;
       return manifest;
+      };
+      const promise = publishGeneration();
+      finalizationFlight = { generation: targetGeneration, promise };
+      promise.then(
+        () => {
+          if (finalizationFlight?.promise === promise) finalizationFlight = null;
+        },
+        () => {
+          if (finalizationFlight?.promise === promise) finalizationFlight = null;
+        },
+      );
+      return promise;
     },
-    async invalidate(changedPaths = null) {
+    invalidate(changedPaths = null) {
       assertActive();
       const paths = Array.isArray(changedPaths)
         ? changedPaths.map((entry) => canonicalDependency(resolvedProjectRoot, entry))
@@ -645,6 +689,26 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
       const affected = paths == null || paths.some((entry) => (
         dependencies.has(entry) || processedModules.has(entry)
       ));
+      const previousInvalidation = invalidationFlight?.promise ?? null;
+      const activeFinalization = finalizationFlight?.promise ?? null;
+      const promise = (async () => {
+      if (previousInvalidation) {
+        try {
+          await previousInvalidation;
+        } catch {
+          // A later invalidation is allowed to recover from an earlier failure.
+        }
+      }
+      if (activeFinalization) {
+        try {
+          await activeFinalization;
+        } catch {
+          // Failed finalization leaves the generation retryable before invalidation.
+        }
+      }
+      if (closing || disposed) {
+        throw new Error("This LitSX pipeline has already been disposed.");
+      }
       for (const { descriptor, instance } of instances) {
         if (typeof instance.invalidate !== "function") continue;
         try {
@@ -661,6 +725,17 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
         }
       }
       return affected;
+      })();
+      invalidationFlight = { promise };
+      promise.then(
+        () => {
+          if (invalidationFlight?.promise === promise) invalidationFlight = null;
+        },
+        () => {
+          if (invalidationFlight?.promise === promise) invalidationFlight = null;
+        },
+      );
+      return promise;
     },
     async forget(moduleId) {
       assertActive();
@@ -683,8 +758,19 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
         await removePath(virtualModule);
       }
     },
-    async dispose() {
-      if (disposed) return;
+    dispose() {
+      if (disposalPromise) return disposalPromise;
+      if (disposed) return Promise.resolve();
+      closing = true;
+      disposalPromise = (async () => {
+      for (const flight of [queuedFinalization, invalidationFlight, finalizationFlight]) {
+        if (!flight) continue;
+        try {
+          await flight.promise;
+        } catch {
+          // The original caller owns a lifecycle error; disposal still completes.
+        }
+      }
       disposed = true;
       let firstError = null;
       for (const { descriptor, instance } of [...instances].reverse()) {
@@ -696,6 +782,8 @@ export async function createLitsxPipeline({ projectRoot, mode, config } = {}) {
       }
       await removePath(virtualRoot);
       if (firstError) throw firstError;
+      })();
+      return disposalPromise;
     },
   };
 
