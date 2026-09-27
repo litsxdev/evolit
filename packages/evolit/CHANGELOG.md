@@ -1,5 +1,11 @@
 # evolit
 
+## 0.4.5
+
+### Patch Changes
+
+- 952b46a: Make LitSX integration finalization single-flight per generation. Concurrent SSR requests now share one publication and one production module compile/import, invalidation queues one publication for the next generation, failed flights remain retryable, and disposal waits for active publication before integration cleanup.
+
 ## 0.4.4
 
 ### Patch Changes
