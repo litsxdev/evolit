@@ -1,13 +1,18 @@
-let adapterPromise = null;
+import { createRequire } from "node:module";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const adapterPromisesByModuleUrl = new Map();
 
 function isMissingUrqlAdapter(error) {
-  return error?.code === "ERR_MODULE_NOT_FOUND"
+  return (error?.code === "ERR_MODULE_NOT_FOUND" || error?.code === "MODULE_NOT_FOUND")
     && String(error.message).includes("@litsx/urql");
 }
 
-async function loadSsrUrqlAdapter() {
+function resolveSsrUrqlAdapterUrl(projectRoot) {
   try {
-    return await import("@litsx/urql");
+    const requireFromProject = createRequire(path.join(path.resolve(projectRoot), "package.json"));
+    return pathToFileURL(requireFromProject.resolve("@litsx/urql")).href;
   } catch (error) {
     if (isMissingUrqlAdapter(error)) {
       return null;
@@ -16,9 +21,22 @@ async function loadSsrUrqlAdapter() {
   }
 }
 
-export async function getSsrUrqlAdapter() {
-  adapterPromise ??= loadSsrUrqlAdapter();
-  return adapterPromise;
+export async function getSsrUrqlAdapter(projectRoot = process.cwd()) {
+  const moduleUrl = resolveSsrUrqlAdapterUrl(projectRoot);
+  if (!moduleUrl) return null;
+  let adapterPromise = adapterPromisesByModuleUrl.get(moduleUrl);
+  if (!adapterPromise) {
+    adapterPromise = import(moduleUrl);
+    adapterPromisesByModuleUrl.set(moduleUrl, adapterPromise);
+  }
+  try {
+    return await adapterPromise;
+  } catch (error) {
+    if (adapterPromisesByModuleUrl.get(moduleUrl) === adapterPromise) {
+      adapterPromisesByModuleUrl.delete(moduleUrl);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -40,7 +58,7 @@ export async function runWithOptionalSsrUrqlScope(
   }
   const adapter = Object.hasOwn(options, "adapter")
     ? options.adapter
-    : await getSsrUrqlAdapter();
+    : await getSsrUrqlAdapter(options.projectRoot);
   if (!adapter) {
     return callback(null);
   }

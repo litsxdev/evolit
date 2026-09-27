@@ -606,7 +606,7 @@ export async function buildProject(projectRoot, options = {}) {
             urqlRequestContext,
           ),
         };
-      });
+      }, { projectRoot });
       if (!response) {
         continue;
       }

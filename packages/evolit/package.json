@@ -75,7 +75,7 @@
     "ws": "^8.18.3"
   },
   "peerDependencies": {
-    "@litsx/urql": "^0.4.0"
+    "@litsx/urql": "^0.4.2"
   },
   "peerDependenciesMeta": {
     "@litsx/urql": {
@@ -85,6 +85,7 @@
   "devDependencies": {
     "@litsx/tailwind": "1.0.0-next.8",
     "@litsx/unocss": "1.0.0-next.8",
+    "@litsx/urql": "^0.4.2",
     "@playwright/test": "^1.62.0",
     "@webcomponents/scoped-custom-element-registry": "^0.0.10",
     "unocss": "66.8.1",

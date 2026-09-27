@@ -444,6 +444,12 @@ configuration therefore stays isolated per render, extracted SSR data is read
 before the scope closes, and integration response headers are included before
 the response is cached.
 
+The supported SSR combination is `evolit@0.4.4` or newer,
+`@litsx/core@1.0.0-next.8` or newer, and `@litsx/urql@0.4.2` or newer. Evolit
+resolves the server-conditioned URQL adapter from the application project and
+uses that same module instance for setup, request resources, route rendering,
+SSR extraction, and cleanup.
+
 ## Extensions
 
 Optional integrations are configured explicitly in `evolit.config.js`. Core only coordinates their
