@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -28,7 +29,8 @@ const RESOLVABLE_IMPORT_EXTENSIONS = [
 const developmentGraphCache = new Map();
 const developmentGraphDependencies = new Map();
 const developmentModuleNamespaceCache = new Map();
-const productionModuleNamespaceCache = new Map();
+const productionModuleCaches = new WeakMap();
+const defaultProductionModuleCache = { namespaces: new Map(), attempts: new Map() };
 const developmentGraphVersions = new Map();
 const developmentUnmanagedImportWarnings = new Set();
 const projectPathAliasesCache = new Map();
@@ -1294,15 +1296,50 @@ async function rewriteRelativeSpecifiers({
   };
 }
 
-function getDevelopmentGraphCacheKey(entryPath, options) {
-  return [
-    options.projectRoot,
+function getCompilationGraphCacheKey(entryPath, options) {
+  const mode = options.mode ?? "development";
+  if (mode === "development") {
+    return [
+      options.projectRoot,
+      entryPath,
+      options.target ?? "server",
+      options.ssr === true ? "ssr" : "client",
+      options.sourceMaps === false ? "without-maps" : "with-maps",
+      options.litsxPipeline?.identity?.id ?? "default-litsx",
+    ].join("::");
+  }
+  const staticAssetPublicUrls = options.staticAssetPublicUrls instanceof Map
+    ? [...options.staticAssetPublicUrls.entries()].sort(([left], [right]) => left.localeCompare(right))
+    : null;
+  const conditions = [...new Set([
+    ...(options.conditions ?? []),
+    ...(options.exportConditions ?? []),
+  ])].sort();
+  return `${options.projectRoot}::${JSON.stringify({
     entryPath,
-    options.target ?? "server",
-    options.ssr === true ? "ssr" : "client",
-    options.sourceMaps === false ? "without-maps" : "with-maps",
-    options.litsxPipeline?.identity?.id ?? "default-litsx",
-  ].join("::");
+    mode,
+    target: options.target ?? "server",
+    ssr: options.ssr === true,
+    sourceMaps: options.sourceMaps !== false,
+    conditions,
+    managedSourceRoots: [...(options.managedSourceRoots ?? [])].map((entry) => path.resolve(entry)).sort(),
+    staticAssetPublicUrls,
+    litsxPipeline: options.litsxPipeline?.identity?.id ?? "default-litsx",
+    generation: options.litsxPipeline?.generation ?? 0,
+  })}`;
+}
+
+function getProductionModuleCache(options) {
+  const identity = options.litsxPipeline?.identity;
+  if (!identity || (typeof identity !== "object" && typeof identity !== "function")) {
+    return defaultProductionModuleCache;
+  }
+  let cache = productionModuleCaches.get(identity);
+  if (!cache) {
+    cache = { namespaces: new Map(), attempts: new Map() };
+    productionModuleCaches.set(identity, cache);
+  }
+  return cache;
 }
 
 function wrapDevelopmentHydratableExports(code, moduleId, inputSourceMap = null) {
@@ -1549,7 +1586,7 @@ export async function compileModuleGraph(entryPath, options = {}) {
     ...options,
     projectRoot: path.resolve(options.projectRoot ?? process.cwd()),
   };
-  const cacheKey = getDevelopmentGraphCacheKey(
+  const cacheKey = getCompilationGraphCacheKey(
     path.resolve(entryPath),
     normalizedOptions,
   );
@@ -1784,37 +1821,67 @@ export async function emitClientStaticAssets(assetPaths, options = {}) {
   return emitted.sort();
 }
 
-export async function importCompiledModule(entryPath, options = {}) {
+export function importCompiledModule(entryPath, options = {}) {
   const mode = options.mode ?? "development";
   const normalizedOptions = {
     ...options,
     projectRoot: path.resolve(options.projectRoot ?? process.cwd()),
   };
-  const cacheKey = getDevelopmentGraphCacheKey(path.resolve(entryPath), normalizedOptions);
+  const resolvedEntryPath = path.resolve(entryPath);
+  const productionCache = mode === "development"
+    ? null
+    : getProductionModuleCache(normalizedOptions);
   const moduleCache = mode === "development"
     ? developmentModuleNamespaceCache
-    : productionModuleNamespaceCache;
+    : productionCache.namespaces;
+  let cacheKey = getCompilationGraphCacheKey(resolvedEntryPath, normalizedOptions);
   const cachedModule = moduleCache.get(cacheKey);
   if (cachedModule) {
     return cachedModule;
   }
+  if (mode !== "development") {
+    normalizedOptions.litsxPipeline?.beginCompilation?.();
+    cacheKey = getCompilationGraphCacheKey(resolvedEntryPath, normalizedOptions);
+    const generationModule = moduleCache.get(cacheKey);
+    if (generationModule) return generationModule;
+  }
 
-  const pendingModule = (async () => {
+  const importedModule = (async () => {
     const { entrypoint } = await compileModuleGraph(entryPath, normalizedOptions);
     const moduleUrl = new URL(pathToFileURL(entrypoint).href);
     if (mode === "development") {
       moduleUrl.searchParams.set("t", String(developmentGraphVersions.get(cacheKey) ?? 0));
+    } else {
+      moduleUrl.searchParams.set(
+        "v",
+        createHash("sha256").update(cacheKey).digest("hex").slice(0, 16),
+      );
+      moduleUrl.searchParams.set(
+        "attempt",
+        String(productionCache.attempts.get(cacheKey) ?? 0),
+      );
     }
     return import(moduleUrl.href);
   })();
+  let pendingModule;
+  pendingModule = importedModule.then(
+    (moduleNamespace) => {
+      productionCache?.attempts.delete(cacheKey);
+      return moduleNamespace;
+    },
+    (error) => {
+      if (moduleCache.get(cacheKey) === pendingModule) {
+        moduleCache.delete(cacheKey);
+        if (mode !== "development") {
+          productionCache.attempts.set(
+            cacheKey,
+            (productionCache.attempts.get(cacheKey) ?? 0) + 1,
+          );
+        }
+      }
+      throw error;
+    },
+  );
   moduleCache.set(cacheKey, pendingModule);
-
-  try {
-    return await pendingModule;
-  } catch (error) {
-    if (moduleCache.get(cacheKey) === pendingModule) {
-      moduleCache.delete(cacheKey);
-    }
-    throw error;
-  }
+  return pendingModule;
 }
