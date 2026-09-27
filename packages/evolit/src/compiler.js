@@ -28,6 +28,7 @@ const RESOLVABLE_IMPORT_EXTENSIONS = [
 const developmentGraphCache = new Map();
 const developmentGraphDependencies = new Map();
 const developmentModuleNamespaceCache = new Map();
+const productionModuleNamespaceCache = new Map();
 const developmentGraphVersions = new Map();
 const developmentUnmanagedImportWarnings = new Set();
 const projectPathAliasesCache = new Map();
@@ -1785,34 +1786,34 @@ export async function emitClientStaticAssets(assetPaths, options = {}) {
 
 export async function importCompiledModule(entryPath, options = {}) {
   const mode = options.mode ?? "development";
-  const normalizedOptions = mode === "development"
-    ? { ...options, projectRoot: path.resolve(options.projectRoot ?? process.cwd()) }
-    : options;
-  const cacheKey = mode === "development"
-    ? getDevelopmentGraphCacheKey(path.resolve(entryPath), normalizedOptions)
-    : null;
-  const cachedModule = cacheKey ? developmentModuleNamespaceCache.get(cacheKey) : null;
+  const normalizedOptions = {
+    ...options,
+    projectRoot: path.resolve(options.projectRoot ?? process.cwd()),
+  };
+  const cacheKey = getDevelopmentGraphCacheKey(path.resolve(entryPath), normalizedOptions);
+  const moduleCache = mode === "development"
+    ? developmentModuleNamespaceCache
+    : productionModuleNamespaceCache;
+  const cachedModule = moduleCache.get(cacheKey);
   if (cachedModule) {
     return cachedModule;
   }
 
-  const { entrypoint } = await compileModuleGraph(entryPath, normalizedOptions);
-  const moduleUrl = new URL(pathToFileURL(entrypoint).href);
-
-  if (mode === "development") {
-    moduleUrl.searchParams.set("t", String(developmentGraphVersions.get(cacheKey) ?? 0));
-  }
-
-  const pendingModule = import(moduleUrl.href);
-  if (cacheKey) {
-    developmentModuleNamespaceCache.set(cacheKey, pendingModule);
-  }
+  const pendingModule = (async () => {
+    const { entrypoint } = await compileModuleGraph(entryPath, normalizedOptions);
+    const moduleUrl = new URL(pathToFileURL(entrypoint).href);
+    if (mode === "development") {
+      moduleUrl.searchParams.set("t", String(developmentGraphVersions.get(cacheKey) ?? 0));
+    }
+    return import(moduleUrl.href);
+  })();
+  moduleCache.set(cacheKey, pendingModule);
 
   try {
     return await pendingModule;
   } catch (error) {
-    if (developmentModuleNamespaceCache.get(cacheKey) === pendingModule) {
-      developmentModuleNamespaceCache.delete(cacheKey);
+    if (moduleCache.get(cacheKey) === pendingModule) {
+      moduleCache.delete(cacheKey);
     }
     throw error;
   }

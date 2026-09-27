@@ -444,11 +444,16 @@ configuration therefore stays isolated per render, extracted SSR data is read
 before the scope closes, and integration response headers are included before
 the response is cached.
 
-The supported SSR combination is `evolit@0.4.4` or newer,
+The supported SSR combination is `evolit@0.4.5` or newer,
 `@litsx/core@1.0.0-next.8` or newer, and `@litsx/urql@0.4.2` or newer. Evolit
 resolves the server-conditioned URQL adapter from the application project and
 uses that same module instance for setup, request resources, route rendering,
 SSR extraction, and cleanup.
+
+The concurrent UnoCSS + URQL regression gate is validated with
+`evolit@0.4.5`, `@litsx/compiler@1.0.0-next.13`,
+`@litsx/ssr@1.0.0-next.5`, `@litsx/unocss@1.0.0-next.8`,
+`@litsx/urql@0.4.2`, and `unocss@66.8.1`.
 
 ## Extensions
 

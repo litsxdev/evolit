@@ -2,6 +2,7 @@ import test, { expect } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -11,17 +12,22 @@ import { scaffoldSite } from "../src/scaffold.js";
 const frameworkRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const frameworkNodeModules = path.resolve(frameworkRoot, "..", "..", "node_modules");
 
-async function waitForServer(url) {
-  let lastResponse = null;
+async function waitForPort(port) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
-      const response = await fetch(url);
-      if (response.ok) return;
-      lastResponse = `${response.status} ${await response.text()}`;
+      await new Promise((resolve, reject) => {
+        const socket = net.createConnection({ host: "127.0.0.1", port });
+        socket.once("connect", () => {
+          socket.end();
+          resolve();
+        });
+        socket.once("error", reject);
+      });
+      return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`Timed out waiting for ${url}${lastResponse ? `: ${lastResponse}` : ""}`);
+  throw new Error(`Timed out waiting for port ${port}`);
 }
 
 async function runCli(projectRoot, ...args) {
@@ -63,7 +69,31 @@ async function writeUrqlFixture(projectRoot) {
   packageJson.dependencies["@litsx/urql"] = "^0.4.2";
   await fs.writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
   await fs.writeFile(path.join(projectRoot, "evolit.config.js"), [
+    'import fs from "node:fs/promises";',
+    'import path from "node:path";',
+    'import { litsxUnoCss } from "@litsx/unocss";',
+    "",
+    "const unoCss = litsxUnoCss();",
+    "const instrumentedUnoCss = {",
+    "  ...unoCss,",
+    "  async create(context) {",
+    "    const instance = await unoCss.create(context);",
+    "    return {",
+    "      ...instance,",
+    "      async finalize(finalizeContext) {",
+    '        await fs.appendFile(path.join(context.projectRoot, ".uno-finalize.log"), `${finalizeContext.generation}\\n`);',
+    "        await new Promise((resolve) => setTimeout(resolve, 25));",
+    "        return instance.finalize?.(finalizeContext);",
+    "      },",
+    "    };",
+    "  },",
+    "};",
+    "",
     "export default {",
+    "  litsx: {",
+    "    compiler: { sourceMaps: true },",
+    "    integrations: [instrumentedUnoCss],",
+    "  },",
     '  server: { setup: "./server/setup.js" },',
     "};",
     "",
@@ -137,7 +167,7 @@ async function writeUrqlFixture(projectRoot) {
     "    variables: { value },",
     "  });",
     "  return (",
-    '    <section data-mutation-fetching={String(mutationState.fetching)} data-subscription-fetching={String(subscriptionState.fetching)}>',
+    '    <section class="text-red-500" data-mutation-fetching={String(mutationState.fetching)} data-subscription-fetching={String(subscriptionState.fetching)}>',
     '      <output>{queryState.data?.viewer?.name ?? initialName}</output>',
     '      <button on:click={() => reexecute({ requestPolicy: "network-only" })}>refresh</button>',
     "    </section>",
@@ -165,7 +195,33 @@ function readUrqlData(html) {
   return JSON.parse(match[1]);
 }
 
-test("URQL request scopes, production identity, and browser hydration stay isolated", async ({ page }, testInfo) => {
+function readUnoCssAssets(html) {
+  return [...new Set(html.match(/\/_evolit\/static\/integrations\/unocss\/[^"']+/gu) ?? [])].sort();
+}
+
+async function readFinalizeGenerations(projectRoot) {
+  return (await fs.readFile(path.join(projectRoot, ".uno-finalize.log"), "utf8"))
+    .trim()
+    .split("\n");
+}
+
+async function readPublicationTemps(projectRoot, mode) {
+  const integrationRoot = path.join(
+    projectRoot,
+    ".evolit",
+    mode === "dev" ? "dev" : "build",
+    "integrations",
+  );
+  try {
+    return (await fs.readdir(integrationRoot))
+      .filter((entry) => entry.includes(".staging-") || entry.includes(".previous-"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+test("URQL SSR and UnoCSS publication stay isolated under concurrent lifecycle pressure", async ({ page }, testInfo) => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "evolit-urql-browser-"));
   const projectRoot = path.join(tempRoot, "app");
   const pageErrors = [];
@@ -182,7 +238,7 @@ test("URQL request scopes, production identity, and browser hydration stay isola
       ),
     });
 
-    for (const [index, mode] of ["dev", "production"].entries()) {
+    for (const [index, mode] of ["production", "dev"].entries()) {
       let buildOutput = "";
       if (mode === "production") {
         buildOutput = await runCli(projectRoot, "build");
@@ -191,6 +247,7 @@ test("URQL request scopes, production identity, and browser hydration stay isola
 
       const port = 4900 + (testInfo.workerIndex * 4) + index;
       const origin = `http://127.0.0.1:${port}`;
+      await fs.writeFile(path.join(projectRoot, ".uno-finalize.log"), "");
       const child = spawn(
         process.execPath,
         [path.join(frameworkRoot, "src", "cli.js"), mode === "dev" ? "dev" : "start", "--port", String(port)],
@@ -201,25 +258,27 @@ test("URQL request scopes, production identity, and browser hydration stay isola
       child.stderr.on("data", (chunk) => { serverOutput += String(chunk); });
 
       try {
-        await waitForServer(`${origin}/?value=ready`);
-        const [firstResponse, secondResponse] = await Promise.all([
-          fetch(`${origin}/?value=one`),
-          fetch(`${origin}/?value=two`),
-        ]);
-        const [firstHtml, secondHtml] = await Promise.all([
-          firstResponse.text(),
-          secondResponse.text(),
-        ]);
-        expect(firstResponse.status).toBe(200);
-        expect(secondResponse.status).toBe(200);
-        expect(firstResponse.headers.get("x-urql-resource")).toBe("one");
-        expect(secondResponse.headers.get("x-urql-resource")).toBe("two");
-        const firstData = JSON.stringify(readUrqlData(firstHtml));
-        const secondData = JSON.stringify(readUrqlData(secondHtml));
-        expect(firstData).toContain("server:one");
-        expect(firstData).not.toContain("server:two");
-        expect(secondData).toContain("server:two");
-        expect(secondData).not.toContain("server:one");
+        await waitForPort(port);
+        const values = Array.from({ length: 10 }, (_, requestIndex) => `cold-${requestIndex}`);
+        const responses = await Promise.all(values.map((value) => fetch(`${origin}/?value=${value}`)));
+        const htmlDocuments = await Promise.all(responses.map((response) => response.text()));
+        const unoCssAssets = htmlDocuments.map(readUnoCssAssets);
+        for (const [requestIndex, response] of responses.entries()) {
+          const value = values[requestIndex];
+          expect(response.status, `${mode} request ${value} failed:\n${htmlDocuments[requestIndex]}\n${serverOutput}`).toBe(200);
+          expect(response.headers.get("x-urql-resource")).toBe(value);
+          const requestData = JSON.stringify(readUrqlData(htmlDocuments[requestIndex]));
+          expect(requestData).toContain(`server:${value}`);
+          for (const otherValue of values) {
+            if (otherValue !== value) expect(requestData).not.toContain(`server:${otherValue}`);
+          }
+          if (mode === "production") {
+            expect(unoCssAssets[requestIndex]).toEqual(unoCssAssets[0]);
+          }
+        }
+        expect(unoCssAssets.some((assets) => assets.length > 0)).toBe(true);
+        expect(await readFinalizeGenerations(projectRoot)).toEqual(["0"]);
+        expect(await readPublicationTemps(projectRoot, mode)).toEqual([]);
 
         await page.goto(`${origin}/?value=hydrate`, { waitUntil: "networkidle" });
         expect(pageErrors).toEqual([]);
@@ -232,6 +291,33 @@ test("URQL request scopes, production identity, and browser hydration stay isola
         await expect.poll(() => page.evaluate(() => globalThis.__URQL_FETCH_COUNT__)).toBe(1);
         await expect(page.locator("urql-probe output")).toHaveText("browser:hydrate");
         expect(pageErrors).toEqual([]);
+        if (mode === "dev") {
+          const probePath = path.join(projectRoot, "app", "urql-probe.jsx");
+          const probeSource = await fs.readFile(probePath, "utf8");
+          await fs.writeFile(probePath, probeSource.replace("text-red-500", "text-blue-500"));
+          await expect.poll(
+            () => readFinalizeGenerations(projectRoot),
+            { timeout: 10_000 },
+          ).toEqual(["0", "1"]);
+
+          const nextValues = Array.from({ length: 10 }, (_, requestIndex) => `next-${requestIndex}`);
+          const nextResponses = await Promise.all(
+            nextValues.map((value) => fetch(`${origin}/?value=${value}`)),
+          );
+          expect(nextResponses.every((response) => response.status === 200)).toBe(true);
+          const nextDocuments = await Promise.all(nextResponses.map((response) => response.text()));
+          const nextAssets = nextDocuments.map(readUnoCssAssets);
+          for (const [requestIndex, document] of nextDocuments.entries()) {
+            expect(JSON.stringify(readUrqlData(document))).toContain(`server:${nextValues[requestIndex]}`);
+            expect(nextAssets[requestIndex]).toEqual(nextAssets[0]);
+          }
+          expect(nextAssets[0].length).toBeGreaterThan(0);
+          expect(await readFinalizeGenerations(projectRoot)).toEqual(["0", "1"]);
+          expect(await readPublicationTemps(projectRoot, mode)).toEqual([]);
+        } else {
+          expect(await readFinalizeGenerations(projectRoot)).toEqual(["0", "1"]);
+          expect(await readPublicationTemps(projectRoot, mode)).toEqual([]);
+        }
         expect(serverOutput).not.toMatch(/Circular chunk:.*vendor-(?:litsx|misc)/i);
       } finally {
         if (child.exitCode === null) {
